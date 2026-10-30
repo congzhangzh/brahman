@@ -1,0 +1,26 @@
+[project]
+name = "work-brahman"
+version = "0.2.1"
+description = "A small, extensible work buddy: Feishu/Lark chat + scheduled jobs driving Claude Code, with portable skills"
+authors = [
+    { name = "Cong Zhang", email = "13283869+congzhangzh@users.noreply.github.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "lark-oapi>=1.7.5",
+]
+
+[project.scripts]
+buddy = "work_brahman.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.6,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

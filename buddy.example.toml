@@ -1,0 +1,110 @@
+# Copy to buddy.toml (git-ignored) and edit. Secrets never go here: see .env.example.
+
+workspace = "~/src"     # working directory for chat turns
+domain = "feishu"       # "feishu" (open.feishu.cn) or "lark" (open.larksuite.com)
+
+# What the buddy says in the chats and on the workbench page: cards, buttons, notices,
+# help, the duties' tables. "zh-CN" (the default, also when this is left out) or "en".
+# PR titles, comments and the agent's own answers stay as they are. Read when a process
+# starts: restart to change it. The page also has its own EN / 中文 switch.
+[buddy]
+language = "zh-CN"
+
+[claude]
+# Headless Claude Code cannot ask for approval: anything not listed here is
+# denied, and the reply tells you which tool was blocked. Start read-only.
+permission_mode = "default"
+allowed_tools = [
+  "Read", "Grep", "Glob", "Skill",
+  "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git status:*)",
+  "Bash(gh search prs:*)", "Bash(gh pr list:*)", "Bash(gh pr view:*)", "Bash(gh pr diff:*)", "Bash(gh pr checks:*)", "Bash(gh run view:*)",
+]
+model = ""              # empty = your Claude Code default
+timeout = 1800          # seconds per turn
+# Added to Claude Code's system prompt for every chat turn and job. Your own
+# ~/.claude/CLAUDE.md still applies; this only describes where the reply is read.
+append_system_prompt = """Your reply is shown in a chat app on a phone. Markdown renders:
+bold, lists, links, code blocks, ### headings and tables. The screen is narrow:
+keep tables to 3 or 4 short columns and lead with the answer.
+Do not run text-to-speech or other audio commands: audio would play on the
+server, not on the reader's phone."""
+
+# Long stories (/long new, and a thread no terminal holds) are sessions you started to
+# work in, so they may write: these keys go over [claude]'s (the rest carries over). Without
+# [long.claude] a long story is as read-only as the chat. acceptEdits lets it edit files in
+# its own folder only; Bash runs what allowed_tools lists, and disallowed_tools wins over it.
+# Pushing, merging and restarting services stay with you: not listed, or denied.
+[long.claude]
+permission_mode = "acceptEdits"
+allowed_tools = [
+  "Read", "Grep", "Glob", "Skill",
+  "Bash(git log:*)", "Bash(git diff:*)", "Bash(git show:*)", "Bash(git status:*)",
+  "Bash(git add:*)", "Bash(git commit:*)", "Bash(git switch:*)", "Bash(git branch:*)", "Bash(git worktree:*)",
+  "Bash(ls:*)", "Bash(grep:*)", "Bash(uv run:*)", "Bash(uv sync:*)", "Bash(pytest:*)",
+  "Bash(npm test:*)", "Bash(npm run:*)", "Bash(make:*)", "Bash(cmake:*)", "Bash(ninja:*)",
+  "Bash(gh pr view:*)", "Bash(gh pr diff:*)", "Bash(gh pr checks:*)", "Bash(gh run view:*)",
+]
+disallowed_tools = [
+  "Bash(git push:*)", "Bash(git reset --hard:*)", "Bash(rm -rf:*)", "Bash(systemctl:*)",
+  "Bash(buddy serve:*)", "Bash(gh pr create:*)", "Bash(gh pr merge:*)",
+]
+
+[long.codex]
+sandbox = "workspace-write"   # its own folder; read-only without this
+
+# One person, several chat apps (optional): posts go to every chat here, what you do in
+# one is mirrored to the others, and they share one agent session. The first names the
+# session. A job or duty without chat_id posts here.
+[me]
+chats = ["oc_xxxxxxxxxxxxxxxx", "tg:123456789"]   # Lark DM, Telegram chat
+
+# Scheduled jobs: run with `buddy job <name>`; `buddy serve` runs them on `schedule`
+# (its own scheduler, no system timers). The result is posted to chat_id.
+[jobs.morning-prs]
+prompt = "Use the pr-review skill in overview mode: which of my open pull requests need my attention today?"
+cwd = "~/src"
+chat_id = "oc_xxxxxxxxxxxxxxxx"     # Lark chat; "tg:<chat id>" posts to Telegram
+schedule = "0 9 * * 1-5"      # cron (min hour day month weekday) or "every 10m"
+
+# The web workbench: `buddy serve` also serves http://127.0.0.1:<port>, local only.
+# It shows runs, the cards waiting for you and ■ STOP. Leave the section out to turn it off.
+[web]
+port = 8787
+
+# A Lark/Feishu Base as a workbench: runs, asks, PRs, threads and workflows as tables,
+# for Lark's charts and dashboards. One way, buddy -> Base, every minute. The buddy creates
+# the Base and shares it with share_with (your open_id, ou_...). Needs the app scopes
+# bitable:app and docs:permission.member:create. Leave the section out to turn it off.
+[bitable]
+share_with = "ou_xxxxxxxxxxxxxxxx"
+
+# Duties: standing work with its own SOP (src/work_brahman/duties/<name>/DUTY.md).
+# `buddy duty <name>` runs one check and posts only what changed; `buddy serve` runs it on
+# `schedule`. A duty's chat commands (/update, /watch, /unwatch) work in every chat.
+[duties.code-review]
+chat_id = "oc_xxxxxxxxxxxxxxxx"     # where change notices go
+schedule = "*/10 * * * *"          # every 10 minutes
+# My open GitHub PRs are found through gh (author:@me). GitLab has no search across
+# projects without a token, so list the projects; its anonymous API is enough.
+gitlab = ["gitlab.gnome.org/GNOME/gnome-remote-desktop"]
+gitlab_user = "your-gitlab-login"
+ignore_authors = []                 # CI accounts that comment as ordinary users
+# A conflict or a needed rebase asks "draft a rebase?". The draft is a plain git rebase in a
+# scratch worktree of a clone found under clone_roots; a conflict asks which side git keeps.
+# It is force-pushed (with lease) only to forks listed here, and only after "push it";
+# for any other fork the answer is the command to push by hand. Check the project's
+# policy on automated contributions before listing it.
+clone_roots = ["~/projects"]
+push_repos = []                     # e.g. ["your-login/FreeRDP"], or "host/your-login/project" for GitLab
+
+[duties.threads]                    # every GitHub thread I'm in: say when one turns to me
+schedule = "*/10 * * * *"
+digest = "09:00"                    # optional: the whole list once a day, after this time
+# command = ["threads", "--json"]   # the L1 tool; any command printing the same JSON works
+# chat_id = "oc_xxxxxxxxxxxxxxxx"   # optional with [me]: then every linked chat
+
+# Families: people-led work, an SOP per family (src/work_brahman/families/<name>/FAMILY.md).
+# Their chat commands (/stories, /report) work without a section here; a schedule makes
+# `buddy serve` post the family's message (`buddy family <name>`) to chat_id or to [me].
+[families.monthly-report]
+schedule = "0 9 1 * *"              # the 1st of every month, 09:00: the month that ended

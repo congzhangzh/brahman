@@ -1,0 +1,45 @@
+/* brahman design tokens: one place for the colours, type and shapes every page uses.
+   Pages link this file and use only var(--…); preview.html shows every token.
+   Paper and ink, gold for what is lit or selected; status colours are kept for status. */
+:root {
+  /* surfaces */
+  --paper: #f6f2ea;        /* page */
+  --card: #fffdf8;         /* a panel on the page */
+  --well: #faf7f0;         /* code, logs, sunken areas */
+  --line: #e4dccb;         /* borders and rules */
+  /* text */
+  --ink: #1f2a37;
+  --mute: #6b7280;
+  --link: #1f5fbf;
+  /* accent: lit, selected, the current step */
+  --gold: #b8862b;
+  --sel: #fff4d6;
+  --glow: #f3d27a55;
+  /* status */
+  --ok: #2f855a;
+  --ok-bg: #e7f4ec;
+  --bad: #c0392b;
+  --bad-bg: #fbe9e7;
+  --warn: #b7791f;
+  /* who acts in the evolution loop */
+  --business: #2b6cb0;     /* varies and selects */
+  --system: #6b7280;       /* lives and measures */
+  --enablement: #805ad5;   /* passes on and boosts */
+  /* frontends */
+  --lark: #3370ff;
+  --telegram: #2aa1da;
+  --device: #1f2a37;       /* phone bezel */
+  --screen: #eef1f5;
+  /* type */
+  --font: Inter, "Helvetica Neue", Arial, "Noto Sans CJK SC", sans-serif;
+  --serif: Georgia, "Noto Serif CJK SC", serif;
+  --mono: "DejaVu Sans Mono", "Noto Sans Mono CJK SC", monospace;
+  --text: 14px;
+  --small: 12px;
+  --tiny: 11px;
+  /* shape */
+  --r-lg: 14px;
+  --r: 10px;
+  --r-sm: 6px;
+  --gap: 14px;
+}

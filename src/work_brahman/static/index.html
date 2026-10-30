@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>brahman workbench</title>
+<!-- The live workbench, served by `buddy serve` on 127.0.0.1 (src/work_brahman/web.py).
+     It reads /api/data every few seconds; a button posts to /api/answer, /api/stop,
+     /api/resume or /api/short, which the buddy handles exactly like a press in Lark or
+     Telegram. A family is a workflow in level 1 and its stories are its runs.
+     Level 3 opens with the selected run's sketch: its path through its kind's SOP.
+     Same look as the demo (storyboard/site/index.html in the monorepo), same tokens (design/tokens.css). -->
+<link rel="stylesheet" href="/tokens.css">
+<style>
+* { box-sizing: border-box; }
+[hidden] { display:none !important; }  /* main and #chatview are flex: hidden must still hide them */
+body { margin:0; background:var(--paper); color:var(--ink); font:var(--text)/1.45 var(--font); }
+button { font:inherit; color:inherit; cursor:pointer; }
+code { font:12px var(--mono); background:var(--well); border:1px solid var(--line); border-radius:4px; padding:0 3px; }
+header { display:flex; align-items:center; gap:14px; padding:12px 20px 0; flex-wrap:wrap; }
+header h1 { font:700 26px var(--serif); margin:0; }
+header .live { color:var(--mute); font-size:var(--small); flex:1; }
+header .live i { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--ok); margin-right:6px; }
+header .live.off i { background:var(--bad); }
+/* the corner: what this is, at the top; a small film, the motto, the digital + human meter */
+.corner { display:flex; align-items:center; gap:12px; max-width:min(720px, 52vw); }
+.corner video { width:128px; height:72px; object-fit:cover; border-radius:var(--r-sm); border:1px solid var(--line); cursor:zoom-in; background:#000; flex:none; }
+.filmbox { position:fixed; z-index:50; inset:0; background:rgba(31,42,55,.78); display:flex; align-items:center; justify-content:center; cursor:zoom-out; }
+.filmbox[hidden] { display:none; }
+.filmbox video { width:min(90vw, 1280px); max-height:85vh; border-radius:var(--r-sm); cursor:auto; background:#000; }
+.filmbox .x { position:absolute; top:18px; right:22px; font-size:22px; line-height:1; border:0; border-radius:50%; width:40px; height:40px; background:var(--card); color:var(--ink); cursor:pointer; }
+.mode { display:flex; gap:2px; } .mode button { font-size:10.5px; padding:0 8px; border:1px solid var(--line); background:var(--card); color:var(--mute); border-radius:999px; cursor:pointer; }
+.mode button.on { color:var(--ink); border-color:var(--gold); background:var(--sel); }
+.motto { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.motto .humble { font-size:11px; color:var(--mute); font-style:italic; }
+.motto .main { font:700 15px var(--serif); color:var(--ink); }
+.motto .rot { font-size:12px; color:var(--mute); transition:opacity .6s; min-height:1.3em; }
+.meter { display:flex; align-items:center; gap:7px; font-size:11px; color:var(--mute); cursor:help; }
+.meter .bar { width:120px; height:6px; border-radius:3px; background:var(--gold); overflow:hidden; display:flex; }
+.meter .bar i { background:var(--ink); }
+@media (max-width: 900px) { .corner video, .motto .rot { display:none; } .corner { max-width:none; } }
+.stop { background:var(--bad); color:#fff; border:2px solid var(--bad); border-radius:999px; font-weight:700; padding:3px 14px; letter-spacing:.5px; }
+.halt { margin:8px 20px 0; background:var(--bad); color:#fff; border-radius:var(--r-sm); padding:6px 12px; font-size:13.5px; }
+.halt button { margin-left:10px; border:1px solid #fff; background:none; color:#fff; border-radius:999px; padding:1px 10px; }
+main { display:flex; flex-direction:column; gap:10px; padding:10px 20px 24px; }  /* the whole width: a wide screen shows more runs per row */
+.level { background:var(--card); border:1px solid var(--line); border-radius:var(--r-lg); padding:9px 14px; }
+.level h2 { margin:0 0 6px; font-size:var(--tiny); letter-spacing:2px; color:var(--gold); text-transform:uppercase; }
+.level h2 span { color:var(--mute); letter-spacing:0; text-transform:none; font-weight:400; margin-left:6px; }
+.mute { color:var(--mute); font-size:var(--small); }
+/* asks */
+.asks { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:10px; }
+.ask { border:1px solid var(--line); border-left:4px solid var(--warn); border-radius:var(--r); padding:8px 10px; background:#fff; font-size:13px; }
+.ask.failed { border-left-color:var(--bad); }
+.ask h3 { margin:0 0 4px; font-size:13px; color:var(--warn); }
+.ask.failed h3 { color:var(--bad); }
+.ask table { border-collapse:collapse; font-size:11.5px; } .ask td, .ask th { border:1px solid var(--line); padding:1px 4px; }
+.ask ul { margin:3px 0; padding-left:16px; } .ask a { color:var(--link); text-decoration:none; }
+.ask pre { font:11px var(--mono); background:var(--well); padding:4px; border-radius:4px; white-space:pre-wrap; }
+.choices { display:flex; flex-wrap:wrap; gap:5px; margin-top:6px; }
+.choices button { border:1px solid var(--line); background:var(--card); border-radius:var(--r-sm); padding:3px 9px; font-size:12px; }
+.choices button:hover { border-color:var(--gold); background:var(--sel); }
+.choices button.danger { color:var(--bad); border-color:var(--bad); }
+.answered { padding:2px 0; font-size:12px; color:var(--ok); } .answered.stop { color:var(--bad); }
+/* level 1 */
+.wf { display:grid; grid-template-columns:330px 1fr; align-items:center; gap:8px; padding:4px 0; border-top:1px solid var(--line); }
+.wf:first-of-type { border-top:none; }
+.wf b { display:block; } .wf small { display:block; color:var(--mute); font-size:var(--small); }
+.dots { display:flex; gap:4px; flex-wrap:wrap; }
+.dot { width:58px; padding:1px 3px; border-radius:var(--r-sm); border:1px solid var(--line); font-size:10.5px; text-align:center; background:#fff; }
+.dot i { display:block; font-style:normal; font-weight:600; color:var(--ok); }
+.dot.quiet i { color:var(--mute); }
+.dot.failed { border-color:var(--bad); background:var(--bad-bg); } .dot.failed i { color:var(--bad); }
+.dot.stopped i, .dot.interrupted i { color:var(--bad); }
+.dot.running { border-color:var(--warn); animation:pulse 1.6s infinite; } .dot.running i { color:var(--warn); }
+.dot.sel { background:var(--sel); border-color:var(--gold); box-shadow:0 0 0 3px var(--glow); }
+@keyframes pulse { 50% { box-shadow:0 0 0 5px var(--glow); } }
+/* level 2 */
+.diagram { display:grid; grid-template-columns:200px 1fr 220px; gap:7px 14px; }
+.node { border:1.5px solid #5b6b82; border-radius:var(--r); padding:5px 9px; background:#fff; font-size:12px; text-align:left; overflow-wrap:anywhere; }
+.node b { display:block; font-size:10px; letter-spacing:1px; color:var(--mute); text-transform:uppercase; }
+.node.lit { border-color:var(--gold); background:var(--sel); } .node.bad { border-color:var(--bad); background:var(--bad-bg); }
+.node.picked { outline:2px solid var(--gold); box-shadow:0 0 0 4px var(--glow); }
+.resp, .obs { grid-column:1/4; text-align:center; } .obs { border-style:double; border-width:3px; }
+.flow { display:flex; gap:6px; align-items:stretch; flex-wrap:wrap; } .flow .node { flex:1; min-width:110px; }
+.arrow { color:var(--gold); font-weight:700; align-self:center; } .tools { grid-column:2; }
+/* level 3 */
+.observe { display:grid; grid-template-columns:1fr 1fr; gap:12px; font-size:13px; }
+.observe h3 { margin:0 0 4px; font-size:13px; }
+.kv { display:grid; grid-template-columns:auto 1fr; gap:1px 10px; font-size:12.5px; } .kv span:nth-child(odd) { color:var(--mute); }
+.kv span { overflow-wrap:anywhere; }
+pre.log { margin:0; background:var(--well); border:1px solid var(--line); border-radius:var(--r-sm); padding:7px; font:10.5px/1.35 var(--mono); white-space:pre-wrap; max-height:300px; overflow:auto; }
+pre.log.bad { border-color:var(--bad); }
+.fitness { margin:4px 0; padding:4px 8px; border-radius:var(--r-sm); background:var(--sel); font-size:12px; } .fitness b { color:var(--gold); }
+.bad-t { color:var(--bad); font-weight:600; }
+/* Level 3: the run's sketch, by hand (as in the demo) */
+.sketch { grid-column:1/-1; }
+.sketch h3 small { font-weight:400; color:var(--mute); margin-left:8px; }
+.sk-wrap { overflow-x:auto; background:#fffdf7; border:1px solid var(--line); border-radius:var(--r); padding:4px; }
+.sk-wrap svg { display:block; font-family:"Segoe Print","Bradley Hand","Chalkboard SE","Comic Sans MS","Kaiti SC","STKaiti","KaiTi",cursive; }
+.sk-node { cursor:pointer; }
+.sk-node path { fill:none; stroke:#b9bfc9; stroke-width:1.3; stroke-dasharray:5 4; }
+.sk-node .sk-fill { stroke:none; fill:#fff; }
+.sk-node text { font-size:12.5px; fill:#9aa2ad; }
+.sk-node.on path { stroke:var(--ink); stroke-dasharray:none; } .sk-node.on .sk-fill { fill:var(--sel); stroke:none; }
+.sk-node.on text { fill:var(--ink); }
+.sk-node.wait path { stroke:var(--warn); stroke-width:2; } .sk-node.wait .sk-fill { filter:drop-shadow(0 0 5px var(--warn)); }
+.sk-node.bad path { stroke:var(--bad); stroke-width:2; } .sk-node.bad .sk-fill { fill:var(--bad-bg); }
+.sk-node.picked path { stroke-width:2.6; }
+.sk-node text.sk-data { font-size:11px; fill:var(--gold); }
+.sk-edge { fill:none; stroke:#c7ccd4; stroke-width:1.2; stroke-dasharray:5 4; } .sk-edge.on { stroke:var(--ink); stroke-dasharray:none; stroke-width:1.5; }
+.sk-when { font-size:11px; fill:#9aa2ad; } .sk-when.on { fill:var(--gold); font-weight:700; }
+.sk-fit { font-size:12px; fill:var(--gold); }
+/* tabs and the chat */
+.tabs, .langs { display:flex; gap:4px; }
+.tabs button, .langs button { border:1px solid var(--line); background:var(--card); border-radius:999px; padding:3px 14px; font-size:13px; }
+.tabs button.on, .langs button.on { background:var(--sel); border-color:var(--gold); box-shadow:0 0 0 3px var(--glow); }
+.langs button { padding:3px 10px; font-size:12px; }
+#chatview { max-width:1200px; margin:0 auto; width:100%; box-sizing:border-box; padding:10px 20px 20px; display:flex; flex-direction:column; height:calc(100vh - 70px); }
+.thread { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding:8px 2px; }
+.cm { background:#fff; border:1px solid var(--line); border-radius:12px 12px 12px 4px; padding:7px 11px; max-width:88%; font-size:13.5px; overflow-wrap:anywhere; }
+.cm.you { align-self:flex-end; background:#d9ecff; border-color:#c7defa; border-radius:12px 12px 4px 12px; white-space:pre-wrap; }
+.cm.failed { border-color:var(--bad); } .cm.working { color:var(--mute); font-style:italic; }
+.cm .t { font-size:var(--tiny); color:var(--mute); margin-bottom:2px; } .cm .t b { color:var(--ink); }
+.cm table { border-collapse:collapse; font-size:12px; } .cm td, .cm th { border:1px solid var(--line); padding:1px 5px; }
+.cm pre { font:11.5px/1.4 var(--mono); background:var(--well); padding:6px; border-radius:6px; white-space:pre-wrap; }
+.cm ul { margin:3px 0; padding-left:18px; } .cm a { color:var(--link); }
+.topics { display:flex; gap:5px; flex-wrap:wrap; align-items:center; padding-bottom:6px; border-bottom:1px solid var(--line); }
+.topics button { border:1px solid var(--line); background:var(--card); border-radius:999px; padding:2px 11px; font-size:12.5px; }
+.topics button.on { background:var(--sel); border-color:var(--gold); box-shadow:0 0 0 3px var(--glow); }
+.topics input { font:inherit; font-size:12.5px; border:1px solid var(--line); border-radius:999px; padding:2px 10px; width:170px; background:#fff; }
+.compose { display:flex; gap:8px; align-items:flex-end; border-top:1px solid var(--line); padding-top:8px; }
+.compose textarea { flex:1; font:inherit; font-size:14px; border:1px solid var(--line); border-radius:var(--r); padding:8px 10px; min-height:44px; max-height:200px; resize:vertical; background:#fff; }
+.compose button { border:1px solid var(--gold); background:var(--sel); border-radius:var(--r); padding:9px 16px; font-weight:600; }
+/* a short story picked in level 1 */
+.node.todo { opacity:.55; } .node.doing { border-color:var(--warn); background:#fff8ec; }
+.story { font-size:13px; } .story h3 { margin:0 0 4px; font-size:13px; }
+.story textarea { width:100%; font:inherit; font-size:13px; border:1px solid var(--line); border-radius:var(--r-sm); padding:6px 8px; min-height:52px; resize:vertical; background:#fff; margin-top:6px; }
+.replies div { font-size:12.5px; padding:2px 0; border-top:1px solid var(--line); } .replies div:first-child { border-top:none; }
+@media (max-width: 900px) { .wf, .observe, .diagram { grid-template-columns:1fr; } .resp, .obs, .tools { grid-column:auto; } }
+</style>
+</head>
+<body>
+<header><h1>brahman</h1><div class="tabs"><button data-tab="bench" class="on" data-t="tab.bench">Workbench</button><button data-tab="chat" data-t="tab.chat">Chat</button></div><span class="live" id="live" data-t="connecting"><i></i>connecting…</span><div class="corner"><video id="film" muted autoplay loop playsinline data-t-title="film_title" title="The film: click to watch it large"></video><div class="motto"><span class="mode"><button data-motto="what" data-t="motto.what">What</button><button data-motto="why" data-t="motto.why">Why</button></span><span class="humble" id="m-top"></span><span class="main" id="m-main"></span><span class="rot" id="rot"></span><span class="meter" id="meter"><span class="bar"><i></i></span><span></span></span></div></div><div class="langs" data-t-title="lang_title" title="the page's language"><button data-lang="en">EN</button><button data-lang="zh-CN">中文</button></div><button class="stop" data-stop="1" title="stop everything that is running or waiting, and pause the schedule" data-t="stop" data-t-title="stop_title">■ STOP</button></header>
+<div class="filmbox" id="filmbox" hidden><button class="x" id="filmx" data-t-title="film_close" title="close (Esc)">✕</button><video id="filmbig" controls playsinline></video></div>
+<div class="halt" id="halt" hidden></div>
+<div id="chatview" hidden>
+  <div class="topics" id="topics"></div>
+  <div class="thread" id="thread"></div>
+  <div class="compose"><textarea id="say" placeholder="Message the buddy: the same session as Lark and Telegram, mirrored to them. Enter sends, Shift+Enter is a new line." data-t-placeholder="chat.say"></textarea><button id="send" data-t="send">Send</button></div>
+</div>
+<main id="bench">
+  <section class="level"><h2 data-t="h.asks">Waiting for you<span data-t="h.asks_sub">the same cards as in Lark and Telegram; the first answer anywhere wins</span></h2><div id="asks"></div></section>
+  <section class="level"><h2 data-t="h.l1">Level 1 · Workflows and their runs<span data-t="h.l1_sub">the last 3 days · click a run</span></h2><div id="workflows"></div></section>
+  <section class="level"><h2 data-t="h.l2">Level 2 · How the system works<span id="l2h" data-t="h.l2_sub">lit by the selected run · click a part</span></h2><div class="diagram" id="diagram"></div></section>
+  <section class="level"><h2 data-t="h.l3">Level 3 · Observation<span id="l3h"></span></h2><div class="observe" id="observe"></div></section>
+</main>
+<script>
+const S = { run: null, part: "", data: null, drafts: {}, topic: "" };  // topic: the chat tab's conversation, "" = main  // drafts: a story's reply being typed
+// The page's words in each language (text.py's "page." keys, and the SOP labels as "label."):
+// web.py fills TEXTS in when it serves the page and sets <html lang> to buddy.toml's language.
+// The page starts in ?lang= (this load only), else the choice kept in this browser (EN / 中文),
+// else buddy.toml's. tr() fills in a word's {fields}; in Chinese a field that meets a Chinese
+// character with a Latin letter or digit gets a space, as text.t() does.
+const TEXTS = {};
+let TEXT = {}, zh = false;
+const han = c => /[\u3400-\u9fff]/.test(c || ""), latin = c => /^[A-Za-z0-9]$/.test(c || "");
+function tr(k, f = {}) {
+  return (TEXT[k] ?? k).split(/(\{\w+\})/).reduce((out, part) => {
+    const m = /^\{(\w+)\}$/.exec(part), v = m ? String(f[m[1]] ?? "") : part;
+    return out + (zh && out && v && ((han(out.at(-1)) && latin(v[0])) || (latin(out.at(-1)) && han(v[0]))) ? " " : "") + v;
+  }, "");
+}
+const trn = (k, n, f = {}) => tr(`${k}.${n === 1 ? "one" : "many"}`, { n, ...f });  // a count: k.one or k.many
+const word = (group, w) => TEXT[`${group}.${w}`] ?? w;  // a status, kind or app name as the record has it
+const statusName = s => word("st", s), kindName = k => word("kind", k), appName = w => word("app", w), partName = p => word("part", p), wfName = n => word("workflow", n);
+const sopLabel = l => word("label", l);
+function setLang(lang) {  // the labels written in the HTML; what is drawn later asks tr() itself
+  TEXT = TEXTS[lang] || {}; zh = lang === "zh-CN"; document.documentElement.lang = lang;
+  document.title = tr("title");
+  for (const e of document.querySelectorAll("[data-t]")) {
+    const n = [...e.childNodes].find(c => c.nodeType === 3);
+    if (n) n.nodeValue = tr(e.dataset.t);
+  }
+  for (const e of document.querySelectorAll("[data-t-title]")) e.title = tr(e.dataset.tTitle);
+  for (const e of document.querySelectorAll("[data-t-placeholder]")) e.placeholder = tr(e.dataset.tPlaceholder);
+  document.querySelectorAll(".langs button").forEach(b => b.classList.toggle("on", b.dataset.lang === lang));
+}
+setLang([new URLSearchParams(location.search).get("lang"), (() => { try { return localStorage.getItem("lang"); } catch (_) { return null; } })(),
+  document.documentElement.lang].find(l => l in TEXTS) || document.documentElement.lang);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function inline(s) {
+  return esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+    .replace(/(^|\W)_(.+?)_(\W|$)/g, "$1<i>$2</i>$3").replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+}
+function md(text) {  // the Markdown duties post: paragraphs, lists, tables, code blocks
+  const out = [], lines = String(text || "").split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (l.startsWith("```")) { const b = []; for (i++; i < lines.length && !lines[i].startsWith("```"); i++) b.push(lines[i]); out.push(`<pre>${esc(b.join("\n"))}</pre>`); }
+    else if (l.startsWith("|")) {
+      const rows = [];
+      for (; i < lines.length && lines[i].startsWith("|"); i++) if (!/^\|[-| :]+\|$/.test(lines[i])) rows.push(lines[i].slice(1, -1).split("|").map(c => inline(c.trim())));
+      i--; out.push("<table>" + rows.map((r, k) => "<tr>" + r.map(c => k ? `<td>${c}</td>` : `<th>${c}</th>`).join("") + "</tr>").join("") + "</table>");
+    } else if (l.startsWith("- ")) {
+      const items = []; for (; i < lines.length && lines[i].startsWith("- "); i++) items.push(`<li>${inline(lines[i].slice(2))}</li>`);
+      i--; out.push(`<ul>${items.join("")}</ul>`);
+    } else if (l.trim()) out.push(`<div>${inline(l)}</div>`);
+  }
+  return out.join("");
+}
+const fit = r => r.fitness || {};
+const sum = (rs, k) => rs.reduce((a, r) => a + (fit(r)[k] || 0), 0);
+const tokens = rs => sum(rs, "tokens_in") + sum(rs, "tokens_cached") + sum(rs, "tokens_out");
+const usd = x => "$" + (x ? x.toFixed(x < 0.1 ? 4 : 2) : "0");
+const kilo = n => n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n);
+const FAILED = new Set(["failed", "timeout", "interrupted"]);
+const hm = s => (s || "").slice(11, 16), day = s => (s || "").slice(5, 10);
+const quiet = r => r.status === "ok" && /^no (changes|moves)$/.test(r.result || "");
+const STORY = { running: "⏳", ok: "✓", failed: "✗", stopped: "■" };
+const MARK = { todo: "⏳", doing: "▶️", done: "✅", failed: "❌", skipped: "⏭" };
+const label = r => r.story ? `${STORY[r.status] || ""} #${r.story.id}` : r.status === "running" ? tr("status.running") : FAILED.has(r.status) ? "✗ " + statusName(r.status)
+  : r.status === "stopped" ? tr("status.stopped") : r.kind === "chat" ? tr("status.chat") : quiet(r) ? tr("status.quiet") : tr(r.steps.some(s => s.step === "post" || s.step === "ask") ? "status.posted" : "status.ok");
+
+async function post(path, body) {
+  await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Buddy": "1" }, body: JSON.stringify(body || {}) });
+  setTimeout(load, 600);
+}
+async function load() {
+  try {
+    const r = await fetch("/api/data", { cache: "no-store" });
+    S.data = await r.json();
+    document.getElementById("live").className = "live";
+    document.getElementById("live").innerHTML = `<i></i>${tr("live", { n: S.data.runs.length, at: new Date().toLocaleTimeString() })}`;
+    render();
+  } catch (e) {
+    document.getElementById("live").className = "live off";
+    document.getElementById("live").innerHTML = "<i></i>" + tr("down");
+  }
+}
+
+// A duty checks every 10 minutes and is mostly quiet: show the latest few, then only the
+// runs that did something (posted, asked, failed, stopped, a chat), and count the rest.
+function shown(rs, sel) {
+  return rs.filter((r, k) => k < 8 || !quiet(r) || r === sel).slice(0, 40);
+}
+
+// The corner: a title and its film as one unit, in two modes the switch flips together:
+// what the bench does (plain words, the system film) and why (the message, the evolution
+// film); the meter from D.meter (counted in meter.py) in both.
+const MOTTO = {
+  what: { film: "brahman-02-system", top: "motto.what.top", main: "motto.what.main", rot: ["motto.what.r1", "motto.what.r2"] },
+  why: { film: "brahman-01-evolution", top: "motto.humble", main: "motto.main", rot: ["motto.r1", "motto.r2"] },
+};
+let motto = "what";
+try { motto = MOTTO[localStorage.getItem("motto")] ? localStorage.getItem("motto") : "what"; } catch (_) {}
+function setMotto(mode) {
+  motto = mode;
+  try { localStorage.setItem("motto", mode); } catch (_) {}
+  const film = document.getElementById("film"), u = MOTTO[mode];
+  film.poster = `/media/${u.film}.jpg`; film.src = `/media/${u.film}.mp4`; film.play().catch(() => {});
+  document.querySelectorAll(".mode button").forEach(b => b.classList.toggle("on", b.dataset.motto === mode));
+  rotN = 0; words();
+}
+function words() {
+  document.getElementById("m-top").textContent = tr(MOTTO[motto].top);
+  document.getElementById("m-main").textContent = tr(MOTTO[motto].main);
+}
+function corner(D) {
+  words();  // the page's language may have changed
+  const m = D.meter, el = document.getElementById("meter");
+  if (!m || !el) return;
+  el.querySelector("i").style.width = (m.digital + m.human ? m.digital_pct : 50) + "%";
+  el.lastElementChild.textContent = tr("meter", { d: m.digital_pct, h: m.human_pct });
+  el.title = tr("meter_title", { days: m.days, dn: m.digital, hn: m.human });
+  if (!rotN) rotate();  // the first line at once, then every 8 s
+}
+let rotN = 0;
+function rotate() {
+  const el = document.getElementById("rot");
+  el.style.opacity = 0;
+  setTimeout(() => { el.textContent = tr(MOTTO[motto].rot[rotN++ % 2]); el.style.opacity = 1; }, 600);
+}
+setInterval(rotate, 8000);
+document.querySelectorAll(".mode button").forEach(b => b.addEventListener("click", () => setMotto(b.dataset.motto)));
+// The film large, with sound: ✕, Esc or a click beside it closes it.
+const box = document.getElementById("filmbox"), big = document.getElementById("filmbig");
+document.getElementById("film").addEventListener("click", () => {
+  big.src = `/media/${MOTTO[motto].film}.mp4`; box.hidden = false; big.play().catch(() => {});
+});
+const closeFilm = () => { big.pause(); box.hidden = true; };
+document.getElementById("filmx").addEventListener("click", closeFilm);
+box.addEventListener("click", e => { if (e.target === box) closeFilm(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !box.hidden) closeFilm(); });
+setMotto(motto);
+
+function render() {
+  const D = S.data, focused = document.activeElement && document.activeElement.id;
+  corner(D);
+  const halt = document.getElementById("halt");
+  halt.hidden = !D.paused;
+  if (D.paused) halt.innerHTML = `${tr("halt", { where: esc(appName(D.paused.where)), at: hm(D.paused.at) })}<button data-resume="1">${tr("resume")}</button>`;
+
+  // Asks: open ones with their buttons, then the last day's answers.
+  const open = D.asks.filter(a => !a.answer), done = D.asks.filter(a => a.answer);
+  document.getElementById("asks").innerHTML = (open.length ? `<div class="asks">${open.map(a => `
+    <div class="ask ${a.failed ? "failed" : ""}"><h3>${a.failed ? "⚠️" : "❓"} ${esc(a.title)} <span class="mute">${day(a.asked)} ${hm(a.asked)}</span></h3>
+      ${md(a.markdown)}${a.note ? `<div class="mute">${esc(a.note)}</div>` : ""}
+      <div class="choices">${a.options.map(([k, l]) => `<button data-ask="${esc(a.id)}" data-choice="${esc(k)}" class="${k === "reject" || k === "leave" ? "danger" : ""}">${esc(l)}</button>`).join("")}</div></div>`).join("")}</div>`
+    : `<div class="mute">${tr("nothing_waiting")}</div>`)
+    + (done.length ? `<div style="margin-top:6px">${done.map(a => `<div class="answered ${a.answer.stopped ? "stop" : ""}">${a.answer.stopped ? "■" : "✓"} ${esc(a.title)}: ${esc(a.answer.label)} <span class="mute">${tr("on", { where: esc(appName(a.answer.where)), at: hm(a.answer.at) })}</span></div>`).join("")}</div>` : "");
+
+  // Level 1: every configured job and duty, plus the chats, with the last 3 days of runs.
+  const groups = D.workflows.map(w => ({ ...w, key: `${w.kind}:${w.name}` }));
+  for (const r of D.runs) if (!groups.some(g => g.key === `${r.kind}:${r.name}`)) groups.push({ kind: r.kind, name: r.name, schedule: "", key: `${r.kind}:${r.name}` });
+  const sel = D.runs.find(r => r.id === S.run) || D.runs.find(r => r.status !== "ok" && r.status !== "running") || D.runs[0];
+  document.getElementById("workflows").innerHTML = groups.map(g => {
+    const rs = D.runs.filter(r => `${r.kind}:${r.name}` === g.key);
+    const failed = rs.filter(r => FAILED.has(r.status)).length;
+    const cost = tokens(rs) ? `${usd(sum(rs, "usd_list"))} · ${tr("wf.tok", { n: kilo(tokens(rs)) })}` : tr("wf.code_only");
+    const running = D.running.some(k => k.startsWith(g.key)) || rs.some(r => r.story && r.status === "running");
+    return `<div class="wf"><div><b>${esc(wfName(g.name))} ${running ? `<span class="mute">${tr("running_now")}</span>` : ""}</b>
+      <small>${kindName(g.kind)}${g.schedule ? " · " + esc(g.schedule) : g.kind === "chat" ? tr("wf.chat") : g.kind === "family" ? " · " + esc(g.about) : tr("wf.unscheduled")}</small>
+      <small>${tr(g.kind === "family" ? "wf.stories" : "wf.runs", { n: rs.length })} · ${failed ? `<span class="bad-t">${tr("wf.failed", { n: failed })}</span>` : tr("wf.failed", { n: 0 })} · ${cost} · ${tr("wf.denied", { n: sum(rs, "denied") })}</small></div>
+      <div class="dots">${shown(rs, sel).map(r => `<button class="dot ${FAILED.has(r.status) ? "failed" : r.status === "running" ? "running" : r.status === "stopped" ? "stopped" : quiet(r) ? "quiet" : ""} ${r === sel ? "sel" : ""}" data-run="${esc(r.id)}" title="${esc(r.story ? `#${r.story.id} ${r.story.title}` : r.id)}">${day(r.started)} ${hm(r.started)}<i>${label(r)}</i></button>`).join("")}${rs.length > shown(rs, sel).length ? `<span class="mute">${tr("wf.quiet", { n: rs.length - shown(rs, sel).length })}</span>` : ""}</div></div>`;
+  }).join("");
+  if (!sel) { document.getElementById("diagram").innerHTML = `<div class="mute">${tr("no_runs")}</div>`; document.getElementById("observe").innerHTML = ""; return; }
+
+  if (sel.story) return story(sel, focused);
+
+  // Level 2: the architecture, lit by the selected run: its real steps, in order.
+  const failed = FAILED.has(sel.status) || sel.status === "stopped";
+  const steps = sel.steps.map(s => s.step).filter((s, k, a) => s !== a[k - 1]);
+  const tools = [...new Set(sel.steps.map(s => s.tool || s.engine).filter(Boolean))];
+  const post = sel.steps.find(s => s.step === "post");
+  const cls = (p, on, bad) => `node ${bad ? "bad" : on ? "lit" : ""} ${S.part === p ? "picked" : ""}`;
+  const asked = sel.steps.filter(s => s.step === "ask").length;
+  document.getElementById("l2h").textContent = tr("l2h", { kind: kindName(sel.kind), name: wfName(sel.name), at: `${day(sel.started)} ${hm(sel.started)}` });
+  document.getElementById("diagram").innerHTML = `
+    <button class="${cls("responsible", failed || asked)} resp" data-part="responsible"><b>${tr("resp")}</b>${failed ? tr("resp.failed", { status: statusName(sel.status) }) : asked ? trn("resp.asked", asked) : tr("resp.none")}${tr("resp.stop")}</button>
+    <button class="${cls("input", true)}" data-part="input"><b>${tr("input")}</b>${esc(sel.trigger)}</button>
+    <div class="flow">${steps.map((s, k) => `<button class="${cls("step:" + s, true, failed && k === steps.length - 1)}" data-part="step:${esc(s)}"><b>${tr("step", { n: k + 1 })}</b>${esc(s)}</button>`).join('<span class="arrow">→</span>') || `<span class="mute">${tr("no_steps")}</span>`}</div>
+    <button class="${cls("effect", !!post || sel.kind === "chat", failed)}" data-part="effect"><b>${tr("effect")}</b>${post ? tr("posted_to", { n: Object.keys(post.chats || {}).length }) : esc((sel.result || sel.error || sel.status).split("\n")[0].slice(0, 60))}</button>
+    <div></div><button class="${cls("tools", tools.length)} tools" data-part="tools"><b>${tr("tools")}</b>${esc(tools.join(" · ") || "—")}</button><div></div>
+    <button class="${cls("observability", true)} obs" data-part="observability"><b>${tr("obs")}</b>${tr("obs.record", { id: esc(sel.id), version: esc(sel.version) })}${failed ? tr("obs.box") : ""}</button>`;
+
+  // Level 3: the part that was clicked, or the whole run.
+  document.getElementById("l3h").textContent = `${wfName(sel.name)} · ${S.part ? partName(S.part) : tr("whole_run")}`;
+  document.getElementById("observe").innerHTML = runSketch(sel) + observe(sel);
+}
+
+// The SOP a run is drawn on: its kind's (runs.SOPS, in /api/data), unless the run recorded a
+// step the SOP doesn't name; then the run's own steps, in order, so the sketch never hides
+// what the record says.
+function sopFor(r) {
+  const sop = (S.data.sops || {})[r.kind], known = new Set();
+  const walk = items => items.forEach(it => it.fork ? it.fork.forEach(([, sub]) => walk(sub)) : known.add(it[1]));
+  if (sop) walk(sop);
+  if (sop && r.steps.every(s => known.has(s.step))) return [sop, ""];
+  return [r.steps.map(s => s.step).filter((s, k, a) => s !== a[k - 1]).map(s => [s, s]),
+    sop ? tr("sop.own") : tr("sop.none", { kind: kindName(r.kind) })];
+}
+
+// The selected run, drawn by hand on its SOP, with its record's own data under each step.
+function runSketch(r) {
+  const [sop, note] = sopFor(r);
+  const did = step => r.steps.filter(s => s.step === step), f = fit(r);
+  const failed = FAILED.has(r.status) || r.status === "stopped", running = r.status === "running";
+  const quietEnd = r.status === "ok" && !did("post").length && r.result === "no changes";
+  const last = (r.steps[r.steps.length - 1] || {}).step;
+  const asking = D => D.asks.some(a => a.run === r.id && !a.answer);
+  const many = (xs, f) => (xs.length > 1 ? `×${xs.length} · ` : "") + xs.map(f).join(" · ");
+  const brief = s => Object.entries(s).filter(([k]) => !["step", "at", "cost", "chats", "ok", "engine", "session_id", "prompt"].includes(k))
+    .map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`).join(" · ");
+  const reached = s => typeof s.chats === "object" && s.chats ? Object.keys(s.chats).length : s.chat ? 1 : 0;
+  const agent = s => `${s.ok === false ? "✗ " : ""}${s.cost ? `${trn("d.turns", s.cost.turns)} · ${usd(s.cost.usd_list)} · ${tr("wf.tok", { n: kilo((s.cost.tokens_in || 0) + (s.cost.tokens_cached || 0) + (s.cost.tokens_out || 0)) })}` : tr("d.no_cost")}`
+    + ((s.denied || []).length ? tr("d.denied", { tools: s.denied.join(", ") }) : "");
+  const data = step => {
+    const xs = did(step);
+    if (step === "input") { const p = (did("agent")[0] || {}).prompt; return p ? `“${p}”` : ""; }
+    if (!xs.length) return "";
+    return { check: () => many(xs, s => trn("d.changes", s.changes)), act: () => many(xs, s => s.act),
+      ask: () => many(xs, s => s.title || s.ask), answer: () => many(xs, s => tr("d.on", { choice: s.choice, where: appName(s.where) })),
+      post: () => many(xs, s => trn("d.to", reached(s)) + (s.ok === false ? tr("d.not_all") : "")),
+      agent: () => many(xs, agent), render: () => many(xs, s => tr("d.chars", { n: s.chars })) }[step]?.() ?? many(xs, brief);
+  };
+  const icon = (TRIGGER.find(([re]) => re.test(r.trigger)) || [, "▶"])[1];
+  const post = did("post")[0];
+  const end = failed ? `✗ ${statusName(r.status)}: ${(r.error || r.output || "").trim().split("\n")[0]}` : running ? tr("end.running")
+    : quietEnd ? tr("end.quiet") : post ? trn("end.notice", reached(post))
+    : r.kind === "chat" ? tr("end.chat") : (r.result || r.status).split("\n")[0];
+  return sketch(r, sop, step => step === "quiet" ? quietEnd : did(step).length > 0, {
+    wait: running ? last || "input" : asking(S.data) ? "ask" : null,
+    // Red: the step whose record says it failed, else the last one it reached.
+    bad: step => failed && (step === "effect" || (r.steps.some(s => s.ok === false) ? did(step).some(s => s.ok === false) : step === last)),
+    data, fitness: `${tr("fit.s", { s: f.seconds ?? "–" })} · ${f.turns ? `${usd(f.usd_list)} · ${trn("d.turns", f.turns)} · ${tr("fit.tokens", { n: kilo(tokens([r])) })}` : tr("fit.no_agent")} · ${tr("fit.denied", { n: f.denied || 0 })}`,
+  }, `${icon} ${r.trigger}\n${day(r.started)} ${hm(r.started)}`, { text: end, on: !running }, note);
+}
+const TRIGGER = [[/^(schedule|catch-up)/, "⏱"], [/^answer/, "↩"], [/^message/, "💬"]];
+const width = s => [...s].reduce((a, ch) => a + (/[ᄀ-ᅟ⺀-꓏가-힣豈-﫿＀-｠\u{1f300}-\u{1faff}]/u.test(ch) ? 2 : 1), 0);
+
+// The run as a sketch: the path it took through its SOP, drawn by hand, top to bottom, a
+// step per row, each branch of a fork in its own column. Steps it did not take stay faint
+// and dashed, so a fork shows which way this run went; the step it waits in glows, a failed
+// one is red. The strokes wobble like a pen's, seeded by the run's id, so the same run always
+// looks the same; no library, the page stays offline. Ported from the demo's sketch().
+function sketch(r, sop, took, info, start, end, note) {
+  let seed = [...r.id].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
+  const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32 - 0.5) * 2;
+  const curve = (x1, y1, cx, cy, x2, y2, j = 1.4) => [0, 1].map(() => `M${(x1 + rnd() * j).toFixed(1)} ${(y1 + rnd() * j).toFixed(1)} `
+    + `Q${(cx + rnd() * j * 2).toFixed(1)} ${(cy + rnd() * j * 2).toFixed(1)} ${(x2 + rnd() * j).toFixed(1)} ${(y2 + rnd() * j).toFixed(1)}`).join(" ");
+  const stroke = (x1, y1, x2, y2, j) => curve(x1, y1, (x1 + x2) / 2, (y1 + y2) / 2, x2, y2, j);
+  const box = (x, y, w, h) => stroke(x, y, x + w, y) + " " + stroke(x + w, y, x + w, y + h) + " " + stroke(x + w, y + h, x, y + h) + " " + stroke(x, y + h, x, y);
+  const W = 196, H = 106, BW = 168, BH = 40, X0 = 30, Y0 = 14;
+  const nodes = [], edges = [];
+  // A fork puts each branch in its own columns; what follows it joins on whichever ends its
+  // branches reached, so an empty branch is a step that may be skipped.
+  const place = (items, row, col, prevs, when) => {
+    let cols = 0;
+    for (const it of items) {
+      if (it.fork) {
+        let c = col, ends = [], bottom = row;
+        for (const [label, sub] of it.fork) {
+          const p = place(sub, row, c, prevs, label && sopLabel(label));
+          c += p.cols; ends = ends.concat(p.ends); bottom = Math.max(bottom, p.row);
+        }
+        cols = Math.max(cols, c - col); prevs = [...new Set(ends)]; row = bottom; when = null;
+        continue;
+      }
+      const n = { label: sopLabel(it[0]), step: it[1], col, row, when, on: took(it[1]) };
+      nodes.push(n); prevs.forEach(a => edges.push({ a, b: n })); prevs = [n]; when = null; row++; cols = Math.max(cols, 1);
+    }
+    return { cols, row, ends: prevs };
+  };
+  const input = { label: start, step: "input", col: 0, row: 0, on: true };
+  nodes.push(input);
+  const cols = Math.max(place(sop, 1, 0, [input], null).cols, 1);
+  const last = nodes.filter(n => n.on).reduce((a, n) => n.row > a.row ? n : a);
+  const effect = { label: end.text, step: "effect", row: Math.max(...nodes.map(n => n.row)) + 1, col: last.col, on: end.on };
+  nodes.push(effect); edges.push({ a: last, b: effect });
+  // The way the run came into a step: from the latest step it took before it. A way it did
+  // not come is drawn only from the row just above, so skips don't cross the page faintly.
+  for (const n of nodes) {
+    const ins = edges.filter(e => e.b === n && e.a.on && n.on);
+    if (ins.length) ins.reduce((a, e) => e.a.row > a.a.row ? e : a).on = true;
+  }
+  const drawn = edges.filter(e => e.on || e.b.row - e.a.row === 1);
+  const at = n => [X0 + n.col * W, Y0 + n.row * H];
+  const lines = (text, n = 2, w = 26) => {
+    const out = [""]; let used = 0;
+    for (const ch of String(text)) {
+      const cw = width(ch);
+      if (ch === "\n" || used + cw > w) {
+        if (out.length === n) { out[n - 1] = out[n - 1].slice(0, -1) + "…"; return out; }
+        // Latin words break at a space; CJK, which has none, breaks anywhere.
+        const cut = ch === "\n" ? -1 : out[out.length - 1].lastIndexOf(" "), carry = cut > 0 ? out[out.length - 1].slice(cut + 1) : "";
+        if (cut > 0) out[out.length - 1] = out[out.length - 1].slice(0, cut);
+        out.push(carry); used = width(carry);
+      }
+      if (ch !== "\n") { out[out.length - 1] += ch; used += cw; }
+    }
+    return out;
+  };
+  const wide = Math.max(X0 + cols * W - (W - BW) + 60, 340), high = Y0 + (effect.row + 1) * H - 20;
+  // An edge over more than one row goes around what it skips: left of its column, or across
+  // first and then down the column it goes to.
+  const route = (a, b) => {
+    const [ax, ay] = at(a), [bx, by] = at(b), x1 = ax + BW / 2, y1 = ay + BH, x2 = bx + BW / 2, y2 = by - 3;
+    const d = b.row - a.row < 2 ? stroke(x1, y1, x2, y2) : a.col === b.col ? curve(ax + 10, y1, ax - 60, (y1 + y2) / 2, x2 - 30, y2) : curve(x1, y1, x2, y1, x2, y2);
+    const tip = b.row - a.row < 2 || a.col !== b.col ? x2 : x2 - 30;
+    return `${d} ${stroke(tip, y2, tip - 4, y2 - 7, .6)} ${stroke(tip, y2, tip + 4, y2 - 7, .6)}`;
+  };
+  const part = n => n.step === "input" || n.step === "effect" ? n.step : n.step === "quiet" ? "effect" : "step:" + n.step;
+  const svgEdges = drawn.map(e => `<path class="sk-edge ${e.on ? "on" : ""}" d="${route(e.a, e.b)}"/>`).join("");
+  const svgNodes = nodes.map(n => {
+    const [x, y] = at(n), cls = [n.on ? "on" : "", info.wait === n.step ? "wait" : "", info.bad(n.step) && n.on ? "bad" : "", S.part === part(n) ? "picked" : ""].join(" ");
+    const said = n.on && info.data(n.step);
+    return (n.when ? `<text class="sk-when ${n.on ? "on" : ""}" x="${x + BW / 2 + 8}" y="${y - 7}">${esc(n.when)}</text>` : "")
+      + `<g class="sk-node ${cls}" data-part="${esc(part(n))}"><title>${esc(n.step)}</title><path class="sk-fill" d="M${x} ${y}h${BW}v${BH}h-${BW}z"/><path d="${box(x, y, BW, BH)}"/>`
+      + lines(n.label).map((l, k) => `<text x="${x + 7}" y="${y + 16 + k * 15}">${esc(l)}</text>`).join("")
+      + (said ? lines(said, 2, 34).map((l, k) => `<text class="sk-data" x="${x + 2}" y="${y + BH + 13 + k * 13}">${esc(l)}</text>`).join("") : "")
+      + `</g>`;
+  }).join("");
+  return `<div class="sketch"><h3>${tr("sketch")}<small>${tr("sketch_sub")}${note ? " · " + esc(note) : ""}</small></h3>
+    <div class="sk-wrap"><svg width="${wide}" height="${high}" viewBox="0 0 ${wide} ${high}">${svgEdges}${svgNodes}
+      <text class="sk-fit" x="${wide - 8}" y="${high - 8}" text-anchor="end">${esc(info.fitness)}</text></svg></div></div>`;
+}
+
+// A short story in levels 2 and 3: its marks are the flow, and its card has ■ Stop, a reply
+// box and the options of its open questions while it runs, as under its card in Lark and Telegram.
+function story(r, focused) {
+  const st = r.story, n = st.id, live = r.status === "running";
+  const unread = st.replies.filter(x => !x.read).length;
+  const node = (cls, title, body) => `<div class="node ${cls}"><b>${title}</b>${body}</div>`;
+  document.getElementById("l2h").textContent = tr("story.l2h", { n, title: st.title });
+  document.getElementById("diagram").innerHTML =
+    node(`resp ${st.stop || unread ? "lit" : ""}`, tr("resp"),
+      st.stop ? tr("story.stop", { where: esc(appName(st.stop.where)), at: hm(st.stop.at) }) : unread ? trn("story.unread", unread)
+        : live ? tr("story.you") : tr("story.ended"))
+    + node("lit", tr("story.input"), esc(r.trigger))
+    + `<div class="flow">${r.steps.map((m, k) => node(m.status === "failed" ? "bad" : m.status === "todo" ? "todo" : m.status === "doing" ? "doing" : "lit",
+        `${tr("story.mark", { n: k + 1 })}${m.planned ? "" : tr("story.unplanned")}`, `${MARK[m.status]} ${esc(m.step)}${m.at ? ` <span class="mute">${hm(m.at)}</span>` : ""}`)).join('<span class="arrow">→</span>')
+        || `<span class="mute">${tr("story.no_marks")}</span>`}</div>`
+    + node(r.status === "ok" ? "lit" : FAILED.has(r.status) || r.status === "stopped" ? "bad" : "", tr("effect"),
+      tr("story." + r.status) + ` · ${esc(r.result)}`)
+    + `<div></div>${node("lit tools", tr("tools"), "buddy-short · Lark · Telegram · web")}<div></div>`
+    + node("lit obs", tr("obs"), tr("story.file", { file: `<code>short_stories/${n}.json</code>`, n: Math.round(r.fitness.seconds / 60) }));
+  document.getElementById("l3h").textContent = tr("story.card", { n });
+  const controls = live ? `<textarea id="reply-${n}" placeholder="${tr("story.placeholder")}">${esc(S.drafts[n] || "")}</textarea>
+    <div class="choices">${st.buttons.filter(([, a]) => a.split(":")[2].startsWith("a")).map(([l, a]) => `<button data-short-answer="${esc(a)}">${esc(l)}</button>`).join("")}<button data-short-reply="${n}">${tr("story.send")}</button>${st.buttons.some(([, a]) => a.endsWith(":stop")) ? `<button class="danger" data-short-stop="${n}">${tr("stop_btn")}</button>` : ""}</div>` : "";
+  document.getElementById("observe").innerHTML = `<div class="story"><h3>${esc(label(r))} ${esc(st.title)}</h3>${md(st.markdown)}${controls}</div>
+    <div><h3>${tr("replies")}</h3><div class="replies">${st.replies.map(x => `<div>${x.read ? "✓" : "•"} ${esc(x.text)} <span class="mute">${esc(appName(x.where))} · ${hm(x.at)} · ${tr(x.read ? "read" : "unread")}</span></div>`).join("") || `<span class="mute">${tr("none")}</span>`}</div>
+    <h3 style="margin-top:8px">${tr("story_file")}</h3><pre class="log">${esc(JSON.stringify(st, null, 1))}</pre></div>`;
+  const box = document.getElementById(`reply-${n}`);
+  if (box && focused === box.id) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+}
+
+function observe(r) {
+  const f = fit(r), kv = o => `<div class="kv">${Object.entries(o).map(([k, v]) => `<span>${esc(k)}</span><span>${esc(typeof v === "object" ? JSON.stringify(v) : v)}</span>`).join("")}</div>`;
+  const fitness = `<div class="fitness"><b>${tr("fitness")}</b> ${tr("fit.s", { s: f.seconds ?? "–" })} · ${f.turns ? tr("fit.list", { usd: usd(f.usd_list), turns: f.turns, tokens: kilo(tokens([r])) }) : tr("fit.none")} · ${tr("fit.denied", { n: f.denied || 0 })}</div>`;
+  const record = `<pre class="log">${esc(JSON.stringify(r, null, 1))}</pre>`;
+  const bad = FAILED.has(r.status) || r.status === "stopped";
+  const box = bad ? `<h3 class="bad-t">${tr("black_box")}</h3>${kv({ status: r.status, error: r.error || "—", exit: r.exit_code ?? "—" })}<pre class="log bad">${esc(r.output || tr("no_output"))}</pre>` : "";
+  const sid = (r.steps.find(s => s.session_id) || {}).session_id;
+  const handoff = sid ? `<h3>${tr("handoff")}</h3><div class="kv"><span>${tr("handoff.terminal")}</span><span><code>claude --resume ${esc(sid)}</code> ${tr("handoff.same")}</span><span>Codex</span><span>${tr("handoff.codex")}</span></div>` : "";
+  if (S.part.startsWith("step:")) {
+    const name = S.part.slice(5);
+    return `<div><h3>${tr("step_h", { name: esc(name) })}</h3>${r.steps.filter(s => s.step === name).map(s => kv(Object.fromEntries(Object.entries(s).filter(([k]) => k !== "step")))).join("<hr>")}</div><div>${box || record}</div>`;
+  }
+  if (S.part === "input") return `<div><h3>${tr("input_h")}</h3>${kv({ trigger: r.trigger, kind: r.kind, name: r.name, started: r.started })}<p class="mute">${tr("input_p")}</p></div>${record}`;
+  if (S.part === "effect") return `<div><h3>${tr("effect_h")}</h3>${kv({ status: r.status, ended: r.ended || "—" })}${md(r.result || r.error || "")}</div>${record}`;
+  if (S.part === "tools") return `<div><h3>${tr("tools")}</h3>${kv(Object.fromEntries(r.steps.filter(s => s.tool || s.engine).map(s => [s.step, s.tool || s.engine])))}${fitness}</div>${record}`;
+  if (S.part === "responsible") return `<div><h3>${tr("resp_h")}</h3>${kv({ [tr("resp.this_run")]: statusName(r.status), [tr("resp.asked_you")]: r.steps.filter(s => s.step === "ask").map(s => s.title || s.ask).join(", ") || tr("resp.nothing"), [tr("resp.answers")]: r.steps.filter(s => s.step === "answer").map(s => tr("d.on", { choice: s.choice, where: appName(s.where) })).join(", ") || "—" })}<p class="mute">${tr("resp_p")}</p></div><div>${box}${handoff}</div>`;
+  return `<div><h3>${esc(kindName(r.kind))} · ${esc(wfName(r.name))}</h3>${kv({ id: r.id, trigger: r.trigger, status: r.status, started: r.started, ended: r.ended || "—", version: r.version })}${fitness}
+    <ol style="margin:4px 0;padding-left:18px;font-size:12px">${r.steps.map(s => `<li><b>${esc(s.step)}</b> ${esc(Object.entries(s).filter(([k]) => !["step", "at", "cost"].includes(k)).map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`).join(" ").slice(0, 200))}</li>`).join("")}</ol>${handoff}</div><div>${box}${record}</div>`;
+}
+
+// The chat tab: the same conversations as in the apps; it polls while open. Main is the one
+// your linked chats share; a topic (🧵) is another, with its own session (a Lark thread too).
+let chatSeen = "";
+async function loadChat() {
+  const r = await fetch("/api/chat", { cache: "no-store" }).then(x => x.json()).catch(() => null);
+  if (!r) return;
+  const key = S.topic + JSON.stringify(r.messages) + JSON.stringify(r.topics);
+  if (key === chatSeen) return;
+  chatSeen = key;
+  if (S.topic && !r.topics.some(t => t.id === S.topic)) S.topic = "";
+  const draft = (document.getElementById("newtopic") || {}).value || "";
+  document.getElementById("topics").innerHTML = `<button data-topic="" class="${S.topic ? "" : "on"}" title="${tr("chat.main_title")}">${tr("chat.main")}</button>`
+    + r.topics.map(t => `<button data-topic="${esc(t.id)}" class="${S.topic === t.id ? "on" : ""}" title="${esc(tr("chat.topic_title", { id: t.id, where: appName(t.where) }))}">🧵 ${esc(t.name)}</button>`).join("")
+    + `<input id="newtopic" placeholder="${tr("chat.new_topic")}" value="${esc(draft)}"><button data-newtopic="1" title="${tr("chat.add_topic_title")}">${tr("chat.add_topic")}</button>`;
+  document.getElementById("say").placeholder = S.topic
+    ? tr("chat.say_topic") : tr("chat.say");
+  const msgs = r.messages.filter(m => (m.thread || "") === S.topic);
+  const el = document.getElementById("thread"), atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+  el.innerHTML = !r.on ? `<div class="mute">${tr("chat.off")}</div>`
+    : msgs.length ? msgs.map(m => m.from === "you"
+      ? `<div class="cm you">${esc(m.markdown)}</div>`
+      : `<div class="cm ${m.failed ? "failed" : ""} ${m.working ? "working" : ""}">
+          ${m.title ? `<div class="t"><b>${esc(m.title)}</b>${m.subtitle ? " · " + esc(m.subtitle) : ""} · ${hm(m.at)}</div>` : `<div class="t">${hm(m.at)}</div>`}
+          ${md(m.markdown)}${m.note ? `<div class="mute">${esc(m.note)}</div>` : ""}
+          ${m.options ? `<div class="choices">${m.options.map(([k, l]) => `<button data-ask="${esc(m.ask)}" data-choice="${esc(k)}">${esc(l)}</button>`).join("")}<button class="danger" data-stop="1">${tr("stop_btn")}</button></div>` : ""}
+          ${m.buttons && m.buttons.length ? `<div class="choices">${m.buttons.map(([l, a]) => { const [, n, what] = a.split(":");
+            return what === "stop" ? `<button class="danger" data-short-stop="${esc(n)}">${esc(l)}</button>` : what.startsWith("a") ? `<button data-short-answer="${esc(a)}">${esc(l)}</button>` : `<button data-short-prefill="${esc(n)}" title="${tr("chat.prefill", { n: esc(n) })}">${esc(l)}</button>`; }).join("")}</div>` : ""}
+          ${m.line ? `<div class="answered">${esc(m.line)}</div>` : ""}
+          ${m.working ? `<div class="choices"><button class="danger" data-stop="1">${tr("stop_btn")}</button></div>` : ""}
+          ${m.resume ? `<div class="choices"><button data-resume="1">${tr("resume")}</button></div>` : ""}</div>`).join("")
+    : `<div class="mute">${tr("chat.empty")}</div>`;
+  if (atEnd) el.scrollTop = el.scrollHeight;
+}
+async function send() {
+  const box = document.getElementById("say"), text = box.value.trim();
+  if (!text) return;
+  box.value = "";
+  await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json", "X-Buddy": "1" }, body: JSON.stringify({ text, thread: S.topic }) });
+  loadChat();
+}
+document.getElementById("send").addEventListener("click", send);
+document.addEventListener("input", e => { if (e.target.id.startsWith("reply-")) S.drafts[e.target.id.slice(6)] = e.target.value; });
+document.getElementById("say").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
+function tab(name) {
+  document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
+  document.getElementById("bench").hidden = name !== "bench";
+  document.getElementById("chatview").hidden = name !== "chat";
+  try { localStorage.setItem("tab", name); } catch (_) {}
+  if (name === "chat") { chatSeen = ""; loadChat(); document.getElementById("say").focus(); }
+}
+setInterval(() => { if (!document.getElementById("chatview").hidden) loadChat(); }, 2000);
+
+document.addEventListener("click", e => {
+  const b = e.target.closest("button, g[data-part]");  // a button, or a step in the run's sketch
+  if (!b) return;
+  if (b.dataset.tab) return tab(b.dataset.tab);
+  if (b.dataset.lang) {  // kept in this browser; a ?lang= in the address gives way to it
+    try { localStorage.setItem("lang", b.dataset.lang); } catch (_) {}
+    const url = new URL(location.href); url.searchParams.delete("lang"); history.replaceState(null, "", url);
+    setLang(b.dataset.lang); chatSeen = "";
+    if (!document.getElementById("chatview").hidden) loadChat();
+    return load();
+  }
+  if ("topic" in b.dataset) { S.topic = b.dataset.topic; chatSeen = ""; try { localStorage.setItem("topic", S.topic); } catch (_) {} return loadChat(); }
+  if (b.dataset.newtopic) {
+    const box = document.getElementById("newtopic"), name = box.value.trim();
+    if (!name) return box.focus();
+    box.value = ""; b.disabled = true;
+    return fetch("/api/topic", { method: "POST", headers: { "Content-Type": "application/json", "X-Buddy": "1" }, body: JSON.stringify({ name }) })
+      .then(x => x.json()).then(r => { S.topic = r.topic.id; chatSeen = ""; loadChat(); document.getElementById("say").focus(); });
+  }
+  if (b.dataset.ask) { b.disabled = true; return post("/api/answer", { ask: b.dataset.ask, choice: b.dataset.choice }); }
+  if (b.dataset.stop) return post("/api/stop");
+  if (b.dataset.resume) return post("/api/resume");
+  if (b.dataset.shortPrefill) { const box = document.getElementById("say"); box.value = `/short ${b.dataset.shortPrefill} `; return box.focus(); }
+  if (b.dataset.shortAnswer) { const [, n, what] = b.dataset.shortAnswer.split(":"); b.disabled = true; return post("/api/short", { n: +n, what }); }
+  if (b.dataset.shortStop) { b.disabled = true; return post("/api/short", { n: +b.dataset.shortStop, what: "stop" }); }
+  if (b.dataset.shortReply) {
+    const n = b.dataset.shortReply, box = document.getElementById(`reply-${n}`), text = box.value.trim();
+    if (!text) return box.focus();
+    box.value = ""; delete S.drafts[n];
+    return post("/api/short", { n: +n, what: "reply", text });
+  }
+  if (b.dataset.run) { S.run = b.dataset.run; S.part = ""; }
+  else if (b.dataset.part) S.part = S.part === b.dataset.part ? "" : b.dataset.part;
+  else return;
+  render();
+});
+load();
+setInterval(load, 5000);
+try { S.topic = localStorage.getItem("topic") || ""; if (localStorage.getItem("tab") === "chat") tab("chat"); } catch (_) {}
+</script>
+</body>
+</html>
