@@ -2,6 +2,10 @@
 # A tag v<version> builds the buddy as one executable on each OS (PyInstaller, Python inside,
 # UTF-8 mode built in), runs a teammate's first steps with it on that OS, builds the wheel,
 # and publishes one GitHub release with all of them and their SHA-256 sums.
+#
+# No artifacts: each job puts its file straight into a draft release (artifact storage is a
+# quota shared by every private repo of the account; release files are not), and the draft
+# is published only when every job passed. A failed run leaves a draft nobody downloads.
 name: release
 
 on:
@@ -13,7 +17,25 @@ permissions:
   contents: read
 
 jobs:
+  draft:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+              --title "work-brahman ${GITHUB_REF_NAME#v}" --notes-file .github/release-notes.md
+
   executable:
+    needs: [draft]
+    if: always() && (needs.draft.result == 'success' || needs.draft.result == 'skipped')
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -59,45 +81,46 @@ jobs:
           "$b" service install --dry-run > /dev/null
           { "$b" || true; } | grep -q "checks ok"
           test -f "$cfg"
-      - name: Name it for its platform
+      - name: Into the draft release, named for its platform
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           src=dist/buddy; [ "$RUNNER_OS" = Windows ] && src=dist/buddy.exe
           mkdir -p out && cp "$src" "out/${{ matrix.asset }}"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.asset }}
-          path: out/${{ matrix.asset }}
-          if-no-files-found: error
+          gh release upload "$GITHUB_REF_NAME" "out/${{ matrix.asset }}" --clobber
 
   wheel:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - run: uv build --wheel --out-dir out
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wheel
-          path: out/*.whl
-          if-no-files-found: error
-
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [executable, wheel]
+    needs: [draft]
+    if: always() && (needs.draft.result == 'success' || needs.draft.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          path: out
-          merge-multiple: true
-      - name: Publish
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build --wheel --out-dir out
+      - name: Into the draft release
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" out/*.whl --clobber
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [executable, wheel]  # every platform passed, or this never runs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Sums, then publish the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          cd out && sha256sum * > SHA256SUMS && cat SHA256SUMS && cd ..
-          gh release create "$GITHUB_REF_NAME" out/* --verify-tag \
-            --title "work-brahman ${GITHUB_REF_NAME#v}" --notes-file .github/release-notes.md
+          mkdir out && cd out
+          gh release download "$GITHUB_REF_NAME"
+          sha256sum * > SHA256SUMS && cat SHA256SUMS
+          gh release upload "$GITHUB_REF_NAME" SHA256SUMS --clobber
+          gh release edit "$GITHUB_REF_NAME" --draft=false
