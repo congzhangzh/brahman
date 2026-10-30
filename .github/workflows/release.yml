@@ -1,0 +1,103 @@
+# Written by the release kit into every release (brahman is never edited by hand).
+# A tag v<version> builds the buddy as one executable on each OS (PyInstaller, Python inside,
+# UTF-8 mode built in), runs a teammate's first steps with it on that OS, builds the wheel,
+# and publishes one GitHub release with all of them and their SHA-256 sums.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}  # a dry run: builds and tests, publishes nothing
+
+permissions:
+  contents: read
+
+jobs:
+  executable:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04      # an older glibc: the executable runs on more Linux systems
+            asset: buddy-linux-x86_64
+          - os: windows-latest
+            asset: buddy-windows-x64.exe
+          - os: macos-15          # Apple silicon
+            asset: buddy-macos-arm64
+          - os: macos-15-intel
+            asset: buddy-macos-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Build
+        shell: bash
+        run: |
+          uv venv --python 3.12 .venv-build
+          bin=.venv-build/bin; [ "$RUNNER_OS" = Windows ] && bin=.venv-build/Scripts
+          uv pip install --python .venv-build . pyinstaller
+          printf 'from work_brahman.cli import main\nraise SystemExit(main())\n' > buddy_entry.py
+          "$bin/pyinstaller" --onefile --name buddy --collect-data work_brahman \
+            --python-option "X utf8" --noconfirm --distpath dist buddy_entry.py
+      - name: Test, as a teammate would
+        shell: bash
+        run: |
+          set -x
+          b=dist/buddy; [ "$RUNNER_OS" = Windows ] && b=dist/buddy.exe
+          home="$RUNNER_TEMP/home"; mkdir -p "$home"
+          export HOME="$home" USERPROFILE="$home" XDG_CONFIG_HOME="$home/.config" XDG_STATE_HOME="$home/.state"
+          cfg="$home/.config/work_brahman/buddy.toml"
+          "$b" --help | grep -q "start here"
+          "$b" init --yes --telegram-token 0:x --language en | grep -q wrote
+          { "$b" init --yes --telegram-token 0:x 2>&1 || true; } | grep -q "already set up"  # refuses, exit 2
+          "$b" allow tg:42 | grep -q "allowed tg:42"
+          { "$b" doctor --offline || true; } | grep -q "a chat: Telegram"
+          # exit 1 by design: a fake token, so no chat takes the card
+          n=$({ "$b" short start ci --mark "CI ×?" || true; } | tail -1)
+          "$b" short mark "$n" CI --status failed --note flaky > /dev/null
+          "$b" short list | grep -q "⏳"
+          "$b" service install --dry-run > /dev/null
+          { "$b" || true; } | grep -q "checks ok"
+          test -f "$cfg"
+      - name: Name it for its platform
+        shell: bash
+        run: |
+          src=dist/buddy; [ "$RUNNER_OS" = Windows ] && src=dist/buddy.exe
+          mkdir -p out && cp "$src" "out/${{ matrix.asset }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: out/${{ matrix.asset }}
+          if-no-files-found: error
+
+  wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build --wheel --out-dir out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel
+          path: out/*.whl
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [executable, wheel]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd out && sha256sum * > SHA256SUMS && cat SHA256SUMS && cd ..
+          gh release create "$GITHUB_REF_NAME" out/* --verify-tag \
+            --title "work-brahman ${GITHUB_REF_NAME#v}" --notes-file .github/release-notes.md
