@@ -9,6 +9,8 @@ reads the same on both:
 - kill_tree(p): stop a child and everything it started. POSIX: SIGKILL to its session's
   group (procs.run starts each child in a new session). Windows: taskkill /T /F, since
   Popen.kill() would stop only the child itself and leave claude's node running.
+- peer_uid(client_port, server_port): who opened a TCP connection to this machine's loopback.
+  Linux reads /proc/net/tcp(6): the client socket's line names its owner. None elsewhere.
 - parent(pid): (parent pid, program name). Linux reads /proc; macOS has none, so it asks
   ps; Windows: None (long stories follow a terminal there through screen, which it lacks).
 """
@@ -68,6 +70,23 @@ def alive(pid: int) -> bool:
         return bool(k.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == 259
     finally:
         k.CloseHandle(h)
+
+
+def peer_uid(client_port: int, server_port: int) -> int | None:
+    """The uid that owns the client end of a loopback connection (Linux), else None."""
+    for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            lines = Path(table).read_text().splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            f = line.split()  # sl local rem st tx:rx tr:when retrnsmt uid ...
+            try:
+                if int(f[1].rsplit(":", 1)[1], 16) == client_port and int(f[2].rsplit(":", 1)[1], 16) == server_port:
+                    return int(f[7])
+            except (IndexError, ValueError):
+                continue
+    return None
 
 
 def parent(pid: int) -> tuple[int, str] | None:

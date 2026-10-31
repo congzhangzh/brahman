@@ -6,6 +6,10 @@
 # No artifacts: each job puts its file straight into a draft release (artifact storage is a
 # quota shared by every private repo of the account; release files are not), and the draft
 # is published only when every job passed. A failed run leaves a draft nobody downloads.
+#
+# PyPI (as freerdp-tk does it): trusted publishing, no token. Off until the repository
+# variable PYPI_PUBLISH is "true" and pypi.org trusts this workflow (project work-brahman,
+# workflow release.yml, environment pypi): a version on PyPI is public and can't be re-uploaded.
 name: release
 
 on:
@@ -23,7 +27,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -50,8 +54,8 @@ jobs:
             asset: buddy-macos-x86_64
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
       - name: Build
         shell: bash
         run: |
@@ -81,6 +85,11 @@ jobs:
           "$b" service install --dry-run > /dev/null
           { "$b" || true; } | grep -q "checks ok"
           test -f "$cfg"
+      - name: The wheel on this OS, as uv installs it
+        shell: bash
+        run: |
+          uv build --wheel --out-dir wheel
+          uv run --isolated --no-project --with wheel/*.whl buddy --help | grep -q "start here"
       - name: Into the draft release, named for its platform
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
@@ -98,14 +107,14 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - run: uv build --wheel --out-dir out
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+      - run: uv build --out-dir out  # the wheel and the sdist (PyPI takes both)
       - name: Into the draft release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" out/*.whl --clobber
+        run: gh release upload "$GITHUB_REF_NAME" out/* --clobber
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -124,3 +133,18 @@ jobs:
           sha256sum * > SHA256SUMS && cat SHA256SUMS
           gh release upload "$GITHUB_REF_NAME" SHA256SUMS --clobber
           gh release edit "$GITHUB_REF_NAME" --draft=false
+
+  pypi:
+    if: startsWith(github.ref, 'refs/tags/v') && vars.PYPI_PUBLISH == 'true'
+    needs: [publish]  # only what was released here, after every platform passed
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release download "$GITHUB_REF_NAME" --dir dist --pattern "*.whl" --pattern "*.tar.gz"
+      - uses: pypa/gh-action-pypi-publish@release/v1

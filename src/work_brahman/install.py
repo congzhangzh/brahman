@@ -88,8 +88,10 @@ domain = "{domain}"         # FEISHU_APP_ID's platform: "lark" (open.larksuite.c
 language = "{language}"     # "zh-CN" or "en": what the buddy says in the chats and on the page
 
 [claude]
-# Headless Claude Code cannot ask for approval: anything not listed is denied, and the
-# reply says which tool was blocked. It starts read-only; add what you trust.
+# Headless Claude Code cannot ask for approval: a tool this list (and your Claude Code
+# settings, ~/.claude/settings.json and the folder's .claude/) doesn't allow is denied, and
+# the reply says which. It starts read-only, but Read sees every file you can, and git's
+# --output can write one: chat only with repositories and folders you trust.
 permission_mode = "default"
 allowed_tools = [
   "Read", "Grep", "Glob", "Skill",

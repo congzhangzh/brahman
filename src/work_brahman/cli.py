@@ -38,6 +38,15 @@ def feishu_domain(cfg: dict):
 
 
 
+def _private(state: Path) -> None:
+    """The state folder holds the chats, the runs and terminal captures: the user's own (0700)."""
+    try:
+        state.mkdir(parents=True, exist_ok=True)
+        state.chmod(0o700)
+    except OSError:
+        pass
+
+
 def _status(config: str | None) -> int:
     """`buddy` on its own: what needs fixing, the page, the stories running; quick, offline."""
     path = install.config_path(config)
@@ -385,6 +394,7 @@ def main() -> int:
     text.set_language(cfg.get("buddy", {}).get("language"))
     jobs = cfg.get("jobs", {})
     state = Path(os.environ.get("XDG_STATE_HOME", "~/.local/state")).expanduser() / "work_brahman"
+    _private(state)
     linked = Linked(cfg.get("me", {}).get("chats", []))
     home = linked.chats[0] if linked.chats else ""  # where a job or duty without chat_id posts
     duties = {name: DUTIES[name]({"chat_id": home} | d, state)

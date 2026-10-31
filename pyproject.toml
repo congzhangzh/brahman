@@ -1,6 +1,6 @@
 [project]
 name = "work-brahman"
-version = "0.2.3"
+version = "0.2.4"
 description = "A small, extensible work buddy: Feishu/Lark chat + scheduled jobs driving Claude Code, with portable skills"
 authors = [
     { name = "Cong Zhang", email = "13283869+congzhangzh@users.noreply.github.com" }

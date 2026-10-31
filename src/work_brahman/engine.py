@@ -15,6 +15,14 @@ from . import procs
 
 # A headless turn has nobody at a speaker: `speak` (the owner's voice wrapper) stays silent.
 QUIET = {"SPEAK": "off"}
+# The chat apps' secrets stay with the buddy: the agent, its Bash commands, hooks and MCP
+# servers never see them (a prompt injection in a README could send its env away).
+SECRETS = ("TELEGRAM_BOT_TOKEN", "FEISHU_APP_ID", "FEISHU_APP_SECRET", "LARK_APP_ID",
+           "LARK_APP_SECRET", "BUDDY_ALLOWED_IDS", "BUDDY_ALLOWED_OPEN_IDS")
+
+
+def agent_env() -> dict:
+    return {**{k: v for k, v in os.environ.items() if k not in SECRETS}, **QUIET}
 
 
 @dataclass
@@ -69,7 +77,7 @@ class ClaudeCode:
             cmd += ["--append-system-prompt", self.append_system_prompt]
         try:
             # The prompt goes in on stdin so text starting with "-" is never read as a flag.
-            p = procs.run(cmd, input=prompt, cwd=cwd, timeout=self.timeout, env={**os.environ, **QUIET})  # STOP can kill it
+            p = procs.run(cmd, input=prompt, cwd=cwd, timeout=self.timeout, env=agent_env())  # STOP can kill it
         except subprocess.TimeoutExpired as e:
             partial = "".join(x.decode(errors="replace") if isinstance(x, bytes) else (x or "")
                               for x in (e.stderr, e.stdout))
@@ -126,7 +134,7 @@ class Codex:
             cmd += ["-m", self.model]
         cmd.append("-")  # the prompt on stdin, so text starting with "-" is never a flag
         try:
-            p = procs.run(cmd, input=prompt, cwd=cwd, timeout=self.timeout, env={**os.environ, **QUIET})  # STOP can kill it
+            p = procs.run(cmd, input=prompt, cwd=cwd, timeout=self.timeout, env=agent_env())  # STOP can kill it
         except subprocess.TimeoutExpired:
             return Reply(f"timed out after {self.timeout}s", session_id, False)
         said, usage, errors = [], {}, []

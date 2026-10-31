@@ -295,7 +295,10 @@ def say(state: Path, channels: list[Channel], number: int, text: str, *, where: 
 def new(state: Path, channels: list[Channel], chats: list[str], text: str, *, cwd: str,
         where: str, engine, kind: str = "claude-code") -> dict:
     """/long new: a session started from the phone, its first turn headless; a terminal can
-    take it over (`claude --resume <id>`, `codex resume <id>`)."""
+    take it over (`claude --resume <id>`, `codex resume <id>`). It may write in its folder, so
+    that is never your home folder or /: ValueError says so."""
+    if os.path.realpath(os.path.expanduser(cwd)) in (os.path.realpath(Path.home()), "/"):
+        raise ValueError(t("long.not_home", cwd=cwd))
     story = _create(state, channels, chats, title=text[:40], session_id="", cwd=cwd, engine=kind)
     _post(channels, story, t("long.made", where=app(where), cwd=cwd), title=t("long.title.new"))
     r = engine.run(text, cwd=cwd)
@@ -411,7 +414,7 @@ def _type(sty: str, window: str, text: str, enter: bool = True) -> bool:
     """Type text (and Enter) into a screen window, as if at its keyboard. One line: a newline
     would send it early. screen reads \\ ^ and $ in `stuff`, so they are escaped. A dialog's
     choice is one key, without Enter: the menu takes it at once."""
-    line = " ".join(text.split())
+    line = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", " ".join(text.split()))  # no Ctrl-C, ESC, ^D...
     for ch in ("\\", "^", "$"):
         line = line.replace(ch, "\\" + ch)
     stuff = lambda keys: subprocess.run(["screen", "-S", sty, "-p", window, "-X", "stuff", keys],

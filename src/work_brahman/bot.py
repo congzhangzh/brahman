@@ -251,8 +251,11 @@ class Bot:
                 self.long_prompts[(msg.chat, handle)] = (engine, folder)
 
     def long_new(self, ch: Channel, msg: Incoming, kind: str, folder: str, text: str) -> None:
-        longs.new(self.state, self.channels, self.linked.of(msg.chat), text, cwd=folder, where=ch.name,
-                  engine=self.long_engines[kind], kind=kind)
+        try:
+            longs.new(self.state, self.channels, self.linked.of(msg.chat), text, cwd=folder, where=ch.name,
+                      engine=self.long_engines[kind], kind=kind)
+        except ValueError as e:  # its home folder: a long story may write there
+            ch.reply(msg, str(e))
 
     def _short(self, ch: Channel, msg: Incoming, n: int, what: str) -> None:
         """■ Stop, 💬 Reply, or an option of a question (a<question>.<option>) under a short

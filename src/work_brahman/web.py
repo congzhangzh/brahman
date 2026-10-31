@@ -30,12 +30,13 @@ import json
 import logging
 import os
 import re
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import long_stories as longs, topics
+from . import long_stories as longs, portable, topics
 from .meter import meter
 from .channel import Incoming
 from .runs import SOPS, read as read_run
@@ -45,6 +46,16 @@ from .text import t
 log = logging.getLogger("buddy.web")
 
 HERE = Path(__file__).resolve().parent
+
+
+def _owner(client_port: int, server_port: int) -> bool:
+    """Is the connection from the user the buddy runs as? 127.0.0.1 is shared by every user
+    and container on the machine (and ssh -L), and the page acts as you; on Linux the kernel
+    says who owns the other end. Elsewhere (one user per desktop) the Host and X-Buddy
+    checks stand alone."""
+    if not sys.platform.startswith("linux"):
+        return True
+    return portable.peer_uid(client_port, server_port) == os.getuid()
 TOKENS = next((p for p in (HERE.parent.parent / "design" / "tokens.css",  # in the repository
                            HERE / "static" / "tokens.css") if p.exists()),  # in a wheel (the kit copies it)
               HERE / "static" / "tokens.css")
@@ -332,6 +343,9 @@ class Web:
                 if host not in ("127.0.0.1", "localhost", "[::1]"):
                     self._send(421, b"use http://127.0.0.1", "text/plain")
                     return False
+                if not _owner(self.client_address[1], self.server.server_port):
+                    self._send(403, b"only the user the buddy runs as", "text/plain")
+                    return False
                 return True
 
             def _json(self, obj):
@@ -341,11 +355,13 @@ class Web:
                 self.send_response(code)
                 self.send_header("Content-Type", f"{kind}; charset=utf-8")
                 self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Frame-Options", "DENY")  # no other page may frame it (clickjacking)
+                self.send_header("Content-Security-Policy", "frame-ancestors 'none'")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
 
-        server = ThreadingHTTPServer(("127.0.0.1", self.port), Handler)
+        server = self.server = ThreadingHTTPServer(("127.0.0.1", self.port), Handler)
         threading.Thread(target=server.serve_forever, name="web", daemon=True).start()
         log.info("web workbench on http://127.0.0.1:%d", self.port)
 

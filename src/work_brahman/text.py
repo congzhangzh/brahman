@@ -281,6 +281,10 @@ Anything else goes to Claude Code, in the same session as your last message in t
     "short.loop.rounds": ("a loop has 2 to {max} rounds: \"name ×3\" or \"name × a, b, c\": {spec}",
                           "循环有 2 到 {max} 轮：\"名字 ×3\" 或 \"名字 × a, b, c\"：{spec}"),
     "short.loop.no_round": ("{name} has no round {round} (it has {n})", "{name} 没有第 {round} 轮（共 {n} 轮）"),
+    "long.not_home": ("A long story may edit files in its folder, so not {cwd} (your home or /): "
+                      "name a project folder, e.g. /long new ~/src/app <task>",
+                      "长篇故事会改它目录里的文件，所以不能用 {cwd}（你的主目录或 /）："
+                      "请指定一个项目目录，例如 /long new ~/src/app <任务>"),
     "short.loop.try": ("try {k}", "第 {k} 次"),
     "short.loop.earlier": ("… {n} earlier tries", "… 之前还有 {n} 次"),
     "short.loop.tries": ("{name} has had {max} tries: more is another short story",

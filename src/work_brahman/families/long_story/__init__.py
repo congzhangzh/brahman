@@ -64,8 +64,11 @@ class LongStory:
             return t("long.usage")
         if word == "new" and rest.strip() and self.engines and self.linked:
             kind, cwd, task = self._parse(rest.strip())
-            s = longs.new(self.state_dir, self.channels, self.linked.chats, task, cwd=cwd, where="chat",
-                          engine=self.engines[kind], kind=kind)
+            try:
+                s = longs.new(self.state_dir, self.channels, self.linked.chats, task, cwd=cwd, where="chat",
+                              engine=self.engines[kind], kind=kind)
+            except ValueError as e:
+                return str(e)
             return longs.label(s)
         if word == "new" and self.linked and self.channels:
             asks.create(self.state_dir, self.channels, self.linked.chats, t("long.pick_engine"),
