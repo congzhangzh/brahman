@@ -8,7 +8,7 @@
 # is published only when every job passed. A failed run leaves a draft nobody downloads.
 #
 # PyPI (as freerdp-tk does it): trusted publishing, no token. Off until the repository
-# variable PYPI_PUBLISH is "true" and pypi.org trusts this workflow (project work-brahman,
+# variable PYPI_PUBLISH is "true" and pypi.org trusts this workflow (project brahman-buddy,
 # workflow release.yml, environment pypi): a version on PyPI is public and can't be re-uploaded.
 name: release
 
@@ -33,7 +33,7 @@ jobs:
         run: |
           gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1 ||
             gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
-              --title "work-brahman ${GITHUB_REF_NAME#v}" --notes-file .github/release-notes.md
+              --title "brahman-buddy ${GITHUB_REF_NAME#v}" --notes-file .github/release-notes.md
 
   executable:
     needs: [draft]

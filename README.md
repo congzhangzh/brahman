@@ -45,7 +45,7 @@ buddy runs in Python's UTF-8 mode there (it starts itself again with `-X utf8`),
 pipes are UTF-8 as on Linux.
 
 ```bash
-uv tool install ./work_brahman-<version>-py3-none-any.whl   # the release you were given
+uv tool install brahman-buddy             # from PyPI (or ./brahman_buddy-<version>-py3-none-any.whl)
 buddy init                  # language, workspace, the token from @BotFather (/newbot)
 buddy service install --enable
 # write to your bot: it answers "Not paired" with a line to run, e.g.

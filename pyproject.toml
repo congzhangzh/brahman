@@ -1,9 +1,9 @@
 [project]
-name = "work-brahman"
-version = "0.2.5"
+name = "brahman-buddy"
+version = "0.2.6"
 license = "MIT"
 license-files = ["LICENSE"]
-description = "A small, extensible work buddy: Feishu/Lark chat + scheduled jobs driving Claude Code, with portable skills"
+description = "A personal work buddy: Telegram, Lark and Feishu chats driving Claude Code, with scheduled jobs, short and long stories, and portable skills"
 authors = [
     { name = "Cong Zhang", email = "13283869+congzhangzh@users.noreply.github.com" }
 ]
@@ -14,6 +14,9 @@ dependencies = [
 
 [project.scripts]
 buddy = "work_brahman.cli:main"
+
+[tool.uv.build-backend]
+module-name = "work_brahman"  # the code keeps its name; the package on PyPI is brahman-buddy
 
 [build-system]
 requires = ["uv_build>=0.11.6,<0.12.0"]

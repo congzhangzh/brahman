@@ -1,5 +1,5 @@
 """Setting the buddy up on a new machine, for someone who installed it as an app
-(`uv tool install work-brahman`) rather than working in its repository:
+(`uv tool install brahman-buddy`) rather than working in its repository:
 
     buddy init                 ask for the language, the chats (Telegram, Lark, Feishu), the workspace
     buddy allow tg:123456789   the id the bot told you when it refused you: you are paired

@@ -71,7 +71,12 @@ def _installed() -> str:
     """An installed buddy (a wheel) has no git: its package version stands for the code."""
     try:
         from importlib.metadata import version
-        return version("work-brahman")
+        for name in ("brahman-buddy", "work-brahman"):  # its name on PyPI; the one before 0.2.6
+            try:
+                return version(name)
+            except Exception:  # noqa: BLE001
+                continue
+        return "n/a"
     except Exception:  # noqa: BLE001 - no version is no reason to fail
         return "n/a"
 
