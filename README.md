@@ -278,3 +278,7 @@ a job prompt. See `skills/pr-review/` for an example.
 - Approve/deny buttons on cards for tools outside the allow-list (needs card callbacks)
 - One Feishu topic per session, `/sessions` overview
 - Other engines (Codex) behind the same `Engine` interface; more channels (Slack, Matrix)
+
+## License
+
+MIT: see LICENSE. Provided "as is", without warranty of any kind.
