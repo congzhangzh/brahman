@@ -63,7 +63,7 @@ jobs:
           bin=.venv-build/bin; [ "$RUNNER_OS" = Windows ] && bin=.venv-build/Scripts
           uv pip install --python .venv-build . pyinstaller
           printf 'from work_brahman.cli import main\nraise SystemExit(main())\n' > buddy_entry.py
-          "$bin/pyinstaller" --onefile --name buddy --collect-data work_brahman \
+          "$bin/pyinstaller" --onefile --name buddy --collect-data work_brahman --copy-metadata brahman-buddy \
             --python-option "X utf8" --noconfirm --distpath dist buddy_entry.py
       - name: Test, as a teammate would
         shell: bash
@@ -73,6 +73,9 @@ jobs:
           home="$RUNNER_TEMP/home"; mkdir -p "$home"
           export HOME="$home" USERPROFILE="$home" XDG_CONFIG_HOME="$home/.config" XDG_STATE_HOME="$home/.state"
           cfg="$home/.config/work_brahman/buddy.toml"
+          # the version comes from the package metadata (importlib.metadata): PyInstaller ships it
+          # only with --copy-metadata; without it the executable says "buddy n/a" (20261108.3)
+          { "$b" || true; } | grep -q "^buddy ${GITHUB_REF_NAME#v}"
           "$b" --help | grep -q "start here"
           "$b" init --yes --telegram-token 0:x --language en | grep -q wrote
           { "$b" init --yes --telegram-token 0:x 2>&1 || true; } | grep -q "already set up"  # refuses, exit 2
