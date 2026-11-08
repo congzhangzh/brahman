@@ -23,6 +23,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import lark_oapi as lark
+from lark_oapi.core.log import handler as _sdk_stdout, logger as _sdk_log
+
+# The SDK writes its log to stdout as well as passing it on: a command's own output (the number
+# `buddy short start` prints) came after a quota error. Ours goes to stderr, once.
+_sdk_log.removeHandler(_sdk_stdout)
 
 from . import short_stories as shorts
 from .runs import read as read_run

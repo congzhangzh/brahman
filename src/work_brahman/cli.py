@@ -1,7 +1,8 @@
 """buddy init | buddy allow ID | buddy config | buddy doctor | buddy service install
 | buddy serve | buddy job NAME | buddy jobs | buddy duty NAME | buddy ask QUESTION KEY=LABEL…
 | buddy bitable | buddy stories | buddy family NAME
-| buddy short start|mark|plan|note|ask|wait|check|done|list | buddy long hook|list
+| buddy short start|attach|mark|plan|note|ask|wait|check|done|list | buddy long hook|list
+| buddy team new|join|handover|retire|leave|show|check|list
 
 Secrets come from the environment only: FEISHU_APP_ID + FEISHU_APP_SECRET for the app on
 buddy.toml's `domain`, LARK_APP_ID + LARK_APP_SECRET for a Lark app beside a Feishu one,
@@ -19,7 +20,7 @@ import time
 import tomllib
 from pathlib import Path
 
-from . import asks, configure, install, long_stories as longs, portable, short_stories as shorts, text, topics
+from . import asks, configure, install, long_live, long_stories as longs, portable, procs, short_stories as shorts, teams, text, topics
 from .bitable import Bitable
 from .bot import Bot, Sessions
 from .channel import Linked, post_all
@@ -31,6 +32,8 @@ from .runs import VERSION, from_env, tail
 from .scheduler import Scheduler
 from .telegram import Telegram
 from .web import CHAT, Web, WebChat, WebRelay
+
+log = logging.getLogger("buddy")
 
 
 def feishu_domain(cfg: dict):
@@ -76,13 +79,27 @@ def _status(config: str | None) -> int:
     return 1 if any(r[0] is False for r in rows) else 0
 
 
+def _pairs(items: list[str] | None) -> dict:
+    """--out sha=95a300f --out run=41368640012 → {"sha": ..., "run": ...}; a bare value is a "ref"."""
+    out = {}
+    for x in items or []:
+        k, eq, v = x.partition("=")
+        out[k.strip() if eq else "ref"] = (v if eq else k).strip()
+    return out
+
+
 def _short(args, state: Path, channels: list, chats: list[str]) -> int:
     """buddy short start|ask|mark|plan|note|done: change the story, print its title and news."""
     a = args.action
     if a == "start":
-        t = shorts.start(state, channels, chats, args.title, args.mark, who=args.who, note=args.note)
+        t = shorts.start(state, channels, chats, args.title, args.mark, who=args.who, note=args.note,
+                         parent=args.parent or os.environ.get("BUDDY_STORY", ""), by=shorts.executor(),
+                         team=", ".join(teams.of_session(state, _session_name())))
+        if w := _window():
+            shorts.hold(state, t["id"], w)
+            shorts.retitle(state, w)
         print(t["id"])
-        return 0 if t["copies"] else 1
+        return 0 if t["copies"] or not channels else 1  # behind the gate the buddy draws it
     if a == "ask":
         if not (args.question or args.fork):
             print("ask needs a question, or --fork NAME", file=sys.stderr)
@@ -98,7 +115,8 @@ def _short(args, state: Path, channels: list, chats: list[str]) -> int:
             return _wait(state, args.number, q["id"], args.timeout)
         return _news(state, args.number)
     t = (shorts.mark(state, channels, args.number, args.name, status=args.status, note=args.note,
-                     took=args.took, round=args.round)
+                     took=args.took, round=args.round, by=shorts.executor(),
+                     inputs=_pairs(args.inputs), outputs=_pairs(args.outputs))
          if a == "mark" else
          shorts.plan(state, channels, args.number, args.marks) if a == "plan" else
          shorts.note(state, channels, args.number, args.text) if a == "note" else
@@ -106,8 +124,43 @@ def _short(args, state: Path, channels: list, chats: list[str]) -> int:
     if t is None:
         print(f"no short story #{args.number}", file=sys.stderr)
         return 2
+    if a == "done" and t.get("window") and t["status"] != "running":  # its window drops it from its title
+        shorts.retitle(state, t["window"], free=args.free)
     print(shorts.title(t))
     return _news(state, args.number) if a != "done" else 0
+
+def _session_name() -> str:
+    """The name of the Claude Code session this command runs under (claude --name), or ""."""
+    pid = _claude_pid()
+    p = teams._claude_home() / "sessions" / f"{pid}.json" if pid else None
+    try:
+        return json.loads(p.read_text()).get("name", "") if p else ""
+    except (OSError, ValueError):
+        return ""
+
+
+def _team(args, state: Path, channels: list, chats: list[str], opts: dict) -> int:
+    """buddy team new|join|handover|retire|leave: record it, redraw the card(s)."""
+    a = args.action
+    if a == "new":
+        tm = teams.new(state, channels, chats, args.team, args.rm[0], args.rm[1], area=args.area,
+                       project=args.project, book=args.book, opts=opts)
+        print(f"team {tm['team']}: RM {args.rm[1]} ({args.rm[0]})")
+    elif a == "join":
+        teams.join(state, channels, args.team, args.role, args.name or "", kind=args.kind, area=args.area,
+                   project=args.project, book=args.book, opts=opts)
+        print(f"team {args.team}: {args.name or args.role} joined as {args.kind}")
+    elif a == "handover":
+        out = teams.handover(state, channels, args.role, args.old, args.new, note=args.note, opts=opts)
+        print(f"{args.role}: {args.old} → {args.new} on {', '.join(x['team'] for x in out) or 'no team'}")
+    elif a == "retire":
+        out = teams.retire(state, channels, args.role, args.name, note=args.note, opts=opts)
+        print(f"{args.role}: {args.name} retired; off {', '.join(x['team'] for x in out) or 'no team'}")
+    elif a == "leave":
+        teams.leave(state, channels, args.team, args.role, opts=opts)
+        print(f"team {args.team}: {args.role} left")
+    return 0
+
 
 def _news(state: Path, number: int, seen: set | None = None) -> int:
     """Tell the executor what the owner said on the card: each reply and each answer once,
@@ -122,9 +175,33 @@ def _news(state: Path, number: int, seen: set | None = None) -> int:
             seen.add(q["id"])
     if stop:
         print(f"■ stop asked from {stop['where']} at {stop['at'][11:16]}: stop the work, then "
-              f"`buddy short done {number} --failed --note \"stopped by the owner\"`")
+              f"`buddy-short done {number} --failed --note \"stopped by the owner\"`")
         return 3
     return 0
+
+
+def _window() -> dict | None:
+    """Where the agent session this command runs under can be woken, or None. Claude Code: its
+    pys or screen window, none for a headless turn or behind the gate; `started` tells that
+    process from a later one with the same pid, and `session` picks the pys server. Codex: its
+    thread ($CODEX_THREAD_ID), which `codex queue` reaches (long_stories._wake_codex)."""
+    term, pid = _terminal(), _claude_pid()
+    if not pid and (thread := os.environ.get("CODEX_THREAD_ID")):  # Codex: reached by its thread, not a window
+        return {"engine": "codex", "thread": thread, "tag": shorts.executor()["tag"]}
+    p = portable.process(pid) if pid and term["mux"] else None
+    if not p or p["tty"].strip("?") == "":
+        return None
+    return {**term, "session": os.environ.get("PYS_SESSION", "") if term["mux"] == "pys" else "",
+            "pid": pid, "started": p["started"], "tag": shorts.executor()["tag"]}
+
+
+def _terminal() -> dict:
+    """The window this hook's session runs in: pys ($PYS_WINDOW) first, the owner's own
+    multiplexer, then GNU screen ($STY, $WINDOW), else none."""
+    if os.environ.get("PYS_WINDOW"):
+        return {"mux": "pys", "sty": "", "window": os.environ["PYS_WINDOW"]}
+    sty = os.environ.get("STY", "")
+    return {"mux": "screen" if sty else "", "sty": sty, "window": os.environ.get("WINDOW", "") if sty else ""}
 
 
 def _claude_pid() -> int | None:
@@ -153,12 +230,13 @@ def run_long_hook(state: Path, channels: list, chats: list[str], engine: str = "
     sid, event = e.get("session_id", ""), e.get("hook_event_name", "")
     if engine == "codex":
         return _codex_hook(state, channels, chats, e, sid, event)
+    if not os.environ.get("BUDDY_LONG") and longs.by_session(state, sid) is None:
+        return 0  # a session with no story (scripts/buddy-long lets a story's session through by its marker)
     if event == "SessionStart":
         title = os.environ.get("BUDDY_LONG", "")
         longs.attach(state, channels, chats, session_id=sid, cwd=e.get("cwd", ""),
                      transcript=e.get("transcript_path", ""), title="" if title == "1" else title,
-                     pid=_claude_pid(), sty=os.environ.get("STY", ""), window=os.environ.get("WINDOW", ""),
-                     source=e.get("source", "startup"))
+                     pid=_claude_pid(), source=e.get("source", "startup"), **_terminal())
     elif event == "UserPromptSubmit":
         longs.busy(state, sid, e.get("prompt", ""))
     elif event == "Stop":
@@ -334,6 +412,8 @@ def main() -> int:
                    "an open loop, a retry: \"rerun ×?\" (one line per try, up to 20)")
     t.add_argument("--who", default="", help="who does the work, e.g. the session's name")
     t.add_argument("--note", default="")
+    t.add_argument("--parent", default="", help="a child story of that step: \"12:build\", or \"12:build:mac\" "
+                   "for a loop's round (default: $BUDDY_STORY); one level, one child per step")
     t = tsub.add_parser("mark", help="a mark happened (added if it was not planned)")
     t.add_argument("number", type=int)
     t.add_argument("name")
@@ -341,6 +421,10 @@ def main() -> int:
     t.add_argument("--note", default="")
     t.add_argument("--took", help="for a fork: the option it went down")
     t.add_argument("--round", type=int, help="for a loop: the round, from 1 (default: the current one)")
+    t.add_argument("--in", dest="inputs", action="append", metavar="KEY=VALUE",
+                   help="what the step used: a SHA, a run id, an artefact (repeat it)")
+    t.add_argument("--out", dest="outputs", action="append", metavar="KEY=VALUE",
+                   help="what the step made: a SHA, a run id, a release (repeat it)")
     t = tsub.add_parser("plan", help="more marks expected")
     t.add_argument("number", type=int)
     t.add_argument("marks", nargs="+")
@@ -363,10 +447,51 @@ def main() -> int:
     t.add_argument("number", type=int)
     t.add_argument("--failed", action="store_true")
     t.add_argument("--note", default="")
+    t.add_argument("--free", action="store_true", help="the window's title says `free · <session>` "
+                                                      "when no story of it is left")
     t = tsub.add_parser("check", help="stop asked? replies not read yet? (exit 3: stop); needs no chat")
+    t.add_argument("number", type=int)
+    t = tsub.add_parser("attach", help="run inside a session: type a note there when a reply comes "
+                                       "(start does it for a new story); needs no chat")
     t.add_argument("number", type=int)
     t = tsub.add_parser("list", help="the short stories still running (--all: every one)")
     t.add_argument("--all", action="store_true")
+    team = sub.add_parser("team", help="a team: one live card per kit, a row per long-lived member; "
+                                       "the RM runs it (specs/team.md)")
+    msub = team.add_subparsers(dest="action", required=True)
+    t = msub.add_parser("new", help="a team, its RM's role and generation, its card")
+    t.add_argument("team")
+    t.add_argument("--rm", nargs=2, required=True, metavar=("ROLE", "SESSION"),
+                   help="the RM's role and the session carrying it (a role that exists: its live one)")
+    for name, helptext in (("join", "a role joins the team: new, with its first generation, or one "
+                                    "another team has already"),):
+        t = msub.add_parser(name, help=helptext)
+        t.add_argument("team")
+        t.add_argument("name", nargs="?", default="", help="the session carrying it (claude --name)")
+        t.add_argument("--role", required=True)
+        t.add_argument("--kind", default="member", choices=teams.KINDS)
+    for t in (msub.choices["new"], msub.choices["join"]):
+        t.add_argument("--area", default="", help="what it owns, in a few words")
+        t.add_argument("--project", default="", help="its repository (its book is in that project's memory)")
+        t.add_argument("--book", default="", help="the book's file name (default role-<role>.md)")
+    t = msub.add_parser("handover", help="the old generation retires, the new one carries the role "
+                                         "(an RM's or a PO's too), on every team naming it")
+    t.add_argument("role")
+    t.add_argument("old")
+    t.add_argument("new")
+    t.add_argument("--note", default="")
+    t = msub.add_parser("retire", help="the role ends, no successor: off every team (not an RM's role)")
+    t.add_argument("role")
+    t.add_argument("name")
+    t.add_argument("--note", default="")
+    t = msub.add_parser("leave", help="a role off this team's roster; it goes on elsewhere")
+    t.add_argument("team")
+    t.add_argument("role")
+    t = msub.add_parser("show", help="the card's text, looked at now (exact ctx); needs no chat")
+    t.add_argument("team")
+    t = msub.add_parser("check", help="the owner's replies on the card, each once; needs no chat")
+    t.add_argument("team")
+    msub.add_parser("list", help="every team, one line each")
     long = sub.add_parser("long", help="a long story: one agent session mirrored to a thread in your chats")
     lsub = long.add_subparsers(dest="action", required=True)
     t = lsub.add_parser("hook", help="a hook event on stdin (scripts/buddy-long hook)")
@@ -375,6 +500,14 @@ def main() -> int:
     t.add_argument("--pid", type=int, required=True)
     t.add_argument("--title", default="")
     lsub.add_parser("list", help="every long story")
+    for name, helptext in (("status", "who holds a long story's session, and what applies now"),
+                           ("handover", "the buddy lets go of the session, kept for your terminal"),
+                           ("takeback", "the buddy holds the session again (a live process)"),
+                           ("take", "hand over and print the folder and session id (scripts/buddy-long take)")):
+        t = lsub.add_parser(name, help=helptext)
+        t.add_argument("number", type=int)
+    t = sub.add_parser("procs", help="the buddy's children under one umbrella (buddy.slice): list them, or kill them all")
+    t.add_argument("action", nargs="?", choices=["list", "kill"], default="list")
     topic = sub.add_parser("topic", help="topics: conversations beside the main one")
     tosub = topic.add_subparsers(dest="action", required=True)
     t = tosub.add_parser("close", help="close topics: the web drops their tabs, Telegram closes "
@@ -413,12 +546,48 @@ def main() -> int:
             return 2
         print(families[args.name].scheduled())
         return 0
+    if args.cmd == "procs":  # the umbrella (procs.py): needs no channel
+        if not procs.configure(state):
+            print("no systemd user manager here: the children run as process groups of `buddy serve`")
+            return 1
+        if args.action == "kill":
+            n = procs.kill_all()
+            print(f"stopped {procs.SLICE}: {n} running")
+            return 0
+        rows = procs.listing()
+        for m in rows:
+            tag = m.get("tag") or {}
+            what = (f"long #{tag['story']}" if "story" in tag else tag.get("key") or tag.get("chat") or "")
+            print(f"{'▶ running' if m['running'] else '  ended  '}  {m['unit']:<28} {m['kind']:<5} "
+                  f"{m['started']}  rc={m.get('rc', '-')}  {what}")
+        print(f"{sum(m['running'] for m in rows)} running, {len(rows)} on record; "
+              f"`buddy procs kill` stops them all ({procs.SLICE})")
+        return 0
     if args.cmd == "long" and args.action == "list":  # read-only, needs no channel
         print(longs.board(state))
+        return 0
+    if args.cmd == "long" and args.action == "status":  # read-only, needs no channel
+        print(long_live.status(state, args.number))
         return 0
     if args.cmd == "long" and args.action == "register":  # before codex starts: no chat calls
         longs.register(state, pid=args.pid, cwd=os.getcwd(), title=args.title or os.path.basename(os.getcwd()),
                        sty=os.environ.get("STY", ""), window=os.environ.get("WINDOW", ""))
+        return 0
+    team_opts = teams.settings(cfg)
+    if args.cmd == "team" and args.action in ("show", "check", "list"):  # the team files only: no chat calls
+        if args.action == "list":
+            print(teams.board(state))
+            return 0
+        if args.action == "show":
+            out = teams.show(state, args.team, team_opts)
+            print(out if out else f"no team {args.team!r}", file=sys.stdout if out else sys.stderr)
+            return 0 if out else 2
+        fresh = teams.news(state, args.team)
+        if fresh is None:
+            print(f"no team {args.team!r}", file=sys.stderr)
+            return 2
+        for r in fresh:
+            print(f"💬 reply from the owner ({r['where']}, {r['at'][11:16]}): {r['text']}")
         return 0
     if args.cmd == "short" and args.action == "list":  # read-only, needs no channel
         print(shorts.board(state, everything=args.all))
@@ -427,6 +596,18 @@ def main() -> int:
         if shorts.load(state, args.number) is None:
             print(f"no short story #{args.number}", file=sys.stderr)
             return 2
+        return _news(state, args.number)
+    if args.cmd == "short" and args.action == "attach":  # the story file only: no chat calls
+        if shorts.load(state, args.number) is None:
+            print(f"no short story #{args.number}", file=sys.stderr)
+            return 2
+        if not (w := _window()):
+            print(f"no Claude Code session in a pys or screen window here: short story #{args.number} "
+                  "keeps to `check`", file=sys.stderr)
+            return 2
+        shorts.hold(state, args.number, w)
+        shorts.retitle(state, w)
+        print(f"short story #{args.number}: {w['mux']} window {w['window']}, claude {w['pid']}")
         return _news(state, args.number)
     if args.cmd == "short" and args.action == "wait":  # blocks on a file: no chat calls
         if shorts.load(state, args.number) is None:
@@ -452,6 +633,14 @@ def main() -> int:
                                "lark", prefix="lark:"))
     if os.environ.get("TELEGRAM_BOT_TOKEN"):
         channels.append(Telegram(os.environ["TELEGRAM_BOT_TOKEN"], state))
+    if not channels and args.cmd == "short" and os.environ.get("BUDDY_GATE"):
+        # Behind the gate (a session in its sandbox): no chat tokens here, on purpose. The story
+        # file is written all the same, and `buddy serve` draws its card (shorts.redraw).
+        try:
+            return _short(args, state, [], linked.of(home))
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 2
     if not channels:
         print("no channel: set TELEGRAM_BOT_TOKEN, LARK_APP_ID/LARK_APP_SECRET or "
               "FEISHU_APP_ID/FEISHU_APP_SECRET", file=sys.stderr)
@@ -484,14 +673,27 @@ def main() -> int:
             channels.append(chat)
             linked.chats.append(CHAT)
             allowed.add(CHAT)  # the person at this machine; the server only listens on 127.0.0.1
+        # Every child under one umbrella (procs.py, specs/umbrella.md): a restart kills none
+        if procs.configure(state):
+            log.info("children run as units in %s; %d old run folders dropped", procs.SLICE, procs.clean())
         scheduler = Scheduler(cfg, str(Path(args.config).resolve()), state)
         scheduler.start()
         families["short-story"].channels = channels  # /short N <text> changes the cards
-        long = long_engines(cfg)  # a long story may write ([long]); the chat and duties stay as [claude]
-        families["long-story"].connect(channels, long, linked, workspace)  # /long new
+        families["team"].channels = channels  # /team NAME <text>, and the looker's redraws
+        # A long story may write ([long]); the chat and duties stay as [claude]. Its sessions run
+        # behind the gate, in its sandbox, with the buddy's own .env hidden from them.
+        long = long_engines(cfg, env_file=Path(args.config).resolve().parent / ".env")
+        shorts.start_drawer(state, channels)  # cards of stories marked from inside the sandbox
+        teams.start_looker(state, channels, team_opts)  # team cards on a change; the RM woken on a reply
+        long_live.start_pump(state, channels, long)  # the buddy's live sessions: their events, their hand-overs
+        families["long-story"].connect(channels, long, linked, workspace)  # /newlong
         bot = Bot(channels, engine, Sessions(state / "sessions.json"), workspace, allowed, commands,
                   state, linked, scheduler)
         bot.long_engines = long
+        bot.team_opts = team_opts
+        adopted = procs.adopt(bot.adopted)  # what the last instance left running: delivered when it ends
+        if adopted:
+            log.info("adopted %d runs from the last instance: %s", len(adopted), ", ".join(adopted))
         if port:  # the workbench, on 127.0.0.1 only
             Web(int(port), state, bot, scheduler, cfg, home, chat, families).start()
         if "bitable" in cfg and os.environ.get("FEISHU_APP_ID"):  # the Lark Base workbench
@@ -513,12 +715,35 @@ def main() -> int:
         print(f"{b.sync()} rows sent; {b.url()}")
         return 0
 
+    if args.cmd == "long" and args.action in ("handover", "takeback", "take"):
+        try:
+            if args.action == "handover":
+                print(long_live.handover(state, channels, args.number) or "ok")
+            elif args.action == "takeback":
+                story = longs.load(state, args.number) or {}
+                engines = long_engines(cfg, env_file=Path(args.config).resolve().parent / ".env")
+                print(long_live.takeback(state, channels, args.number,
+                                         longs.pick(engines, "claude-code", story.get("mode"))) or "ok")
+            else:
+                cwd, sid = long_live.take(state, channels, args.number)
+                print(f"{cwd}\n{sid}")
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 2
+        return 0
     if args.cmd == "long":  # the hook: post to the story's threads, never fail the session
         try:
             return run_long_hook(state, channels, linked.of(home), args.engine)
         except Exception:
             logging.exception("long story hook failed")
             return 0
+
+    if args.cmd == "team":
+        try:
+            return _team(args, state, channels, linked.of(home), team_opts)
+        except ValueError as e:  # a rule broken: a second RM, a name reused, no such role
+            print(e, file=sys.stderr)
+            return 2
 
     if args.cmd == "short":
         try:

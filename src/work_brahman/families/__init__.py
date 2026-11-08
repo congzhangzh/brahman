@@ -13,6 +13,7 @@ report on the 1st, for example) to chat_id or to every chat of [me].
 from .long_story import LongStory
 from .monthly_report import MonthlyReport
 from .short_story import ShortStory
+from .team import Team
 from .upstream_mr import UpstreamMR
 
-FAMILIES = {f.name: f for f in (UpstreamMR, MonthlyReport, ShortStory, LongStory)}
+FAMILIES = {f.name: f for f in (UpstreamMR, MonthlyReport, ShortStory, LongStory, Team)}

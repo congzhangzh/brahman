@@ -14,6 +14,7 @@ existing one is kept as a dated backup with --force, or the command refuses and 
 it is.
 """
 
+import json
 import os
 import re
 import shutil
@@ -315,6 +316,29 @@ def _app_rows(row, label: str, app_id: str, secret: str, domain: str, cfg: dict)
             + (" (an admin may have to approve it)" if scope in scopes else ""))
 
 
+def codex_server() -> tuple:
+    """Codex's own server (its app-server daemon): Codex starts it when first needed and keeps it
+    itself, outside the buddy; it updates itself every hour, and an update restarts it, which may
+    cut a running turn. The buddy needs it to wake a Codex short story (codexd): down, a reply
+    waits for the session's own `check`, silently. So doctor says how it is."""
+    from . import codexd
+    try:
+        p = subprocess.run(["codex", "app-server", "daemon", "version"], capture_output=True, text=True, timeout=15)
+        v = json.loads(p.stdout or "{}")
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        v = {}
+    server, cli = v.get("appServerVersion"), v.get("cliVersion")
+    start = "codex app-server daemon start (or just run codex)"
+    if v.get("status") != "running" or not codexd.alive():
+        return (None, "Codex server not running: Codex short stories are not woken, replies wait for check",
+                start)
+    if server and cli and server != cli:
+        return (None, f"Codex server {server}, but codex is {cli}",
+                "codex app-server daemon restart (it may cut a running Codex turn)")
+    return (True, f"Codex server {server or '?'}: Codex short stories are woken "
+                  "(Codex runs it, and an hourly update may restart it)", "")
+
+
 def line(ok, what: str, how: str = "") -> str:
     return f"{'✅' if ok else '❌' if ok is False else '⚠️ '} {what}" + (f"\n     → {how}" if how else "")
 
@@ -376,6 +400,8 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
         found = shutil.which(tool)
         row(True if found else (False if needed else None),
             f"{tool}: {part}" + ("" if found else " (off)"), "" if found else how)
+        if tool == "codex" and found:
+            row(*codex_server())
     unit = service_file(name)
     if WINDOWS or MACOS or sys.platform.startswith("linux"):
         row(True if unit.exists() else None, f"service {unit}", "" if unit.exists() else "buddy service install")

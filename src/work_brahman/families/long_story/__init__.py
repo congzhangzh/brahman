@@ -20,12 +20,12 @@ class LongStory:
         self.channels, self.engines, self.linked, self.workspace = [], {}, None, "~"
 
     def connect(self, channels: list, engines: dict, linked, workspace: str) -> None:
-        """`buddy serve` hands over what /long new needs: the chats and the engines, by kind
+        """`buddy serve` hands over what /newlong needs: the chats and the engines, by kind
         (engine.long_engines: [long] in buddy.toml says how much they may do)."""
         self.channels, self.engines, self.linked, self.workspace = channels, engines, linked, workspace
 
     def commands(self) -> dict:
-        return {"/long": (t("long.help"), self.markdown)}
+        return {"/long": (t("long.help"), self.markdown), "/newlong": (t("long.help_new"), self.new)}
 
     def stories(self) -> list[dict]:
         return longs.all_stories(self.state_dir)
@@ -57,27 +57,63 @@ class LongStory:
         return out
 
     def markdown(self, arg: str = "") -> str:
-        """/long: the board, nothing more. /long new: a card to start one (engine, folder, then
-        the task). /long new [claude|codex] [folder] <task>: start one in a line."""
-        word, _, rest = arg.strip().partition(" ")
-        if word == "help":
+        """/long: the board, nothing more; /long help: how. Starting one is /newlong's job
+        (Telegram links a command only up to its first space, so a tap on "/long new" sent
+        "/long": the start got a word of its own, and `/long new` is gone)."""
+        if arg.strip().partition(" ")[0] == "help":
             return t("long.usage")
-        if word == "new" and rest.strip() and self.engines and self.linked:
-            kind, cwd, task = self._parse(rest.strip())
+        if not longs.all_stories(self.state_dir):
+            return longs.board(self.state_dir)  # long.none says how to start one already
+        return longs.board(self.state_dir) + "\n\n" + t("long.start_hint")
+
+    def new(self, arg: str = "") -> str:
+        """/newlong: a card to start one (engine, folder, then the task).
+        /newlong [--open] [claude|codex] [folder] [--short 12:test] <task>: start one in a line."""
+        rest = arg.strip()
+        if rest and self.engines and self.linked:
+            opened, short, rest = self._flags(rest)
+            try:
+                kind, cwd, task = self._parse(rest)
+            except ValueError as e:  # a folder that isn't there
+                return str(e)
+            opened2, short2, task = self._flags(task)
+            mode, short = "open" if opened or opened2 else "sandbox", short or short2
+            engine = longs.pick(self.engines, kind, mode)
+            if engine is None:
+                return t("gate.open_off")
             try:
                 s = longs.new(self.state_dir, self.channels, self.linked.chats, task, cwd=cwd, where="chat",
-                              engine=self.engines[kind], kind=kind)
+                              engine=engine, kind=kind, short=short, mode=mode)
             except ValueError as e:
                 return str(e)
             return longs.label(s)
-        if word == "new" and self.linked and self.channels:
+        if self.linked and self.channels:
             asks.create(self.state_dir, self.channels, self.linked.chats, t("long.pick_engine"),
                         title=t("long.title.start"), options=[["claude", "Claude"], ["codex", "Codex"], ["cancel", t("btn.cancel")]],
                         then={"claude": ["long", "engine", "claude-code"], "codex": ["long", "engine", "codex"]})
             return t("long.carded")
-        if not longs.all_stories(self.state_dir):
-            return longs.board(self.state_dir)  # long.none says how to start one already
-        return longs.board(self.state_dir) + "\n\n" + t("long.start_hint")
+        return longs.board(self.state_dir)
+
+    @staticmethod
+    def _short(text: str) -> tuple[str, str]:
+        """--short 12:test before the task: the short story's step the session works for."""
+        _, short, task = LongStory._flags(text)
+        return short, task
+
+    @staticmethod
+    def _flags(text: str) -> tuple[bool, str, str]:
+        """The flags before the task, in any order: --open (the owner's 🔓: his own environment
+        and files) and --short 12:test (a short story's step). Returns (open, short, the rest)."""
+        opened, short = False, ""
+        while True:
+            word, _, rest = text.partition(" ")
+            if word == "--open":
+                opened, text = True, rest.strip()
+            elif word == "--short":
+                short, _, text = rest.strip().partition(" ")
+                text = text.strip()
+            else:
+                return opened, short, text
 
     def _parse(self, text: str) -> tuple[str, str, str]:
         """[claude|codex] [folder] task: the engine and folder if given, else Claude and the workspace."""
@@ -86,6 +122,10 @@ class LongStory:
         if word.lower() in ("claude", "codex") and rest.strip():
             kind, text = ("codex" if word.lower() == "codex" else "claude-code"), rest.strip()
             word, _, rest = text.partition(" ")
-        if word.startswith(("~", "/")) and os.path.isdir(os.path.expanduser(word)) and rest.strip():
-            cwd, text = os.path.realpath(os.path.expanduser(word)), rest.strip()
+        if word.startswith(("~", "/")) and rest.strip():
+            if os.path.isdir(os.path.expanduser(word)):
+                cwd, text = os.path.realpath(os.path.expanduser(word)), rest.strip()
+            elif word.startswith("~") or word.count("/") >= 2:  # a path with a typo: never run elsewhere
+                raise ValueError(t("long.no_such_folder", folder=word))
+            # else a one-slash word is the task's own (an engine command like /review)
         return kind, cwd, text

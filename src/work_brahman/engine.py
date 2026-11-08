@@ -36,7 +36,8 @@ class Reply:
 
 
 class Engine(Protocol):
-    def run(self, prompt: str, *, cwd: str, session_id: str | None = None) -> Reply: ...
+    def run(self, prompt: str, *, cwd: str, session_id: str | None = None,
+            extra_env: dict | None = None) -> Reply: ...
 
 
 class ClaudeCode:
@@ -49,7 +50,9 @@ class ClaudeCode:
 
     def __init__(self, allowed_tools: list[str] = (), permission_mode: str = "default",
                  model: str = "", timeout: int = 1800, append_system_prompt: str = "",
-                 disallowed_tools: list[str] = ()):
+                 disallowed_tools: list[str] = (), env=None, wrap=None):
+        self.env = env or agent_env  # a long story's sessions get the gate's (gate.session_env)
+        self.wrap = wrap  # and run in its sandbox (gate.sandbox): (cmd, cwd, env) -> (cmd, env)
         self.allowed_tools = list(allowed_tools)
         self.disallowed_tools = list(disallowed_tools)  # denied even when allowed_tools lets it in
         self.append_system_prompt = append_system_prompt
@@ -57,7 +60,30 @@ class ClaudeCode:
         self.model = model
         self.timeout = timeout
 
-    def run(self, prompt: str, *, cwd: str, session_id: str | None = None) -> Reply:
+    def live_cmd(self, *, session_id: str = "", new_id: str = "") -> list[str]:
+        """The command of a long story's live session (long_live.py): one process, many turns,
+        over the stream-json protocol; a permission it needs comes out as a request the buddy
+        answers (`--permission-prompt-tool stdio`), not a silent denial. Resumes session_id,
+        or starts the session new_id."""
+        cmd = ["claude", "-p", "--input-format", "stream-json", "--output-format", "stream-json",
+               "--verbose", "--permission-prompt-tool", "stdio", "--permission-mode", self.permission_mode]
+        cmd += ["--resume", session_id] if session_id else ["--session-id", new_id]
+        if self.allowed_tools:
+            cmd += ["--allowedTools", ",".join(self.allowed_tools)]
+        if self.disallowed_tools:
+            cmd += ["--disallowedTools", ",".join(self.disallowed_tools)]
+        if self.model:
+            cmd += ["--model", self.model]
+        if self.append_system_prompt:
+            cmd += ["--append-system-prompt", self.append_system_prompt]
+        return cmd
+
+    def run(self, prompt: str, *, cwd: str, session_id: str | None = None,
+            extra_env: dict | None = None, kind: str = "chat", unit: str = "",
+            tag: dict | None = None) -> Reply:
+        """One turn. kind, unit and tag go to procs.run: the umbrella's slice, the unit's name
+        (a long story's, so only one turn of it runs at a time) and what a later instance needs
+        to deliver it after a restart (procs.adopt, then parse)."""
         cmd = ["claude", "-p", "--output-format", "json", "--permission-mode", self.permission_mode]
         resumed = bool(session_id)
         # A new session gets its id from us, not from the reply: a turn that times out
@@ -77,11 +103,20 @@ class ClaudeCode:
             cmd += ["--append-system-prompt", self.append_system_prompt]
         try:
             # The prompt goes in on stdin so text starting with "-" is never read as a flag.
-            p = procs.run(cmd, input=prompt, cwd=cwd, timeout=self.timeout, env=agent_env())  # STOP can kill it
+            env = {**self.env(), **(extra_env or {})}
+            if self.wrap:
+                cmd, env = self.wrap(cmd, cwd, env)
+            p = procs.run(cmd, input=prompt, cwd=cwd, timeout=self.timeout, env=env,  # STOP can kill it
+                          kind=kind, unit=unit, tag={**(tag or {}), "session_id": session_id, "resumed": resumed})
         except subprocess.TimeoutExpired as e:
             partial = "".join(x.decode(errors="replace") if isinstance(x, bytes) else (x or "")
                               for x in (e.stderr, e.stdout))
             return Reply(f"timed out after {self.timeout}s", session_id, False, detail=partial)
+        return self.parse(p, session_id, resumed)
+
+    @staticmethod
+    def parse(p, session_id: str, resumed: bool) -> Reply:
+        """What a finished `claude -p --output-format json` said, as a Reply."""
         try:
             d = json.loads(p.stdout)
         except json.JSONDecodeError:
@@ -121,10 +156,13 @@ class Codex:
     terminal that holds the session.
     """
 
-    def __init__(self, sandbox: str = "read-only", model: str = "", timeout: int = 1800):
+    def __init__(self, sandbox: str = "read-only", model: str = "", timeout: int = 1800, env=None, wrap=None):
         self.sandbox, self.model, self.timeout = sandbox, model, timeout
+        self.env, self.wrap = env or agent_env, wrap
 
-    def run(self, prompt: str, *, cwd: str, session_id: str | None = None) -> Reply:
+    def run(self, prompt: str, *, cwd: str, session_id: str | None = None,
+            extra_env: dict | None = None, kind: str = "chat", unit: str = "",
+            tag: dict | None = None) -> Reply:
         resumed = bool(session_id)
         cmd = ["codex", "exec"] + (["resume", session_id] if session_id else []) + [
             "--json", "--skip-git-repo-check", "-c", f'sandbox_mode="{self.sandbox}"']
@@ -134,9 +172,18 @@ class Codex:
             cmd += ["-m", self.model]
         cmd.append("-")  # the prompt on stdin, so text starting with "-" is never a flag
         try:
-            p = procs.run(cmd, input=prompt, cwd=cwd, timeout=self.timeout, env=agent_env())  # STOP can kill it
+            env = {**self.env(), **(extra_env or {})}
+            if self.wrap:
+                cmd, env = self.wrap(cmd, cwd, env)
+            p = procs.run(cmd, input=prompt, cwd=cwd, timeout=self.timeout, env=env,  # STOP can kill it
+                          kind=kind, unit=unit, tag={**(tag or {}), "session_id": session_id, "resumed": resumed})
         except subprocess.TimeoutExpired:
             return Reply(f"timed out after {self.timeout}s", session_id, False)
+        return self.parse(p, session_id, resumed)
+
+    @staticmethod
+    def parse(p, session_id: str | None, resumed: bool) -> Reply:
+        """What a finished `codex exec --json` said, as a Reply."""
         said, usage, errors = [], {}, []
         for line in (p.stdout or "").splitlines():
             try:
@@ -160,11 +207,26 @@ class Codex:
         return Reply(text, session_id, ok, detail="" if ok else (p.stderr or "")[-2000:], cost=cost)
 
 
-def long_engines(cfg: dict) -> dict:
+def long_engines(cfg: dict, env_file=None) -> dict:
     """The engines a long story's headless turns run on, by kind. A long story is a session
     the owner started to work in, so it may write: [long.claude] goes over [claude] (its keys
     win; model, timeout and the system prompt carry over) and [long.codex] sets Codex's
-    sandbox. Without them a long story is as read-only as the chat."""
-    long = cfg.get("long", {})
-    return {"claude-code": ClaudeCode(**{**cfg.get("claude", {}), **long.get("claude", {})}),
-            "codex": Codex(**long.get("codex", {}))}
+    sandbox. Without them a long story is as read-only as the chat.
+
+    "claude-code/open" and "codex/open" are the same engines for a session the owner started
+    open (gate.py): his own environment and files, the buddy's keys still hidden. Their tool
+    rules are [long.claude] with [long.open.claude] over it ([long.open.codex] for Codex), so
+    what an open session may run (git push, gh pr create) is the owner's own line in buddy.toml.
+    Not there when [gate] open = false."""
+    from .gate import open_allowed, open_env, open_wrap, sandbox, session_env
+
+    long, wrap = cfg.get("long", {}), sandbox(cfg, env_file=env_file)
+    claude = {**cfg.get("claude", {}), **long.get("claude", {})}
+    out = {"claude-code": ClaudeCode(**claude, env=session_env, wrap=wrap),
+           "codex": Codex(**long.get("codex", {}), env=session_env, wrap=wrap)}
+    if open_allowed(cfg):
+        opened = long.get("open", {})
+        env, owrap = (lambda: open_env(env_file=env_file)), open_wrap(env_file=env_file)
+        out["claude-code/open"] = ClaudeCode(**{**claude, **opened.get("claude", {})}, env=env, wrap=owrap)
+        out["codex/open"] = Codex(**{**long.get("codex", {}), **opened.get("codex", {})}, env=env, wrap=owrap)
+    return out

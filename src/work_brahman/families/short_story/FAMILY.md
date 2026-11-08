@@ -24,8 +24,9 @@ which last weeks: a short story lasts minutes to hours.
 | 3a | **Fork**: an if/else or a switch on the way | executor | plan it as a mark: `--mark "CI green? yes \| no=fix, rerun"` (2–4 options after `?`, split by `\|`; up to 3 steps after `=`); then `buddy short mark N "CI green?" --took no`, or mark a step under an option (that option is taken), or let the owner pick: `buddy short ask N --fork "CI green?"` | the card: the options under the fork as branches; the taken one with its steps, the others *not taken*; ◀ **here now** on the mark being done (else the next one to do) | the branch is taken; the main line goes on |
 | 3b | **Loop**: the same step a few times, with an index | executor | plan it as a mark: `--mark "soak ×3"` (a count; `x3` too) or `--mark "build × linux, mac, win"` (one round per item), 2–9 rounds; then `buddy short mark N build [--status doing]` marks the current round, `--round K` a round by its index, `--status skipped` (no round) skips the rounds left | the card: the loop with ×N and the current round (`build ×3 · 2/3 · mac`), its rounds on one line under it, ◀ on the current round | every round settled: the loop is done (failed if a round failed) |
 | 3c | **Open loop**: a retry or a poll, its count unknown ahead | executor | plan it as `--mark "rerun ×?"`; `buddy short mark N rerun --status failed --note …` ends a try and queues the next, `mark N rerun` is a try that worked, `--status doing` starts one more, `--status skipped` gives up | the card: `rerun ×? · try 3`, then one line per try with its time and note (the last 5), ◀ on the current try | a try worked (done), or given up; never more than 20 tries |
+| 3d | **Child story**: a step with waits of its own, done by another session | executor of that step | `buddy short start TITLE --parent N:STEP` (a loop's round: `N:STEP:ITEM` or `N:STEP:K`; or with `BUDDY_STORY=N:STEP` in the session's environment); plan it with `--mark "build → child"` | the parent card: one line on the step, `→ #13 · 2/5 · freerdp`; the child card: `↑ part of #N …` | the child ends: the step is done or failed with it. One level only, one child per step (a retry is an open loop); ■ Stop on the parent stops its children; `done` on a parent waits for them (exit 2), `done --failed` asks them to stop |
 | 4a | **Ask**: a question only the owner can answer | executor | `buddy short ask N QUESTION [--option LABEL …] [--wait [--timeout S]]` → `question <id>` | the card: ❓ in its title, the question at the top in bold, one button per option | answered: `check` prints `answer <id>: <text>` once; `wait` exits 0 |
-| 5 | **Steer**: stop the work, or tell the executor something | you | **■ Stop** or **💬 Reply** under the card; quote the card; `/short N <text>`, `/short N stop`; ■ STOP asks every running story | the card: "Stop asked", "replies not read yet" | the executor's next `buddy short` call prints it (exit 3 for a stop) |
+| 5 | **Steer**: stop the work, or tell the executor something | you | **■ Stop** or **💬 Reply** under the card; quote the card; `/short N <text>`, `/short N stop`; ■ STOP asks every running story | the card: "Stop asked", "replies not read yet" | the executor's next `buddy short` call prints it (exit 3 for a stop), or sooner if its session was woken (below) |
 | 6 | **Listen**: between steps and while waiting | executor | every `mark`/`plan`/`note`/`ask` prints new replies and answers; while waiting on a pipeline, `buddy short check N` every few minutes; on a question, `buddy short wait N [ID] --timeout S` at a safe point | the session | a reply or answer is acted on; a stop ends the work (stage 7, `--failed`) |
 | 7 | **End** | executor | `buddy short done N` or `--failed --note why` | the card turns green or red; its buttons go | the owner has the result |
 | 8 | **Read** | you | `/short`, `/short all`, `/short N`; the web workbench, level 1: this family is one workflow, each story one run (pick it: its marks in level 2, its card with 💬 Send and ■ Stop in level 3) | chat, web | — |
@@ -38,7 +39,8 @@ which last weeks: a short story lasts minutes to hours.
   loop has 2–9 rounds, all planned, so its index says how far it is; an open loop (a retry)
   writes each try on its own line, so no try is written over by the next; nothing nests (no fork
   inside a fork or a loop, no loop inside a fork). Work that needs more is more than one
-  short story.
+  short story: link it to the step it does (stage 3d), so the cards point at each other.
+  Levels come from links, never from nesting, and only one deep (specs/story-levels.md).
 - **Marks are a guide, not a contract.** They may come in any order; one that was never
   planned is added where it happens; the plan can grow (`plan`) while the work goes on. A
   mark can come before the work it names is finished (`--status doing`), and be marked again.
@@ -53,6 +55,25 @@ which last weeks: a short story lasts minutes to hours.
   the executor, kept in the story file: its next `buddy short` call prints each reply once,
   and exits with code 3 while a stop is asked. Exit 3 means: stop the work at a safe point
   (don't leave a half-pushed release), then `done N --failed --note "stopped by the owner"`.
+- **Waking the session is a nudge on top of that.** `start` records the window of the Claude
+  Code session it runs in (`buddy short attach N` for a story already running, from inside
+  that session; the last to attach has it), and when a reply, an answer or a stop is unread,
+  `buddy serve` types one fixed line there: `short story #N has news from the owner: run
+  buddy-short check N`. Never the owner's words. Typing is blind, so it only happens when that
+  same `claude` process (pid and start time) holds its terminal's foreground and the screen
+  shows an idle, empty input box: not a dialog, not a turn running, not a half-written prompt
+  (a ghost suggestion counts as one). Otherwise it tries again every few seconds; each piece of
+  news is typed once. The story file stays the path that always works: keep calling `check`
+  while waiting. A Codex session gets the line through `codex queue` instead, and only while a
+  Codex terminal holds it (its daemon has the thread loaded and a terminal runs in its folder):
+  with none, Codex would run the turn unattended. Sessions behind the gate are not woken.
+- **The window's title names its stories** (pys), short (the owner's rule, about 24
+  characters: `rel·kit #253 #249`): `start` and `attach` put the story numbers where the title's
+  `#…` stood (else after its first word), newest first, older ones left out when it would grow
+  too long; `done` takes a number out again, and `done --free` makes it `free·<session>` once
+  none is left. Only numbers: the card has the titles. It is written with `pys title --owner
+  <that claude>`, so pys drops it when the session ends (OSC 2 on a pys without `title`); the
+  session's own part is read from its agent title. A title the owner set by hand (C-a ,) still wins.
 - **A reply is an instruction from the owner**, as if typed into the session: act on it,
   and say on the card what changed (`note`, or a new mark).
 - **Ask on the card, not in the terminal**, when only the owner can decide: he follows the

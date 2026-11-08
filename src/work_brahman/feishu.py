@@ -22,6 +22,11 @@ from lark_oapi.api.im.v1 import (CreateMessageRequest, CreateMessageRequestBody,
 
 from lark_oapi.event.callback.model.p2_card_action_trigger import (P2CardActionTrigger,
                                                                    P2CardActionTriggerResponse)
+from lark_oapi.core.log import handler as _sdk_stdout, logger as _sdk_log
+
+# The SDK writes its log to stdout as well as passing it on: a command's own output (the number
+# `buddy short start` prints) came after a quota error. Ours goes to stderr, once.
+_sdk_log.removeHandler(_sdk_stdout)
 
 from .channel import Incoming
 from .text import t
@@ -148,11 +153,14 @@ class Feishu:
 
     def ask(self, chat: str, markdown: str, *, title: str, options: list[list[str]],
             ask_id: str, failed: bool = False, note: str = "") -> str | None:
+        # an option whose key ends in ":reply" is a text box on the card (its label the hint),
+        # not a button: Send comes back as that option, with the text typed
+        typed = next(((f"ask:{ask_id}:{key}", label) for key, label in options if key.endswith(":reply")), ("", ""))
         buttons = [(f"{label}", f"ask:{ask_id}:{key}", "primary" if k == 0 else "default")
-                   for k, (key, label) in enumerate(options)] + [_stop()]
+                   for k, (key, label) in enumerate(options) if not key.endswith(":reply")] + [_stop()]
         return self.send_card(chat, card(markdown, title=("⚠️ " if failed else "❓ ") + title,
                                          color="red" if failed else "orange", note=note,
-                                         buttons=buttons))
+                                         buttons=buttons, reply=typed[0], placeholder=typed[1]))
 
     def settle(self, chat: str, handle: str, markdown: str, *, title: str, line: str,
                failed: bool = False, note: str = "") -> bool:
@@ -198,13 +206,14 @@ REPLY_FIELD = "reply"  # the text box's name; its text comes back in the press's
 
 
 def card(markdown: str, *, title: str = "", subtitle: str = "", color: str = "blue",
-         note: str = "", buttons: list[tuple[str, str, str]] = (), reply: str = "") -> dict:
+         note: str = "", buttons: list[tuple[str, str, str]] = (), reply: str = "",
+         placeholder: str = "") -> dict:
     """A card (JSON schema 2.0): Markdown body, optional buttons, optional coloured header,
     optional grey note under a rule. Card Markdown renders headings, lists, links, code
     blocks and tables, unlike a text message. A button is (label, action, type); a press
     comes back as card.action.trigger with value {"action": action}. With reply (an action),
     a text box and 💬 Send go above the buttons, in a form: Send comes back as that action,
-    with the text in form_value[REPLY_FIELD]."""
+    with the text in form_value[REPLY_FIELD]; placeholder is the box's hint."""
     body = [{"tag": "markdown", "content": _clip(markdown)}]
     body += [{"tag": "button", "text": {"tag": "plain_text", "content": label}, "type": kind,
               "width": "fill", "behaviors": [{"type": "callback", "value": {"action": action}}]}
@@ -212,7 +221,7 @@ def card(markdown: str, *, title: str = "", subtitle: str = "", color: str = "bl
     if reply:
         body.insert(1, {"tag": "form", "name": "reply_form", "elements": [
             {"tag": "input", "name": REPLY_FIELD, "width": "fill",
-             "placeholder": {"tag": "plain_text", "content": t("reply.placeholder")}},
+             "placeholder": {"tag": "plain_text", "content": placeholder or t("reply.placeholder")}},
             {"tag": "button", "name": "send", "text": {"tag": "plain_text", "content": t("btn.send")},
              "type": "primary", "width": "fill", "form_action_type": "submit",
              "behaviors": [{"type": "callback", "value": {"action": reply}}]}]})

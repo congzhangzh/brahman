@@ -218,7 +218,7 @@ const hm = s => (s || "").slice(11, 16), day = s => (s || "").slice(5, 10);
 const quiet = r => r.status === "ok" && /^no (changes|moves)$/.test(r.result || "");
 const STORY = { running: "⏳", ok: "✓", failed: "✗", stopped: "■" };
 const MARK = { todo: "⏳", doing: "▶️", done: "✅", failed: "❌", skipped: "⏭" };
-const label = r => r.story ? `${STORY[r.status] || ""} #${r.story.id}` : r.status === "running" ? tr("status.running") : FAILED.has(r.status) ? "✗ " + statusName(r.status)
+const label = r => r.story ? `${STORY[r.status] || ""} ${r.story.parent ? "↳ " : ""}#${r.story.id}` : r.status === "running" ? tr("status.running") : FAILED.has(r.status) ? "✗ " + statusName(r.status)
   : r.status === "stopped" ? tr("status.stopped") : r.kind === "chat" ? tr("status.chat") : quiet(r) ? tr("status.quiet") : tr(r.steps.some(s => s.step === "post" || s.step === "ask") ? "status.posted" : "status.ok");
 
 async function post(path, body) {
@@ -560,6 +560,7 @@ async function loadChat() {
           ${md(m.markdown)}${m.note ? `<div class="mute">${esc(m.note)}</div>` : ""}
           ${m.options ? `<div class="choices">${m.options.map(([k, l]) => `<button data-ask="${esc(m.ask)}" data-choice="${esc(k)}">${esc(l)}</button>`).join("")}<button class="danger" data-stop="1">${tr("stop_btn")}</button></div>` : ""}
           ${m.buttons && m.buttons.length ? `<div class="choices">${m.buttons.map(([l, a]) => { const [, n, what] = a.split(":");
+            if (a.startsWith("team:")) return `<button data-team-prefill="${esc(n)}">${esc(l)}</button>`;
             return what === "stop" ? `<button class="danger" data-short-stop="${esc(n)}">${esc(l)}</button>` : what.startsWith("a") ? `<button data-short-answer="${esc(a)}">${esc(l)}</button>` : `<button data-short-prefill="${esc(n)}" title="${tr("chat.prefill", { n: esc(n) })}">${esc(l)}</button>`; }).join("")}</div>` : ""}
           ${m.line ? `<div class="answered">${esc(m.line)}</div>` : ""}
           ${m.working ? `<div class="choices"><button class="danger" data-stop="1">${tr("stop_btn")}</button></div>` : ""}
@@ -608,6 +609,7 @@ document.addEventListener("click", e => {
   if (b.dataset.ask) { b.disabled = true; return post("/api/answer", { ask: b.dataset.ask, choice: b.dataset.choice }); }
   if (b.dataset.stop) return post("/api/stop");
   if (b.dataset.resume) return post("/api/resume");
+  if (b.dataset.teamPrefill) { const box = document.getElementById("say"); box.value = `/team ${b.dataset.teamPrefill} `; return box.focus(); }
   if (b.dataset.shortPrefill) { const box = document.getElementById("say"); box.value = `/short ${b.dataset.shortPrefill} `; return box.focus(); }
   if (b.dataset.shortAnswer) { const [, n, what] = b.dataset.shortAnswer.split(":"); b.disabled = true; return post("/api/short", { n: +n, what }); }
   if (b.dataset.shortStop) { b.disabled = true; return post("/api/short", { n: +b.dataset.shortStop, what: "stop" }); }

@@ -48,6 +48,13 @@ terminal he may not be at:
 While a question is open, a reply (💬 Reply, quoting the card, `/short 12 <text>`) answers
 the oldest open question rather than going to the executor as a plain reply.
 
+The story file stays what carries a reply. On top of it, `buddy serve` tries to wake the
+session: `start` (or `buddy short attach 12`, for a story already running) records the window
+of the Claude Code session it runs in, and when something is unread a fixed line is typed there,
+telling it to run `check`. Never the owner's words, so nothing he writes reaches a terminal. A
+busy session is tried again until it is idle; each piece of news is typed once. A wake that
+never comes costs nothing but time: the session still reads it at its next call.
+
 A mark can be a fork, an if/else or a switch, so the card is a small map that keeps its
 shape while ◀ moves along it, and the owner sees where the work is and what may come next:
 
@@ -76,9 +83,32 @@ its own line with its time and note, so a try never overwrites the one before it
 
 A loop has 2 to 9 rounds, an open one up to 20 tries. Nothing nests (no fork in a loop, no loop in a fork): work that
 needs more is more than one short story.
+
+That other story can be linked to the step it does: a child story (specs/story-levels.md).
+Cards stay flat; a link gives the depth, one level only (a child has no children of its own):
+
+    buddy short start "Releases" --mark "build → child" --mark pick      (the link planned)
+    buddy short start "FreeRDP build" --parent 12:build                  → 13
+    BUDDY_STORY=12:build buddy short start "FreeRDP build"               (the same, from the session's env)
+    buddy short start "mac build" --parent 12:build:mac                  (a loop's round, by item or index)
+
+The parent's step follows its child: doing while it runs, done or failed when it ends, and
+one line on the parent's card (→ #13 · 2/5 · freerdp). The child's card says ↑ part of #12.
+■ Stop on the parent stops its children too; `done` on a parent waits for its children
+(exit 2), and `done --failed` asks them to stop.
+
+Every story is read three ways (specs/multi-brahman.md): what (the steps), who (each mark's
+`by`, filled in here from the session's environment, never typed; the card shows only its
+short tag on the step being done) and with what (`--in`/`--out key=value` on a mark: the
+SHAs, run ids and artefacts a step used and made). All of it is optional and read loosely:
+an old story or a mark without these keys draws as before. Each step has a stable id (s1,
+s2, …, never reused), so marks from several sessions land on one step.
 """
 
+import os
 import re
+import socket
+import subprocess
 
 import json
 import time
@@ -99,6 +129,51 @@ LOOP_ITEMS = re.compile(r"^(.+?)\s*×\s*(.+[,，].+)$")  # "build × linux, mac,
 LOOP_OPEN = re.compile(r"^(.+?)(?:\s*×|\s+[x*])\s*[?？…]$")  # "rerun ×?": until a try works
 LOOP_TRIES, TRIES_SHOWN = 20, 5  # an open loop's tries at most, and the last ones on the card
 INDENT = "\u2003"  # an em space: Lark and Telegram keep it at the start of a line
+CHILD_MARK = re.compile(r"^(.+?)\s*(?:→|->)\s*child$")  # "build → child": a child story is expected here
+EVENT_V = 1  # the event record's version: readers keep what they don't know
+
+
+def executor(env=None, cwd: str | None = None) -> dict:
+    """Who is marking, as far as code can tell: the `by` path (specs/multi-brahman.md), never
+    typed. instance@environment/session[:engine-id][/sub:agent], plus the short tag the card
+    shows (the session's project, and the agent). What can't be told is left out, not guessed:
+    a subagent is named only when its master hands it BUDDY_AGENT."""
+    env = os.environ if env is None else env
+    folder = _project(cwd or os.getcwd())
+    sid = env.get("CLAUDE_CODE_SESSION_ID") or env.get("CODEX_THREAD_ID") or env.get("CODEX_SESSION_ID") or ""
+    engine = "claude" if env.get("CLAUDE_CODE_SESSION_ID") else "codex" if sid else ""
+    long = env.get("BUDDY_LONG", "")
+    session = (long if long not in ("", "1") else folder) or "unknown"  # BUDDY_LONG=1: the folder's name
+    agent = env.get("BUDDY_AGENT", "")
+    sub = f"/sub:{agent}" if agent else ""
+    path = (f"{env.get('BUDDY_INSTANCE', 'buddy')}@{socket.gethostname().split('.')[0]}/{session}"
+            + (f":{engine}-{sid[:8]}" if sid else "") + sub)
+    return {"by": path, "tag": session + sub}
+
+
+def _project(cwd: str) -> str:
+    """The name of the repository the folder belongs to (a worktree counts as its repo), else
+    the folder's own name."""
+    try:
+        p = subprocess.run(["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                           capture_output=True, text=True, timeout=5)
+        if p.returncode == 0 and p.stdout.strip():
+            common = Path(p.stdout.strip())
+            return (common.parent if common.name == ".git" else common).name.removesuffix(".git")
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return Path(cwd).name
+
+
+def _ids(story: dict) -> None:
+    """Every step gets a stable id (s1, s2, …), never reused: the text of a step may change,
+    its id doesn't. Old stories get theirs on their next change."""
+    n = story.get("next_step", 1)
+    for m in story["marks"]:
+        for x in [m] + [st for o in (m.get("fork") or {}).get("options", []) for st in o["steps"]]:
+            if not x.get("id"):
+                x["id"], n = f"s{n}", n + 1
+    story["next_step"] = n
 
 
 def _dir(state: Path) -> Path:
@@ -138,29 +213,322 @@ def all_stories(state: Path) -> list[dict]:
 
 
 def start(state: Path, channels: list[Channel], chats: list[str], title: str, marks: list[str],
-          *, who: str = "", note: str = "") -> dict:
-    with _locked(state, "next"):
-        n = max([t["id"] for t in all_stories(state)] or [0]) + 1
-        story = {"id": n, "title": title, "who": who, "started": _now(), "ended": None,
-                "status": "running", "marks": [], "events": [], "chats": chats, "copies": {}}
-        for m in marks:
-            _mark(story, m, "todo")
-        _event(story, _noted(t("short.ev.started"), note))
-        _save(state, story)
+          *, who: str = "", note: str = "", parent: str = "", by: dict | None = None,
+          team: str = "") -> dict:
+    """A new story. parent: "12:build" (or "12:build:mac", "12:build:2" for a loop's round)
+    makes it a child of that step of story 12; the rules (one level, one child per step, a
+    running parent) raise ValueError before anything is written. team: the team(s) of the
+    session that starts it (teams.of_session), shown beside `who`."""
+    if not parent:
+        story = _new(state, chats, title, marks, who, note, by=by, team=team)
+    else:
+        with _locked(state, str(_parent_number(parent))):  # parent's lock, then "next": never the other way
+            p, m, k = _parent_ref(state, parent)
+            story = _new(state, chats, title, marks, who, note, by=by, team=team, parent=
+                         {"story": p["id"], "step": m["name"], "round": None if k is None else k + 1,
+                          "title": p["title"], "label": m["name"] + _round(m.get("loop"), None if k is None else k + 1)})
+            slot = m["loop"]["rounds"][k] if k is not None else m
+            slot["child"] = _snapshot(story)
+            _mark(p, m["name"], "doing", round=None if k is None or m["loop"].get("open") else k + 1)
+            _event(p, t("short.ev.child", n=story["id"], step=m["name"] + _round(m.get("loop"), None if k is None else k + 1),
+                        title=title))
+            _show(channels, p.get("chats") or list(p["copies"]), p)
+            _save(state, p)
+    n = story["id"]
     with _locked(state, str(n)):
         _show(channels, chats, story)
+        _undrawn(story, channels)
         _save(state, story)
     return story
 
 
+def _undrawn(story: dict, channels: list[Channel]) -> None:
+    """A change made with no channel (a session behind the gate holds no chat token) leaves the
+    card to `buddy serve`: redraw() draws it there."""
+    if channels:
+        story.pop("undrawn", None)
+    elif story.get("chats"):
+        story["undrawn"] = True
+
+
+WAKE = "short story #{n} has news from the owner: run buddy-short check {n}"
+
+
+def hold(state: Path, number: int, window: dict) -> dict | None:
+    """The window of the session that runs this story (cli._window): where wake() types. The
+    last session to attach has it; one marking a step for a story it didn't start does not."""
+    return _change(state, [], number, lambda s: s.update(window=window), show=False)
+
+
+TITLE_MAX = 24  # characters: each tab in pys's status line shows its whole title (the owner's rule)
+
+
+def _same_window(a: dict, b: dict) -> bool:
+    return all(a.get(k) == b.get(k) for k in ("mux", "session", "window", "pid", "started"))
+
+
+def window_title(state: Path, window: dict, name: str, free: bool = False) -> str:
+    """The title of a pys window, short (the owner's rule: `rel·kit #253 #249`, `review·cc #248
+    PRs`, at most about 24 characters): what its session gave, with the numbers of the running
+    stories held there, newest first, where its `#…` stood (else after its first word). Only
+    numbers: the card has the titles. Older stories are left out when it would grow too long,
+    but the newest always shows. A name of one word without `·` ("bash") is its program's: the
+    session's own name stands in, and no role is guessed. With no story left: the session's part
+    alone, or `free·<session>` when it asks (done --free)."""
+    tag = window.get("tag") or "?"
+    words = name.split()
+    if len(words) < 2 and "·" not in name:
+        words = [tag]
+    marks = [i for i, x in enumerate(words) if x.startswith("#")]
+    head, tail = (words[:marks[0]], words[marks[-1] + 1:]) if marks else (words[:1], words[1:])
+    while head and head[-1] == "·":  # the long form, `release · kit · #253 …`
+        head.pop()
+    mine = sorted((s for s in all_stories(state) if s["status"] == "running" and s.get("window")
+                   and _same_window(s["window"], window)), key=lambda s: -s["id"])
+    if not mine:
+        if free:
+            own = head[0].split("·", 1) if head else []
+            return f"free·{own[1] if len(own) > 1 and '·' in head[0] else tag}"
+        return " ".join(head + tail)
+    shown = []
+    for x in mine:  # the numbers come before the work's words: those go first when it is too long
+        if shown and len(" ".join(head + shown + [f"#{x['id']}"])) > TITLE_MAX:
+            break
+        shown.append(f"#{x['id']}")
+    full = " ".join(head + shown + tail)
+    return full if len(full) <= TITLE_MAX else " ".join(head + shown)
+
+
+def retitle(state: Path, window: dict, free: bool = False) -> bool:
+    """Write the stories of this window into its title (window_title), if it is a pys window and
+    the same `claude` (pid and start time) still holds it: a title never lands on a terminal
+    someone else has now. As `pys title --owner <that claude>`, so the title goes when the
+    session does; OSC 2 on a pys without it. False when nothing was written; it never fails a
+    command."""
+    from . import long_stories as longs
+    p = portable.process(window.get("pid") or 0)
+    if window.get("mux") != "pys" or not p or p["comm"] != "claude" or p["started"] != window.get("started") \
+            or p["tty"].strip("?") == "":
+        return False
+    w = longs._pys_titles(window["window"], window.get("session", ""))
+    if w is None:
+        return False
+    # The session's part: its agent title (`pys title`); before that rule, an app title in the
+    # role form (`rel·kit …`, from printf). In a Claude pane the app title is otherwise Claude
+    # Code's own (a spinner and its task), never a session's part.
+    app = w.get("app_title") or ""
+    name = w.get("agent_title") or (app if "·" in (app.split() or [""])[0] else "")
+    if "agent_title" not in w:  # a pys before `pys title`: only what shows, set by OSC 2
+        name = w.get("name") or ""
+    title = window_title(state, window, name, free)
+    if title == w.get("agent_title"):
+        return True
+    return longs._pys_title(window["window"], window.get("session", ""), title, window["pid"]) \
+        or longs._set_title(p["tty"], title)
+
+
+def _unread(story: dict) -> set[str]:
+    """What its session has not read, by name (r0 the first reply, a2 question 2's answer, stop),
+    not by time: the times count seconds, and a stop can follow a reply within one. A stop has
+    no read mark, so it counts until the story ends; wake() types each name once."""
+    return ({f"r{i}" for i, r in enumerate(story.get("replies", [])) if not r["read"]}
+            | {f"a{q['id']}" for q in story.get("questions", []) if q["answer"] and not q["answer"]["read"]}
+            | ({"stop"} if story.get("stop") else set()))
+
+
+def wake(state: Path) -> list[int]:
+    """Wake the sessions with news waiting, a nudge on top of the story file (the docstring
+    above); `buddy serve` calls it every few seconds, so a busy session is reached when it goes
+    idle. Returns the stories woken. Only this one thread types, outside the story's lock."""
+    from . import long_stories as longs
+    woken = []
+    for s in all_stories(state):
+        news = _unread(s) - set(s.get("woken", []))
+        if s["status"] == "running" and s.get("window") and news \
+                and longs.wake(s["window"], WAKE.format(n=s["id"])):
+            _change(state, [], s["id"], lambda x: x.update(woken=sorted(set(x.get("woken", [])) | news)),
+                    show=False)
+            woken.append(s["id"])
+    return woken
+
+
+def redraw(state: Path, channels: list[Channel]) -> list[int]:
+    """Draw the cards of the stories changed where no channel was (behind the gate). Returns
+    their numbers. A redraw changes nothing in the story but its card."""
+    drawn = []
+    for s in all_stories(state):
+        if s.get("undrawn") and channels:
+            _change(state, channels, s["id"], lambda x: None)  # None: changed, so drawn and saved
+            drawn.append(s["id"])
+    return drawn
+
+
+def start_drawer(state: Path, channels: list[Channel], every: float = 5) -> None:
+    """`buddy serve`'s thread for redraw() and wake(): every few seconds, so a mark made in the
+    sandbox shows on the phone about as fast as one made outside, and a reply reaches a session
+    about as fast as it is sent."""
+    import logging
+    import threading
+    log = logging.getLogger("buddy.shorts")
+
+    def loop():
+        while True:
+            try:
+                redraw(state, channels)
+            except Exception:
+                log.exception("redrawing short stories failed")
+            try:
+                for n in wake(state):
+                    log.info("short story #%d: its session was woken", n)
+            except Exception:
+                log.exception("waking short-story sessions failed")
+            time.sleep(every)
+    threading.Thread(target=loop, name="short-drawer", daemon=True).start()
+
+
+def _new(state: Path, chats: list[str], title: str, marks: list[str], who: str, note: str,
+         parent: dict | None = None, by: dict | None = None, team: str = "") -> dict:
+    with _locked(state, "next"):
+        n = max([t["id"] for t in all_stories(state)] or [0]) + 1
+        story = {"id": n, "title": title, "who": who, "started": _now(), "ended": None,
+                 "status": "running", "marks": [], "events": [], "chats": chats, "copies": {}}
+        if parent:
+            story["parent"] = parent
+        if team:
+            story["team"] = team
+        if by:
+            story["by"] = by["by"]
+        for m in marks:
+            _mark(story, m, "todo")
+        _ids(story)
+        _event(story, _noted(t("short.ev.started"), note), **({"by": by["by"]} if by else {}))
+        _save(state, story)
+    return story
+
+
+def _parent_number(ref: str) -> int:
+    number, _, rest = ref.strip().partition(":")
+    if not number.strip().isdigit() or not rest.strip():
+        raise ValueError(t("short.child.ref", ref=ref))
+    return int(number)
+
+
+def _parent_ref(state: Path, ref: str) -> tuple[dict, dict, int | None]:
+    """"12:build", "12:build:mac" or "12:build:2" → (story 12, its mark build, the round's
+    index from 0 or None), checked against the rules: a running top-level story, a step
+    that is planned and not settled, and no child on it yet."""
+    n, rest = _parent_number(ref), ref.strip().partition(":")[2].strip()
+    p = load(state, n)
+    if p is None:
+        raise ValueError(t("short.no_such", n=n))
+    if p.get("parent"):
+        raise ValueError(t("short.child.one_level", n=n, parent=p["parent"]["story"]))
+    if p["status"] != "running":
+        raise ValueError(t("short.ended", n=n))
+    m, rnd = _find(p, rest), None
+    if m is None and ":" in rest:
+        step, _, rnd = rest.rpartition(":")
+        m = _find(p, step)
+    if m is None:
+        raise ValueError(t("short.child.no_step", n=n, step=rest, steps=join([x["name"] for x in p["marks"]])))
+    k, loop = None, m.get("loop")
+    if loop and loop.get("open") and rnd is not None:
+        raise ValueError(t("short.loop.open_round", name=m["name"]))
+    if loop and rnd is None:  # the current round: the first one not settled and not linked yet
+        k = next((i for i, r in enumerate(loop["rounds"]) if r["status"] in ("todo", "doing") and not r.get("child")), None)
+        if k is None:
+            raise ValueError(t("short.child.no_free_round", name=m["name"]))
+    elif loop:
+        k = (int(rnd) - 1 if rnd.strip().isdigit()
+             else next((i for i, r in enumerate(loop["rounds"]) if _key(r["name"]) == _key(rnd)), -1))
+        if not 0 <= k < len(loop["rounds"]):
+            raise ValueError(t("short.loop.no_round", name=m["name"], round=rnd, n=len(loop["rounds"])))
+    elif rnd is not None:
+        raise ValueError(t("short.loop.not_loop", name=m["name"]))
+    slot = loop["rounds"][k] if k is not None else m
+    if slot.get("child"):
+        raise ValueError(t("short.child.taken", name=m["name"] + _round(loop, None if k is None else k + 1),
+                           child=slot["child"]["id"]))
+    if slot["status"] not in ("todo", "doing"):
+        raise ValueError(t("short.child.settled", name=m["name"] + _round(loop, None if k is None else k + 1),
+                           status=slot["status"]))
+    return p, m, k
+
+
+def _from(stop: dict) -> str:
+    """Where a stop came from, in a sentence: a chat ("Lark"), or the parent story ("parent #12")."""
+    return t("short.child.where", n=stop.get("who", "")) if stop["where"] == "parent" else app(stop["where"])
+
+
+def _snapshot(child: dict) -> dict:
+    """What the parent's card shows of a child: kept on the parent's step, and written again
+    on every change of the child, so the parent's card needs no other file to be drawn."""
+    way = _walk(child)
+    return {"id": child["id"], "title": child["title"], "who": child.get("who", ""),
+            "status": child["status"], "stop": bool(child.get("stop")),
+            "done": sum(m["status"] in ("done", "skipped") for m in way), "total": len(way)}
+
+
+def children(story: dict) -> list[int]:
+    """The numbers of a story's child stories, in the order of its steps."""
+    out = []
+    for m in story["marks"]:
+        for slot in [m] + ((m.get("loop") or {}).get("rounds") or []):
+            if slot.get("child"):
+                out.append(slot["child"]["id"])
+    return out
+
+
+def _sync_parent(state: Path, channels: list[Channel], child: dict) -> None:
+    """The child changed: its parent's step follows it (doing, done, failed), and the
+    parent's card shows the child's progress. The child's own lock is not held here."""
+    ref = child["parent"]
+
+    def follow(p):
+        m = _find(p, ref["step"])
+        k = ref.get("round")
+        loop = (m or {}).get("loop")
+        slot = loop["rounds"][k - 1] if m and loop and k and k <= len(loop["rounds"]) else m
+        if slot is None or (slot.get("child") or {}).get("id") != child["id"]:
+            return False
+        snap = _snapshot(child)
+        want = {"running": "doing", "done": "done", "failed": "failed"}[child["status"]]
+        moved = slot["status"] in ("todo", "doing") and slot["status"] != want
+        if snap == slot["child"] and not moved:
+            return False
+        slot["child"] = snap
+        if moved:
+            why = t("short.child.stopped") if child.get("stop") else (child["events"][-1]["text"] if child["events"] else "")
+            _mark(p, m["name"], want, f"#{child['id']}: {why}" if want == "failed" else "",
+                  round=None if not loop or loop.get("open") else k)
+        if child["status"] != "running" and moved:
+            _event(p, t("short.ev.child_ended", icon=ICON[want], n=child["id"],
+                        step=m["name"] + _round(loop, k if loop else None)))
+    _change(state, channels, ref["story"], follow)
+
+
 def mark(state: Path, channels: list[Channel], number: int, name: str, *, status: str = "done",
-         note: str = "", took: str | None = None, round: int | None = None) -> dict | None:
-    """A mark happened. took: the option a fork went down; round: a loop's round (from 1)."""
+         note: str = "", took: str | None = None, round: int | None = None, by: dict | None = None,
+         inputs: dict | None = None, outputs: dict | None = None) -> dict | None:
+    """A mark happened. took: the option a fork went down; round: a loop's round (from 1).
+    by: who marks it (executor()); inputs, outputs: what the step used and made (key: value)."""
     def change(s):
         m = _mark(s, name, status, note, took, round)
+        _ids(s)
+        moved = ""
+        if by and by.get("by"):
+            if m.get("tag") and m["tag"] != by["tag"]:  # the step changed hands: one line says so
+                moved = f" · ↪ {m['tag']} → {by['tag']}"
+            m["by"], m["tag"] = by["by"], by["tag"]
+        for key, got in (("in", inputs), ("out", outputs)):
+            if got:
+                m[key] = {**m.get(key, {}), **got}
         took_ = (m.get("fork") or {}).get("took") if took else None
+        made = " · " + " ".join(f"{k}={v}" for k, v in outputs.items()) if outputs else ""
         _event(s, _noted(f"{ICON[status]} {m['name']}" + (f" → {took_}" if took_ else "")
-                         + _round(m.get("loop"), m["loop"].get("last") if m.get("loop") else None), note))
+                         + _round(m.get("loop"), m["loop"].get("last") if m.get("loop") else None)
+                         + made + moved, note),
+               step=m.get("id"), status=status, by=(by or {}).get("by"), **{"in": inputs or {}, "out": outputs or {}})
     return _change(state, channels, number, change)
 
 
@@ -181,9 +549,15 @@ def note(state: Path, channels: list[Channel], number: int, text: str) -> dict |
 def finish(state: Path, channels: list[Channel], number: int, *, failed: bool = False,
            note: str = "") -> dict | None:
     def end(s):
+        running = [c for c in children(s) if (x := load(state, c)) and x["status"] == "running"]
+        if running and not failed:  # a parent waits for its children; --failed stops them
+            raise ValueError(t("short.child.running", n=s["id"], children=join([f"#{c}" for c in running])))
         s["status"], s["ended"] = ("failed" if failed else "done"), _now()
         _event(s, _noted(t("short.ev.failed" if failed else "short.ev.done"), note))
-    return _change(state, channels, number, end)
+    s = _change(state, channels, number, end)
+    for c in children(s) if s and failed else []:
+        ask_stop(state, channels, c, where="parent", who=f"#{number}")
+    return s
 
 
 def ask_stop(state: Path, channels: list[Channel], number: int, *, where: str,
@@ -194,8 +568,11 @@ def ask_stop(state: Path, channels: list[Channel], number: int, *, where: str,
         if s["status"] != "running" or s.get("stop"):
             return False  # nothing new: a second press must not edit every card again
         s["stop"] = {"where": where, "who": who, "at": _now()}
-        _event(s, t("short.ev.stop", where=app(where)))
-    return _change(state, channels, number, stop)
+        _event(s, t("short.ev.stop", where=_from(s["stop"])))
+    s = _change(state, channels, number, stop)
+    for c in children(s) if s else []:  # stopping a release stops every part of it
+        ask_stop(state, channels, c, where="parent", who=f"#{number}")
+    return s
 
 
 def stop_all(state: Path, channels: list[Channel], *, where: str, who: str = "") -> list[int]:
@@ -316,9 +693,13 @@ def _change(state: Path, channels: list[Channel], number: int, fn, show: bool = 
             return None
         if fn(story) is False:  # fn changed nothing
             return story
+        _ids(story)
         if show:
             _show(channels, story.get("chats") or list(story["copies"]), story)
+            _undrawn(story, channels)
         _save(state, story)
+    if show and story.get("parent"):  # outside the child's lock: the parent's is taken next
+        _sync_parent(state, channels, story)
     return story
 
 
@@ -327,7 +708,9 @@ def _key(name: str) -> str:
 
 
 def _find(story: dict, name: str) -> dict | None:
-    return next((m for m in story["marks"] if _key(m["name"]) == _key(name)), None)
+    """A step by its text, else by its stable id (s3)."""
+    return (next((m for m in story["marks"] if _key(m["name"]) == _key(name)), None)
+            or next((m for m in story["marks"] if m.get("id") == name.strip()), None))
 
 
 def _step(story: dict, name: str) -> tuple[dict, dict, dict] | None:
@@ -337,6 +720,15 @@ def _step(story: dict, name: str) -> tuple[dict, dict, dict] | None:
 
 
 def _spec(text: str) -> dict:
+    """A mark as planned; "build → child" (or "->") also says a child story will do it."""
+    hit = CHILD_MARK.match(text.strip())
+    spec = _shape(hit[1] if hit else text)
+    if hit:
+        spec["expects_child"] = True
+    return spec
+
+
+def _shape(text: str) -> dict:
     """A mark as planned. "CI green? yes | no=fix, rerun" is a fork: a question, then 2 to 4
     options split by |, each with up to 3 small steps after =, split by commas."""
     mark = min((c for c in "?？" if c in text), key=text.index, default="?")  # 通知？ too
@@ -513,8 +905,11 @@ def _noted(head: str, note: str) -> str:
     return t("with_note", head=head, note=note) if note else head
 
 
-def _event(story: dict, text: str) -> None:
-    story["events"].append({"at": _now(), "text": text})
+def _event(story: dict, text: str, **keys) -> None:
+    """One line of the story's log. keys (step, by, status, in, out) make it readable three
+    ways; a line without them is still a line."""
+    keys = {k: v for k, v in keys.items() if v not in (None, "", {})}
+    story["events"].append({"at": _now(), "text": text, **({"v": EVENT_V, **keys} if keys else {})})
 
 
 def _elapsed(story: dict) -> str:
@@ -535,9 +930,12 @@ def markdown(story: dict) -> str:
     done = sum(m["status"] in ("done", "skipped") for m in marks)
     bar = "▓" * done + "░" * (len(marks) - done)
     lines = [f"**{done}/{len(marks)}** {bar} · {_elapsed(story)}"
-             + (f" · {story['who']}" if story.get("who") else "")]
+             + (f" · {story['who']}" if story.get("who") else "")
+             + (f" · 👥 {story['team']}" if story.get("team") else "")]
+    if up := story.get("parent"):
+        lines.append(t("short.child.up", n=up["story"], title=up["title"], step=up.get("label") or up["step"]))
     if (stop := story.get("stop")) and story["status"] == "running":
-        lines.append(t("short.stop_asked", where=app(stop["where"]), at=stop["at"][11:16]))
+        lines.append(t("short.stop_asked", where=_from(stop), at=stop["at"][11:16]))
     unread = sum(not r["read"] for r in story.get("replies", []))
     if unread and story["status"] == "running":
         lines.append(t("short.unread.many" if unread > 1 else "short.unread.one", n=unread))
@@ -554,18 +952,37 @@ def markdown(story: dict) -> str:
             rounds = loop["rounds"]
             now = next((k + 1 for k, r in enumerate(rounds) if r["status"] in ("todo", "doing")), None)
             took = f" ×{len(rounds)}" + (f" ·{_round(loop, now)}" if now and m["status"] != "todo" else "")
+        took += _child_tag(m) if not loop else ""
         lines.append(f"{ICON[m['status']]} {m['name']}{took}{at}{extra}"
-                     + (f" — {m['note']}" if m.get("note") else "") + (t("short.here") if m is here else ""))
+                     + (f" — {m['note']}" if m.get("note") else "") + (t("short.here") + _tag(m) if m is here else ""))
         lines += _options(f, here) if f else []
         if loop and loop.get("open"):
             lines += _tries(loop, here)
         elif loop:
             lines.append(INDENT + "└ " + " → ".join(f"{ICON[r['status']]} {r['name']}"
-                                                    + (t("short.here") if r is here else "") for r in loop["rounds"]))
+                                                    + (t("short.here") + _tag(m) if r is here else "") for r in loop["rounds"]))
+            lines += [INDENT + INDENT + f"↳ {r['name']}{_child_tag(r)}" for r in loop["rounds"] if r.get("child")]
     if story["events"]:
         lines.append("")
         lines += [f"`{e['at'][11:16]}` {e['text']}" for e in story["events"][-EVENTS_SHOWN:]]
     return "\n".join(lines)
+
+
+def _tag(m: dict) -> str:
+    """ · app-release-kit/sub:mac: who is on the step being done, the card's only word on the
+    execution (specs/multi-brahman.md)."""
+    return f" · {m['tag']}" if m.get("tag") else ""
+
+
+def _child_tag(slot: dict) -> str:
+    """ → #13 · 2/5 · freerdp: the child story doing this step (or round), as one tag. A
+    step planned as "→ child" whose child has not started yet says so."""
+    c = slot.get("child")
+    if not c:
+        return t("short.child.expected") if slot.get("expects_child") else ""
+    head = f" → #{c['id']}" + ("" if c["status"] == "running" else " " + ICON[c["status"]])
+    return (head + f" · {c['done']}/{c['total']}" + (f" · {c['who']}" if c.get("who") else "")
+            + (" · ■" if c.get("stop") and c["status"] == "running" else ""))
 
 
 def _tries(loop: dict, here: dict | None) -> list[str]:
@@ -574,8 +991,8 @@ def _tries(loop: dict, here: dict | None) -> list[str]:
     out = [INDENT + "├ " + t("short.loop.earlier", n=len(loop["rounds"]) - len(shown))] if len(shown) < len(loop["rounds"]) else []
     for k, r in enumerate(shown):
         out.append(INDENT + ("└" if k == len(shown) - 1 else "├") + f" {ICON[r['status']]} {r['name']}"
-                   + (f" `{r['at'][11:16]}`" if r.get("at") else "") + (f" — {r['note']}" if r.get("note") else "")
-                   + (t("short.here") if r is here else ""))
+                   + _child_tag(r) + (f" `{r['at'][11:16]}`" if r.get("at") else "")
+                   + (f" — {r['note']}" if r.get("note") else "") + (t("short.here") if r is here else ""))
     return out
 
 
@@ -584,7 +1001,7 @@ def _options(f: dict, here: dict | None) -> list[str]:
     out = []
     for k, o in enumerate(f["options"]):
         branch = INDENT + ("└" if k == len(f["options"]) - 1 else "├")
-        steps = " → ".join(f"{ICON[s['status']]} {s['name']}" + (t("short.here") if s is here else "")
+        steps = " → ".join(f"{ICON[s['status']]} {s['name']}" + (t("short.here") + _tag(s) if s is here else "")
                            for s in o["steps"])
         if f["took"] and o["name"] != f["took"]:
             out.append(f"{branch} ┄ {o['name']}{t('short.fork.not_taken')}")
@@ -642,10 +1059,22 @@ def board(state: Path, everything: bool = False) -> str:
     ts = [s for s in all_stories(state) if everything or s["status"] == "running"]
     if not ts:
         return t("short.none_running") if not everything else t("short.none")
+    shown = {s["id"] for s in ts}
+    under = {}  # a child is listed under its parent when the parent is listed too
+    for s in ts:
+        if (up := s.get("parent")) and up["story"] in shown:
+            under.setdefault(up["story"], []).append(s)
     out = []
     for s in ts:
-        done = sum(m["status"] in ("done", "skipped") for m in s["marks"])
-        last = s["events"][-1]["text"] if s["events"] else ""
-        out.append(t("short.board_line", title=title(s), done=done, total=len(s["marks"]),
-                     elapsed=_elapsed(s), last=last))
+        if (up := s.get("parent")) and up["story"] in shown:
+            continue
+        out.append(_board_line(s))
+        out += [INDENT + "↳ " + _board_line(c) for c in under.get(s["id"], [])]
     return "\n".join(out)
+
+
+def _board_line(s: dict) -> str:
+    done = sum(m["status"] in ("done", "skipped") for m in s["marks"])
+    last = s["events"][-1]["text"] if s["events"] else ""
+    return t("short.board_line", title=title(s), done=done, total=len(s["marks"]),
+             elapsed=_elapsed(s), last=last)

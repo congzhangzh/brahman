@@ -9,7 +9,7 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import asks, long_stories as longs, procs, short_stories as shorts, topics
+from . import asks, long_live, long_stories as longs, procs, short_stories as shorts, teams, topics
 from .channel import Channel, Incoming, Linked, post_all
 from .engine import Codex, Engine
 from .runs import Run, note_step, tail
@@ -71,8 +71,9 @@ class Bot:
         self.chat_locks: dict[str, threading.Lock] = {}
         self.seen: OrderedDict[str, None] = OrderedDict()
         self.tried: set[tuple[str, str]] = set()  # (topic, chat) a thread was tried for
-        self.long_prompts: dict[tuple[str, str], tuple[str, str]] = {}  # (chat, prompt) -> (engine, folder)
+        self.long_prompts: dict[tuple[str, str], tuple[str, str, str]] = {}  # (chat, prompt) -> (engine, folder, mode)
         self.long_engines = {"claude-code": engine, "codex": Codex()}  # serve sets [long]'s (engine.long_engines)
+        self.team_opts = None  # serve sets [families.team] (teams.settings); None: the defaults
 
     def serve(self) -> None:
         """Listen on every channel; the first one keeps the main thread."""
@@ -117,13 +118,22 @@ class Bot:
             if n:  # an answer to a short story's card or its 💬 Reply: for the executor
                 shorts.reply(self.state, self.channels, n, text, where=ch.name, who=msg.sender)
                 return ch.reply(msg, t("short.sent", n=n))
+            team = teams.find(self.state, msg.chat, msg.reply_to) if msg.reply_to and self.state else None
+            if team:  # an answer to a team's card or its 💬 Reply: for its RM
+                teams.reply(self.state, self.channels, team, text, where=ch.name, who=msg.sender,
+                            opts=self.team_opts)
+                return ch.reply(msg, t("team.sent", team=team))
             pending = self.long_prompts.pop((msg.chat, msg.reply_to), None) if msg.reply_to else None
             if pending and text.lower() in CANCEL_WORDS:
                 return ch.reply(msg, t("long.cancelled"))
+            if pending and pending[0] == "folder?":  # 📂 Other folder…: the path typed
+                return self._safe(lambda c, m: self.long_folder(c, m, pending[1], text), ch, msg)
             if pending:  # the task asked for by /long's card: start the story
                 return self._safe(lambda c, m: self.long_new(c, m, *pending, text), ch, msg)
             story = longs.find(self.state, msg.chat, msg.thread) if msg.thread and self.state else None
             word, _, arg = text.partition(" ")
+            if story and word in ("/status", "/handover", "/takeback"):  # who holds it (long_live.py)
+                return self._safe(lambda c, m: self.long_holder(c, m, story, word), ch, msg)
             if story and (text in ("/help", "/start") or word in self.commands):
                 # the buddy's own command in a long story's thread: answered there by its code,
                 # not by a model (an engine's own command, like /compact, still goes to the session)
@@ -132,7 +142,7 @@ class Bot:
                 return ch.reply(msg, t("help") + "".join(f"\n{n}  {h}" for n, (h, _) in self.commands.items()))
             if story:  # a long story's thread: for its session, not for a buddy turn
                 said = longs.say(self.state, self.channels, story["id"], text, where=ch.name,
-                                 who=msg.sender, engine=self.long_engines["claude-code"])
+                                 who=msg.sender, engine=longs.pick(self.long_engines, "claude-code", story.get("mode")))
                 return ch.reply(msg, said) if said else None
             command = text in ("", "/help", "/start", "/resume", "/new") or word in self.commands
             loose = msg.thread and self.state and not topics.find(self.state, msg.chat, msg.thread)
@@ -176,7 +186,11 @@ class Bot:
                 run = (Run(self.state, "chat", "chat", f"message on {ch.name}"
                            + (f" · topic {topic['id']} {topic['name']}" if topic else ""))
                        if self.state else None)
-                r = self.engine.run(text, cwd=self.workspace, session_id=self.sessions.get(chat))
+                # under the umbrella (procs.py) the turn outlives a restart: tag says where its
+                # answer goes, and the next instance delivers it (adopted)
+                umbrella = {"kind": "chat", "tag": {"chat": msg.chat, "session": chat, "text": text[:200]}} \
+                    if procs.umbrella() else {}
+                r = self.engine.run(text, cwd=self.workspace, session_id=self.sessions.get(chat), **umbrella)
                 self.sessions.set(chat, r.session_id)
             if run:
                 run.step("agent", engine="claude-code", session_id=r.session_id, ok=r.ok,
@@ -212,6 +226,8 @@ class Bot:
         ask_id, _, choice = rest.partition(":")
         if kind == "short" and self.state and ask_id.isdigit():
             return self._short(ch, msg, int(ask_id), choice)
+        if kind == "team" and self.state and choice == "reply":
+            return self._team(ch, msg, ask_id)
         if kind != "ask" or self.state is None:
             return log.warning("unknown button %r", msg.action)
         said, ask = asks.answer(self.state, self.channels, ask_id, choice, ch.name, msg.sender)
@@ -231,29 +247,105 @@ class Bot:
                      title=f"↻ {ask['answer']['label']}", subtitle=t("bot.answered_on", where=app(ch.name, False)))
 
     def long_answer(self, ch: Channel, msg: Incoming, step: list) -> None:
-        """A press on a long story's card. /long's guided start: engine, then folder, then the
-        task as a reply; or Allow / Deny for a permission a Codex session waits on."""
+        """A press on a long story's card. /long's guided start: engine, folder, 🔒 sandboxed or
+        🔓 open (only when this instance offers open), then the task as a reply; or Allow / Deny
+        for a permission a Codex session waits on. A press comes from an allowed sender only
+        (on_message), so the 🔓 is always a human's. The folder is a button (an earlier story's,
+        a project touched last), ✏️ a typed path (Lark: a text box on the card itself; Telegram:
+        a reply), or 📂 a walk from ~/projects."""
         kind, *rest = step
         if kind == "decide":
             return longs.decide(self.state, *rest)
+        if kind == "later":
+            return longs.later(self.state, int(rest[0]))
+        if kind == "perm":  # ✅ Allow / ⛔ Deny on what the buddy's live session asks
+            return long_live.answer(self.state, int(rest[0]), rest[1], rest[2])
+        if kind == "takeback":  # ⏹ End the terminal session now
+            story = longs.load(self.state, int(rest[0]))
+            if story:
+                said = long_live.takeback(self.state, self.channels, story["id"],
+                                          longs.pick(self.long_engines, "claude-code", story.get("mode")), force=True)
+                if said:
+                    ch.reply(msg, said)
+            return None
+        if kind == "resume":  # ▶ Resume on the card a message to a session nobody held asked
+            story = longs.load(self.state, int(rest[0]))
+            if story:
+                said = longs.resume(self.state, self.channels, story["id"], where=ch.name,
+                                    engine=longs.pick(self.long_engines, "claude-code", story.get("mode")))
+                if said:
+                    ch.reply(msg, said)
+            return None
         if kind == "engine":
-            options = [[f"f{k}", f.replace(str(Path.home()), "~")] for k, f in enumerate(longs.folders(self.state))]
+            found = longs.folders(self.state)
+            options = [[f"f{k}", f.replace(str(Path.home()), "~")] for k, f in enumerate(found)]
+            options.append(["path:reply", t("long.type_path")])  # just the path, typed: no list
+            options.append(["other", t("long.other_folder")])  # any folder: typed, with a listing
             options.append(["cancel", t("btn.cancel")])  # no `then`: the card just settles
+            then = {f"f{k}": ["long", "folder", rest[0], f] for k, f in enumerate(found)}
+            then["path:reply"] = ["long", "path", rest[0]]
+            then["other"] = ["long", "other", rest[0]]
             asks.create(self.state, self.channels, self.linked.of(msg.chat), t("long.pick_folder"),
-                        title=t("long.title.start"), options=options,
-                        then={key: ["long", "folder", rest[0], f]
-                              for (key, _), f in zip(options, longs.folders(self.state))})
-        elif kind == "folder" and hasattr(ch, "prompt"):
+                        title=t("long.title.start"), options=options, then=then)
+        elif kind == "path" and (msg.text or "").strip():  # typed in the card's text box (Lark)
+            self.long_folder(ch, msg, rest[0], msg.text)
+        elif kind == "path" and hasattr(ch, "prompt"):  # a plain button (Telegram): ask for it
+            self._ask_folder(ch, msg, rest[0], t("long.ask_path"))
+        elif kind == "other" and hasattr(ch, "prompt"):
+            _, near, subs = longs.find_folder("")  # ~/projects, listed
+            self._ask_folder(ch, msg, rest[0], t("long.ask_folder", near=near.replace(str(Path.home()), "~"),
+                                                 subs=", ".join(subs) or "—"))
+        elif kind == "folder" and f"{rest[0]}/open" in self.long_engines:
             engine, folder = rest
+            asks.create(self.state, self.channels, self.linked.of(msg.chat), t("long.pick_mode"),
+                        title=t("long.title.start"),
+                        options=[["sandbox", t("long.mode.sandbox_btn")], ["open", t("long.mode.open_btn")],
+                                 ["cancel", t("btn.cancel")]],
+                        then={m: ["long", "mode", engine, folder, m] for m in ("sandbox", "open")})
+        elif kind in ("folder", "mode") and hasattr(ch, "prompt"):
+            engine, folder, mode = (*rest, "sandbox")[:3]
             handle = ch.prompt(msg.chat, t("long.ask_task", engine=longs.ENGINE_NAMES[engine],
-                                           folder=folder.replace(str(Path.home()), "~")))
+                                           folder=folder.replace(str(Path.home()), "~"))
+                               + (" " + t("long.mode.open_short") if mode == "open" else ""))
             if handle:
-                self.long_prompts[(msg.chat, handle)] = (engine, folder)
+                self.long_prompts[(msg.chat, handle)] = (engine, folder, mode)
 
-    def long_new(self, ch: Channel, msg: Incoming, kind: str, folder: str, text: str) -> None:
+    def long_holder(self, ch: Channel, msg: Incoming, story: dict, word: str) -> None:
+        """/status, /handover, /takeback in a long story's thread: who holds the session."""
+        n = story["id"]
+        if word == "/status":
+            said = long_live.status(self.state, n)
+        elif word == "/handover":
+            said = long_live.handover(self.state, self.channels, n)
+        else:
+            said = long_live.takeback(self.state, self.channels, n,
+                                      longs.pick(self.long_engines, "claude-code", story.get("mode")))
+        if said:
+            ch.reply(msg, said)
+
+    def _ask_folder(self, ch: Channel, msg: Incoming, engine: str, text: str) -> None:
+        handle = ch.prompt(msg.chat, text)
+        if handle:
+            self.long_prompts[(msg.chat, handle)] = ("folder?", engine)
+
+    def long_folder(self, ch: Channel, msg: Incoming, engine: str, typed: str) -> None:
+        """The answer to 📂 Other folder…: a folder that exists goes on like a button (🔒/🔓,
+        then the task); anything else gets the nearest folder that exists and what is in it,
+        and the question again, so the phone can walk the tree one reply at a time."""
+        folder, near, subs = longs.find_folder(typed)
+        if folder:
+            return self.long_answer(ch, msg, ["folder", engine, folder])
+        listing = t("long.ask_folder", near=near.replace(str(Path.home()), "~"), subs=", ".join(subs) or "—")
+        looked = typed.strip().endswith("/")  # a path ending in /: a look inside, not a miss
+        self._ask_folder(ch, msg, engine, listing if looked else t("long.no_folder", typed=typed.strip()) + "\n" + listing)
+
+    def long_new(self, ch: Channel, msg: Incoming, kind: str, folder: str, mode: str, text: str) -> None:
+        engine = longs.pick(self.long_engines, kind, mode)
+        if engine is None:
+            return ch.reply(msg, t("gate.open_off"))
         try:
             longs.new(self.state, self.channels, self.linked.of(msg.chat), text, cwd=folder, where=ch.name,
-                      engine=self.long_engines[kind], kind=kind)
+                      engine=engine, kind=kind, mode=mode, who=msg.sender)
         except ValueError as e:  # its home folder: a long story may write there
             ch.reply(msg, str(e))
 
@@ -274,6 +366,18 @@ class Bot:
             handle = ch.prompt(msg.chat, t("bot.short_prompt", n=n, how=how))
             if handle:
                 shorts.prompted(self.state, n, msg.chat, handle)
+
+    def _team(self, ch: Channel, msg: Incoming, team: str) -> None:
+        """💬 Reply under a team's card, for its RM: typed on the card (Lark's text box), or
+        asked for (Telegram), as for a short story."""
+        if msg.text:
+            teams.reply(self.state, self.channels, team, msg.text, where=ch.name, who=msg.sender,
+                        opts=self.team_opts)
+        elif hasattr(ch, "prompt"):
+            how = t("bot.short_how.telegram" if ch.name == "telegram" else "bot.short_how.other")
+            handle = ch.prompt(msg.chat, t("bot.team_prompt", team=team, how=how))
+            if handle:
+                teams.prompted(self.state, team, msg.chat, handle)
 
     def stop(self, ch: Channel, msg: Incoming) -> None:
         """■ STOP, like the button in a lift: everything in motion stops, from any app.
@@ -300,6 +404,25 @@ class Bot:
     def resume(self, ch: Channel, msg: Incoming) -> None:
         was = self.scheduler.resume() if self.scheduler else False
         self._notify(msg.chat, t("resume.done", where=app(ch.name)) if was else t("resume.none"))
+
+    def adopted(self, meta: dict, p) -> None:
+        """A run the last instance started and a restart left running (procs.adopt): a chat
+        turn's answer goes to its chats, a long story's to its thread, a job to its record."""
+        kind, tag = meta.get("kind"), meta.get("tag") or {}
+        if kind == "long" and self.state:
+            longs.adopted(self.state, self.channels, meta, p, self.long_engines)
+        elif kind == "chat" and tag.get("chat"):
+            from .engine import ClaudeCode
+            r = ClaudeCode.parse(p, tag.get("session_id") or "", bool(tag.get("resumed")))
+            if tag.get("session"):
+                self.sessions.set(tag["session"], r.session_id)
+            text = t("bot.adopted", prompt=tag.get("text", "")) + "\n\n" + (r.text or "")
+            for c in self.linked.of(tag["chat"]):
+                owner = next((x for x in self.channels if x.owns(c)), None)
+                if owner:
+                    owner.post(c, text, title="buddy")
+        elif kind == "job" and self.scheduler:
+            self.scheduler.adopted(meta, p)
 
     def _notify(self, chat: str, markdown: str) -> None:
         """Tell every chat of this person, with ▶ Resume or ■ Stop under it."""

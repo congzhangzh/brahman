@@ -101,6 +101,21 @@ def parent(pid: int) -> tuple[int, str] | None:
         return None
 
 
+def process(pid: int) -> dict | None:
+    """pid as ps sees it, or None when it is gone: its name, process group, the foreground group
+    of its terminal (tpgid), the terminal ("?" or "??" for none) and when it started, which tells
+    it from a later process given the same number. One path on Linux and macOS."""
+    if WINDOWS:
+        return None
+    try:
+        f = subprocess.run(["ps", "-o", "pgid=,tpgid=,tty=,lstart=,comm=", "-p", str(pid)],
+                           capture_output=True, text=True, timeout=5).stdout.split()
+        return {"pgid": int(f[0]), "tpgid": int(f[1]), "tty": f[2], "started": " ".join(f[3:8]),
+                "comm": Path(" ".join(f[8:])).name}  # macOS ps gives the program's path
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        return None
+
+
 def _ps(pid: int) -> tuple[int, str]:
     out = subprocess.run(["ps", "-o", "ppid=,comm=", "-p", str(pid)], capture_output=True,
                          text=True, timeout=5).stdout.strip()

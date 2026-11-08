@@ -66,6 +66,30 @@ and Feishu (China) works, or all three at once: `buddy init` asks for each, and 
 below says how to create a Lark or Feishu app. With both, the Lark app's ids read
 `lark:oc_…` / `lark:ou_…`, so `buddy allow lark:ou_… --chat lark:oc_…` (the bot's reply says it).
 
+**The workbench from another computer.** The page listens on `127.0.0.1:8787` only (`[web]
+port`), so reach it through ssh. On the other computer:
+
+```bash
+ssh -N -L 8787:127.0.0.1:8787 you@server      # then open http://localhost:8787/
+ssh -N -L 18787:127.0.0.1:8787 you@server     # 8787 taken there: any local port works
+```
+
+Log in as the user the buddy runs as: on Linux the page asks the kernel who owns each
+connection and refuses anyone else, and through a tunnel that is your ssh login. The address
+must be `localhost` or `127.0.0.1` (the page checks the `Host` header), not the computer's
+name. Keep the forward on that computer's loopback: no `-g` and no `0.0.0.0:`, since the page
+acts as you. To reuse it, put this in that computer's `~/.ssh/config` and run
+`ssh -fN buddy-wb`:
+
+```
+Host buddy-wb
+    HostName server
+    User you
+    LocalForward 8787 127.0.0.1:8787
+    ExitOnForwardFailure yes
+    ServerAliveInterval 30
+```
+
 ## Quick start (from the repository)
 
 Requirements: [uv](https://docs.astral.sh/uv/), Claude Code (logged in), and a Feishu or
@@ -202,7 +226,9 @@ card.
 Under a running card sit **■ Stop** and **💬 Reply**, so the owner can steer the work, not only
 watch it. The buddy can't kill a session it didn't start, so both go into the story file
 for the executor. Its next `buddy-short` call prints each reply once and exits with code 3
-while a stop is asked; while it waits on a pipeline, it polls `buddy-short check 12`. A reply
+while a stop is asked; while it waits on a pipeline, it polls `buddy-short check 12`. If it is a
+Claude Code session in a pys or screen window, the buddy also types a fixed line there telling it
+to run `check` (`buddy-short attach 12` for a story started earlier). A reply
 can also be a quote of the card, or `/short 12 <text>` (`/short 12 stop`) from any chat, the
 web included. ■ STOP asks every running story to stop.
 
@@ -235,6 +261,25 @@ buddy-short list                       # the running stories; --all for every on
 `buddy.toml` (link it into `~/.local/bin`). The board lives in
 `$XDG_STATE_HOME/work_brahman/short_stories/<number>.json`; the stages are in
 `src/work_brahman/families/short_story/FAMILY.md`.
+
+## Teams
+
+A **team** is the who of the work: one per kit, its release manager (RM), its product owner
+(PO) and one long-lived member per area, each carried by one generation of sessions at a time.
+One live card per kit shows a row per role: the session, its pys window, its age (years =
+compactions, and ctx now, ⚠️ from `age_warn`), its book, its running short stories, and the
+last handovers. The RM records what it did; the card looks at the rest and changes only when
+the banded facts do. 💬 Reply under it goes to the RM.
+
+```bash
+buddy-team new app-release-kit --rm app-rm app-release-kit-1 --book role-release-manager.md
+buddy-team join app-release-kit xrdp-cq --role xrdp --area "xrdp, sesman" --project ~/projects/xrdp
+buddy-team handover xrdp xrdp-cq xrdp-g2      # the same for the RM's own role
+buddy-team show app-release-kit               # exact ctx, now; check: the owner's replies
+```
+
+The stages and rules are in `src/work_brahman/families/team/FAMILY.md`; the idea in
+`specs/team.md`.
 
 ## Language and tests
 
@@ -272,6 +317,9 @@ a job prompt. See `skills/pr-review/` for an example.
   your machine.
 - The Telegram token is part of every Bot API URL, so the buddy never logs URLs.
 - Secrets come from the environment only; `.env` and `buddy.toml` are git-ignored.
+- The web workbench binds `127.0.0.1` only and, on Linux, answers only connections owned by
+  the buddy's own user; from another computer, use an `ssh -L` tunnel (see "Install as an
+  app").
 
 ## Roadmap
 

@@ -29,7 +29,7 @@ keep tables to 3 or 4 short columns and lead with the answer.
 Do not run text-to-speech or other audio commands: audio would play on the
 server, not on the reader's phone."""
 
-# Long stories (/long new, and a thread no terminal holds) are sessions you started to
+# Long stories (/newlong, and a thread no terminal holds) are sessions you started to
 # work in, so they may write: these keys go over [claude]'s (the rest carries over). Without
 # [long.claude] a long story is as read-only as the chat. acceptEdits lets it edit files in
 # its own folder only; Bash runs what allowed_tools lists, and disallowed_tools wins over it.
@@ -51,6 +51,20 @@ disallowed_tools = [
 
 [long.codex]
 sandbox = "workspace-write"   # its own folder; read-only without this
+
+# 🔓 Open sessions (/newlong --open, or 🔓 on the card) get the owner's ssh agent, gh and
+# files from the gate, but their tool rules are still [long.claude] / [long.codex] above
+# unless these keys go over them. So by default an open session still edits only its own
+# folder (acceptEdits), runs only the Bash list, and Codex writes only its workspace, which
+# also stops a commit in a git worktree (its .git is in the main checkout, another folder).
+# To make open as free as your terminal, without the questions a headless turn can't ask:
+# [long.open.claude]
+# permission_mode = "bypassPermissions"   # every tool, every folder ("auto": a classifier decides)
+# allowed_tools = []                       # no list: every tool
+# disallowed_tools = []                    # or keep a few, e.g. ["Bash(git push --force:*)"]
+#
+# [long.open.codex]
+# sandbox = "danger-full-access"
 
 # One person, several chat apps (optional): posts go to every chat here, what you do in
 # one is mirrored to the others, and they share one agent session. The first names the

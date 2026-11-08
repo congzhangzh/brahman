@@ -19,25 +19,37 @@ session's own transcript is the single source of truth; the thread is a mirror o
 
 | # | Stage | Leads | Executes | Where | Done when |
 |---|---|---|---|---|---|
-| 1 | **Start** in a terminal | you | `BUDDY_LONG="<name>" claude` (in GNU screen, so the phone can type into it) | a new thread in each chat | the thread says which screen window holds it |
+| 1 | **Start** in a terminal | you | `BUDDY_LONG="<name>" claude` (in a pys window, or GNU screen, so the phone can type into it; pys wins when both are set) | a new thread in each chat | the thread says which window holds it |
 | 1 (Codex) | **Start** in a terminal | you | `buddy-long codex` (registers the terminal, then runs Codex; its first prompt claims the story) | a new thread in each chat, and a tab on the web | the thread says which screen window holds it |
-| 1′ | **Start** from the phone | you | `/long new`: a card asks the agent (Claude, Codex), the folder (earlier stories', then your recent projects), then the task as a reply; or in a line, `/long new [claude\|codex] [folder] <task>` | a new thread; its first turn runs headless (`[long]`'s tools) | the thread says how to take it to a terminal |
+| 1′ | **Start** from the phone | you | `/newlong`: a card asks the agent (Claude, Codex), the folder (six buttons: earlier stories', then your recent projects, never a scratch folder in /tmp; or 📂 Other folder…, typed as a reply: a name under ~/projects or a path, and a miss lists the nearest folder, a fragment working as a search), 🔒 sandboxed or 🔓 open, then the task as a reply; or in a line, `/newlong [--open] [claude\|codex] [folder] <task>` (a folder that isn't there starts nothing) | a new thread. Claude: the buddy's **live session**, one process over the stream-json protocol (a unit in buddy-long.slice, 🔒 in the gate's sandbox or 🔓 open), the task its first message; Codex: its first turn headless | the thread says 🤖 the buddy holds it, with /status and /handover |
 | 2 | **Turn**: the session answers | the session | its Stop hook posts the turn's last message | the thread | one message per turn, its prompt as the subtitle |
-| 3 | **Say**: you write in the thread | you | Codex: `codex queue`, which Codex's daemon hands to the terminal or runs itself. Claude Code: held by a terminal: typed into its window when idle, handed over by its Stop hook when busy; held by nobody: a headless turn of the same session (`claude -p --resume`, `[long]`'s tools) | the session | the reply says ⌨ typed / 📥 queued, or the headless turn posts its answer |
+| 3 | **Say**: you write in the thread | you | Codex: `codex queue`, which Codex's daemon hands to the terminal or runs itself. Claude Code: held by a terminal: typed into its window when idle, handed over by its Stop hook when busy; held by the buddy (🤖): one JSON line into its live session, a permission it needs comes back as ✅ Allow / ⛔ Deny; handed over (⏳ 📌): it waits for the terminal; held by nobody (💤): it waits and a card asks first, ▶ Resume / ⏸ Not now (a resume loads the whole conversation again: tokens), then the live session starts with what waited | the session | the reply says 📨 sent / ⌨ typed / 📥 queued / 📥 kept, or the card asks |
 | 4 | **Wait**: it needs a person | the session | Claude Code: its Notification hook posts the dialog as the screen shows it; Codex: its PermissionRequest hook posts a card with ✅ Allow / ⛔ Deny and waits (45 s while a terminal holds it, 9 min when none does) | the thread, the card | Claude Code: you reply with a number, that key is pressed; Codex: your press is its answer, or the terminal asks once the wait ends |
-| 5 | **Let go / take back** | you | closing the terminal (SessionEnd) leaves it to the thread; `BUDDY_LONG=1 claude --resume <id>` takes it back | the thread | — |
+| 5 | **Hand over / take back** | you | `/status` says who holds it (🤖 buddy, ⏳ releasing, 📌 reserved, 👤 terminal, 💤 nobody). `/handover`: the buddy ends its turn and closes, the session is kept for your terminal; `buddy-long take <n>` there does it all and resumes it here. `/takeback`: the buddy holds it again (from a terminal: once it closes, or ⏹ End it now, between turns). Closing the terminal (SessionEnd) leaves it to the thread | the thread | one writer at a time (specs/long-story-protocol.md) |
 
 ## Rules
 
 - **One writer at a time.** The buddy never resumes a session a terminal still holds (its
   `claude` process is alive); what you write goes through that terminal's own input. A
   session nobody holds is resumed by the buddy, one turn at a time.
+- **A protocol, not keystrokes** (the owner, 2026-11-03). The buddy holds a session as one live
+  process over stream-json: a message is one JSON line (exact, any characters, any lines), a
+  permission is a request it answers; no screen is read, pys is not needed. Typing into a
+  terminal that holds a session stays an extra, where a window is known.
+- **One writer at a time, explicitly.** Two processes on one session fork it (tested: no
+  refusal, same id, two diverging stories). So the buddy starts its process only when nobody
+  holds the session and `claude agents --json` shows no other process with it; a terminal goes
+  in through `buddy-long take <n>`; a terminal that opens it anyway makes the buddy step back.
+- **A session that ended comes back only after the owner says so** (▶ Resume, /takeback):
+  never on its own, since a resume costs tokens.
+- **No test reaches a real agent or terminal** (`tests/conftest.py`): a test once opened a
+  real `claude` window in the owner's pys.
 - **Type only when it is idle**: text typed into a busy terminal mixes with what it is doing,
   so it waits and the Stop hook hands it over (the session reads it as "the owner wrote …").
   The text goes in first and Enter after a short pause: Claude Code reads a burst of keys as
   a paste, where Enter is only a newline.
 - **The screen has the last word.** A hook can be missed (a turn the dialog's "No" interrupts
-  fires no Stop), so before typing, the buddy reads the window (screen's hardcopy): a dialog
+  fires no Stop), so before typing, the buddy reads the window (`pys capture`, or screen's hardcopy): a dialog
   means waiting, a spinner line busy, anything else idle.
 - **Light**: one message per turn, one per wait; nothing per tool call. The idle reminder
   ("waiting for your input") is not posted.
@@ -66,5 +78,12 @@ session's own transcript is the single source of truth; the thread is a mirror o
   ```json
   {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "buddy-long hook", "timeout": 60}]}], "…": "the same for the other four"}}
   ```
-- In chat: `/long` lists the stories, nothing more; `/long new` starts one with a card,
-  `/long new [claude|codex] [folder] <what to do>` in one line.
+- In chat: `/long` lists the stories, nothing more; `/newlong` starts one with a card,
+  `/newlong [claude|codex] [folder] <what to do>` in one line.
+  The start has a command of its own because Telegram links a command only up to its first
+  space: a tap on `/long new` in a help text sent `/long`. `/long new` is gone: it shows the board.
+- 🔒 or 🔓, the owner's choice at the start (gate.py): sandboxed is the gate's sandbox (only its
+  folder, no ssh, `gh` or keyring); open is like a session in his terminal, with the buddy's own
+  keys still hidden. Only a human picks it (a press or a command from an allowed sender); the
+  story keeps it for its later turns; `[long.open]` sets an open session's tools; `[gate] open =
+  false` takes the choice away (a company's instance).

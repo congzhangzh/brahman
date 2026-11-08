@@ -58,6 +58,7 @@ class ShortStory:
                           "markdown": shorts.markdown(s), "buttons": shorts.buttons(s),
                           "stop": s.get("stop"), "replies": s.get("replies", []),
                           "questions": s.get("questions", []),
+                          "parent": s.get("parent"), "children": shorts.children(s),
                           "events": s["events"]}})
         return out
 

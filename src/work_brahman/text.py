@@ -282,9 +282,9 @@ Anything else goes to Claude Code, in the same session as your last message in t
                           "循环有 2 到 {max} 轮：\"名字 ×3\" 或 \"名字 × a, b, c\"：{spec}"),
     "short.loop.no_round": ("{name} has no round {round} (it has {n})", "{name} 没有第 {round} 轮（共 {n} 轮）"),
     "long.not_home": ("A long story may edit files in its folder, so not {cwd} (your home or /): "
-                      "name a project folder, e.g. /long new ~/src/app <task>",
+                      "name a project folder, e.g. /newlong ~/src/app <task>",
                       "长篇故事会改它目录里的文件，所以不能用 {cwd}（你的主目录或 /）："
-                      "请指定一个项目目录，例如 /long new ~/src/app <任务>"),
+                      "请指定一个项目目录，例如 /newlong ~/src/app <任务>"),
     "short.loop.try": ("try {k}", "第 {k} 次"),
     "short.loop.earlier": ("… {n} earlier tries", "… 之前还有 {n} 次"),
     "short.loop.tries": ("{name} has had {max} tries: more is another short story",
@@ -302,6 +302,36 @@ Anything else goes to Claude Code, in the same session as your last message in t
                             "{name} 不是分支（分支像 \"CI green? yes | no=fix\"）"),
     "short.fork.no_option": ("{name} has no option {took} (it has {options})",
                              "{name} 没有选项 {took}（它有 {options}）"),
+    "short.ev.child": ("↳ child story #{n} started for {step}: {title}", "↳ 子故事 #{n} 已开始，负责 {step}：{title}"),
+    "short.ev.child_ended": ("↳ {icon} child story #{n} ({step})", "↳ {icon} 子故事 #{n}（{step}）"),
+    "short.child.up": ("↑ part of #{n} {title} · {step}", "↑ 属于 #{n} {title} · {step}"),
+    "short.child.expected": (" → *a child story*", " → *一个子故事*"),
+    "short.child.stopped": ("stopped", "已停止"),
+    "short.child.where": ("parent {n}", "父故事 {n}"),
+    "short.child.ref": ("a parent is \"<number>:<step>\", or \"<number>:<step>:<round>\" for a loop: {ref}",
+                        "父故事写作 \"<编号>:<步骤>\"，循环则写 \"<编号>:<步骤>:<轮次>\"：{ref}"),
+    "short.child.one_level": ("short story #{n} is itself a child (of #{parent}): a child has no children of its own",
+                              "短篇故事 #{n} 本身是子故事（属于 #{parent}）：子故事不能再有子故事"),
+    "short.child.no_step": ("short story #{n} has no step {step} (it has {steps})",
+                            "短篇故事 #{n} 没有步骤 {step}（现有：{steps}）"),
+    "short.child.no_free_round": ("{name} has no round left without a child story",
+                                  "{name} 已没有尚未关联子故事的轮次"),
+    "short.child.taken": ("{name} already has child story #{child}: one child per step (a retry is a loop, \"name ×?\")",
+                          "{name} 已有子故事 #{child}：每个步骤只有一个子故事（重试请用循环 \"名称 ×?\"）"),
+    "short.child.settled": ("{name} is already {status}: a child story does a step still to do",
+                            "{name} 已是 {status}：子故事只能负责尚未完成的步骤"),
+    "short.child.running": ("short story #{n} still has child stories running ({children}): end them first, or `done --failed` to stop them",
+                            "短篇故事 #{n} 还有子故事在进行（{children}）：先结束它们，或用 `done --failed` 让它们停止"),
+    "gate.no_task": ("a session needs a task: say what to do", "会话需要一个任务：说明要做什么"),
+    "gate.open_off": ("🔓 open sessions are turned off on this buddy ([gate] open = false): it runs 🔒 sandboxed only",
+                      "这个 buddy 关掉了 🔓 开放会话（[gate] open = false）：只能 🔒 沙盒运行"),
+    "gate.too_long": ("the task is {n} characters; a task is at most {max} (a message, not a file)",
+                      "任务有 {n} 个字符；任务最多 {max} 个字符（是消息，不是文件）"),
+    "long.short_context": ("(This session works on short story #{n}, a child story of {parent}. "
+                           "Mark its steps with `buddy-short mark {n} \"<step>\"` and end it with "
+                           "`buddy-short done {n}`, or `--failed --note \"<why>\"`. $BUDDY_SHORT is {n}.)",
+                           "（本会话负责短篇故事 #{n}，它是 {parent} 的子故事。用 `buddy-short mark {n} \"<步骤>\"` "
+                           "标记步骤，用 `buddy-short done {n}` 结束，或 `--failed --note \"<原因>\"`。$BUDDY_SHORT 为 {n}。）"),
     "short.none_running": ("No short story is running.", "没有正在进行的短篇故事。"),
     "short.none": ("No short stories yet.", "还没有短篇故事。"),
     "short.board_line": ("{title} — {done}/{total}, {elapsed}; last: {last}",
@@ -317,6 +347,37 @@ Anything else goes to Claude Code, in the same session as your last message in t
     "short.started_by": ("started by {who}", "由{who}发起"),
     "short.a_session": ("a session", "某个会话"),
     "short.no_such": ("No short story #{n}.", "没有短篇故事 #{n}。"),
+    "team.title": ("👥 Team {team}", "👥 团队 {team}"),
+    "team.kind.rm": ("RM", "RM"),
+    "team.kind.po": ("PO", "PO"),
+    "team.kind.member": ("·", "·"),
+    "team.kindname.rm": ("RM", "RM"),
+    "team.kindname.po": ("PO", "PO"),
+    "team.kindname.member": ("member", "成员"),
+    "team.ev.new": ("team started, its RM {rm}", "团队成立，RM 为 {rm}"),
+    "team.ev.join": ("{who} joined ({kind})", "{who} 加入（{kind}）"),
+    "team.ev.leave": ("{who} left this team", "{who} 离开本团队"),
+    "team.ev.handover": ("{old} (g{gen}) → {new} · book {book}", "{old}（g{gen}）→ {new} · 交接手册 {book}"),
+    "team.ev.retire": ("{who} (g{gen}) retired, the role ends", "{who}（g{gen}）退休，角色结束"),
+    "team.years": ("{n}y", "{n}年"),
+    "team.part": ("(part)", "（子故事）"),
+    "team.no_window": ("no window", "无窗口"),
+    "team.gone": ("gone", "已离开"),
+    "team.also": ("also {teams}", "也在 {teams}"),
+    "team.empty": ("Nobody on this team yet.", "本团队还没有成员。"),
+    "team.unread": ("💬 replies not read yet by the RM: {n}", "💬 RM 尚未读到的回复：{n}"),
+    "team.as_of": ("as of {at}", "截至 {at}"),
+    "team.board_line": ("{team} — RM {rm}, {n} roles", "{team} — RM {rm}，{n} 个角色"),
+    "team.none": ("No teams yet.", "还没有团队。"),
+    "team.help": ("the teams (/team NAME: its card, /team NAME <text>: a reply to its RM)",
+                  "各团队（/team 名称：它的卡片，/team 名称 <文字>：回复它的 RM）"),
+    "team.about": ("long-lived sessions, one per area, and the generations that carry them",
+                   "长期会话，每个领域一个，以及承担它们的世代"),
+    "team.sent": ("✓ Sent to the RM of team {team}: it reads it at its next step.",
+                  "✓ 已发给团队 {team} 的 RM：它会在下一步读到。"),
+    "team.no_such": ("No team {team}.", "没有团队 {team}。"),
+    "bot.team_prompt": ("💬 Team {team}: {how}. Its RM reads it at its next step.",
+                        "💬 团队 {team}：{how}。它的 RM 会在下一步读到。"),
     "short.ended": ("Short story #{n} has ended; nobody will read it.", "短篇故事 #{n} 已结束，没有人会读到。"),
     "short.stop_sent": ("■ Stop asked of short story #{n}.", "■ 已请求短篇故事 #{n} 停止。"),
     "short.ev.asked": ("❓ question {q}: {text}", "❓ 问题{q}：{text}"),
@@ -333,14 +394,79 @@ Anything else goes to Claude Code, in the same session as your last message in t
     "long.label": ("📟 long story #{n} {title}", "📟 长篇故事 #{n} {title}"),
     "long.window": ("screen {sty}, window {window}", "screen {sty}的窗口{window}"),
     "long.no_window": ("a terminal outside screen", "screen 之外的终端"),
+    "long.window_pys": ("pys window {window}", "pys 窗口{window}"),
+    "long.resume_ask": ("{label}: nobody holds the session now, and your message waits. Resume it? "
+                        "A resume loads the whole conversation again, which costs tokens. ▶ starts it as the "
+                        "buddy's live session, with what you wrote.",
+                        "{label}：现在没人持有这个会话，你的消息先等着。要恢复它吗？恢复会重新载入整段对话，耗 token。"
+                        "▶ 会把它作为 buddy 持有的活会话启动，并带上你写的话。"),
+    "long.made_live": ("Started from {where}, in `{cwd}`, as a live session the buddy holds.",
+                       "从{where}发起，目录 `{cwd}`，作为 buddy 持有的活会话。"),
+    "long.sent": ("📨 Sent to the live session.", "📨 已发给活会话。"),
+    "long.live.started": ("🤖 The buddy holds the session now: one live process ({unit}), in `{cwd}`. What you "
+                          "write here goes straight in. /status · /handover to take it to a terminal.",
+                          "🤖 现在由 buddy 持有这个会话：一个活进程（{unit}），目录 `{cwd}`。你在这里写的话直接送进去。"
+                          "/status · /handover 交给终端。"),
+    "long.live.already": ("🤖 The buddy holds it already.", "🤖 已经由 buddy 持有。"),
+    "long.live.terminal": ("👤 A terminal holds it (pid {pid}). /takeback waits for it to close.",
+                           "👤 一个终端持有它（pid {pid}）。/takeback 会等它关闭。"),
+    "long.live.held_elsewhere": ("⚠️ Another process has this session open (pid {pids}): two writers at once "
+                                 "would fork it. Close that one first.",
+                                 "⚠️ 另一个进程正打开着这个会话（pid {pids}）：两边同时写会让它分叉。请先关掉那个。"),
+    "long.live.ended": ("💤 The live session ended (exit {rc}). Write here and a card asks before it resumes.",
+                        "💤 活会话结束了（退出码 {rc}）。在这里写字，会先有卡片问你要不要恢复。"),
+    "long.live.gap": ("⚠️ A terminal opened this session while the buddy held it: the buddy steps back now. "
+                      "Next time use `buddy-long take {n}`: two writers at once can fork the session.",
+                      "⚠️ buddy 持有时有终端打开了这个会话：buddy 现在退让。下次请用 `buddy-long take {n}`："
+                      "两边同时写可能让会话分叉。"),
+    "long.releasing": ("⏳ It finishes its turn, then it is yours. In a terminal: `buddy-long take {n}`",
+                       "⏳ 它做完这一轮就交给你。在终端里：`buddy-long take {n}`"),
+    "long.handed_over": ("📌 Handed over and kept for your terminal: `buddy-long take {n}` (or `cd {cwd} && "
+                         "BUDDY_LONG=1 claude --resume {id}`). Messages here wait; /takeback brings it back.",
+                         "📌 已交接，留给你的终端：`buddy-long take {n}`（或 `cd {cwd} && BUDDY_LONG=1 claude --resume {id}`）。"
+                         "这里的消息先等着；/takeback 拿回来。"),
+    "long.waits_terminal": ("📥 Kept: the session is handed over to your terminal (`buddy-long take {n}`). "
+                            "/takeback brings it back here.",
+                            "📥 已保留：会话已交给你的终端（`buddy-long take {n}`）。/takeback 拿回这里。"),
+    "long.takeback.wait": ("⏳ A terminal holds it (pid {pid}). It comes back to the buddy when that session closes.",
+                           "⏳ 一个终端持有它（pid {pid}）。那个会话关闭后就回到 buddy。"),
+    "long.takeback.end_btn": ("⏹ End the terminal session now", "⏹ 现在结束终端里的会话"),
+    "long.takeback.busy": ("Its turn is still running in the terminal; press again when it ends.",
+                           "终端里这一轮还在运行；结束后再按一次。"),
+    "long.takeback.ending": ("⏹ Ended the terminal's session between turns; the buddy takes it back.",
+                             "⏹ 已在两轮之间结束终端里的会话；buddy 接回来。"),
+    "long.takeback.soon": ("⏳ It finishes its turn first; then the buddy starts it again.",
+                           "⏳ 它先做完这一轮，然后 buddy 重新启动它。"),
+    "long.take.waiting": ("⏳ waiting for the buddy's turn to end…", "⏳ 等 buddy 这一轮结束……"),
+    "long.take.timeout": ("The buddy's turn did not end in time; try again.", "buddy 这一轮没有按时结束；请再试。"),
+    "long.status": ("{who} · {state} · {turns} turns · {waiting} waiting\nsession `{id}` in `{cwd}`\n{next}",
+                    "{who} · {state} · {turns} 轮 · {waiting} 条在等\n会话 `{id}`，目录 `{cwd}`\n{next}"),
+    "long.h.buddy": ("🤖 the buddy (live process, pid {pid})", "🤖 buddy（活进程，pid {pid}）"),
+    "long.h.releasing": ("⏳ releasing to your terminal", "⏳ 正在交给你的终端"),
+    "long.h.reserved": ("📌 reserved for your terminal", "📌 留给你的终端"),
+    "long.h.terminal": ("👤 a terminal (pid {pid})", "👤 一个终端（pid {pid}）"),
+    "long.h.nobody": ("💤 nobody", "💤 无人持有"),
+    "long.next.buddy": ("/handover takes it to a terminal", "/handover 交给终端"),
+    "long.next.releasing": ("wait for its turn to end, then `buddy-long take {n}`", "等这一轮结束，然后 `buddy-long take {n}`"),
+    "long.next.reserved": ("`buddy-long take {n}` in a terminal, or /takeback", "在终端 `buddy-long take {n}`，或 /takeback"),
+    "long.next.terminal": ("/takeback when you are done there", "那边做完后 /takeback"),
+    "long.next.nobody": ("/takeback starts it here (tokens), or `buddy-long take {n}`",
+                         "/takeback 在这里启动（耗 token），或 `buddy-long take {n}`"),
+    "long.title.live": ("🤖 held by the buddy", "🤖 由 buddy 持有"),
+    "long.title.handover": ("📌 hand-over", "📌 交接"),
+    "long.resume_btn": ("▶ Resume", "▶ 恢复"),
+    "long.later_btn": ("⏸ Not now", "⏸ 先不"),
+    "long.kept": ("📥 Kept: it waits with the others for ▶ Resume on the card.",
+                  "📥 已保留：和其他消息一起等卡片上的 ▶ 恢复。"),
     "long.joined": ("The session is held by {where}, in `{cwd}`. Its turns show here; what you write "
                     "here goes to it: typed in when it is idle, handed over when its turn ends.",
                     "这个会话由{where}持有，目录 `{cwd}`。它的每一轮都会显示在这里；你在这里写的话会交给它："
                     "空闲时直接输入，忙碌时在这一轮结束时交给它。"),
-    "long.left": ("The terminal let the session go. Write here to carry it on (a headless turn, with "
-                  "[long]'s tools in buddy.toml), or take it back: `cd {cwd} && BUDDY_LONG=1 claude --resume {id}`",
-                  "终端已放下这个会话。在这里写字可以继续（无界面运行，用 buddy.toml 里 [long] 给的工具），或在终端接回："
-                  "`cd {cwd} && BUDDY_LONG=1 claude --resume {id}`"),
+    "long.left": ("The terminal let the session go. Write here and a card asks first whether to resume "
+                  "it (a resume loads the whole conversation again), or take it back: "
+                  "`cd {cwd} && BUDDY_LONG=1 claude --resume {id}`",
+                  "终端已放下这个会话。在这里写字，会先有一张卡片问你要不要恢复它（恢复会重新载入整段对话，耗 token），"
+                  "或在终端接回：`cd {cwd} && BUDDY_LONG=1 claude --resume {id}`"),
     "long.made": ("Started from {where}, in `{cwd}`. Its first turn runs headless now.",
                   "从{where}发起，目录 `{cwd}`。第一轮正在无界面运行。"),
     "long.take": ("Take it to a terminal: `cd {cwd} && BUDDY_LONG=1 claude --resume {id}`",
@@ -354,33 +480,45 @@ Anything else goes to Claude Code, in the same session as your last message in t
     "long.handed": ("The owner wrote from {where} while you were working: {text}",
                     "你工作时，主人从{where}写道：{text}"),
     "long.typed": ("⌨ Typed into the session's terminal.", "⌨ 已输入到会话的终端。"),
+    "bot.adopted": ("↩️ This answer finished while the buddy restarted. You asked: {prompt}",
+                    "↩️ 这个回答是在 buddy 重启期间完成的。你问的是：{prompt}"),
     "long.queued": ("📥 It is working: it gets this when its turn ends.", "📥 它正在工作：这一轮结束时会交给它。"),
     "long.no_text": ("(no text)", "（无文字）"),
     "long.no_cwd": ("This session ran in `{cwd}`, which is gone, and a session is resumed from its "
-                    "own folder. Start a new one: /long new <what to do>",
-                    "这个会话运行在 `{cwd}`，但该目录已不存在，而会话只能从原目录恢复。请新开一个：/long new <要做的事>"),
+                    "own folder. Start a new one: /newlong <what to do>",
+                    "这个会话运行在 `{cwd}`，但该目录已不存在，而会话只能从原目录恢复。请新开一个：/newlong <要做的事>"),
     "long.failed": ("⚠️ The headless turn did not start: {e}", "⚠️ 无界面的一轮没能启动：{e}"),
     "long.no_such": ("No long story #{n}.", "没有长篇故事 #{n}。"),
     "long.no_engine": ("Nobody holds this session, and no engine is here to carry it on.",
                        "没有人持有这个会话，这里也没有引擎可以继续它。"),
     "long.none": ("No long stories yet. Start one in a terminal: `BUDDY_LONG=\"<name>\" claude`, "
-                  "or here: /long new <what to do>",
-                  "还没有长篇故事。在终端发起：`BUDDY_LONG=\"<名字>\" claude`，或在这里：/long new <要做的事>"),
+                  "or here: /newlong <what to do>",
+                  "还没有长篇故事。在终端发起：`BUDDY_LONG=\"<名字>\" claude`，或在这里：/newlong <要做的事>"),
     "long.board_line": ("{label} — {who}, {turns} turns, `{cwd}`", "{label} — {who}，{turns}轮，`{cwd}`"),
     "long.held": ("held by a terminal", "由终端持有"),
     "long.away": ("nobody holds it", "无人持有"),
-    "long.help": ("long stories, one thread per agent session (/long: the list, /long new: start one, /long help: how)",
-                  "长篇故事，每个智能体会话一个线程（/long：列表，/long new：发起一个，/long help：怎么用）"),
-    "long.start_hint": ("Start one: /long new (a card asks the rest), or /long new <what to do>",
-                        "新建：/long new（卡片问其余的），或 /long new <要做的事>"),
+    "long.help": ("long stories, one thread per agent session: the list (/long help: how)",
+                  "长篇故事，每个智能体会话一个线程：列表（/long help：怎么用）"),
+    "long.help_new": ("start a long story: a card asks the agent, the folder and the task, or all in one line",
+                      "发起一个长篇故事：卡片问智能体、目录和要做的事，或一行写完"),
+    "long.start_hint": ("Start one: /newlong (a card asks the rest), or /newlong <what to do>",
+                        "新建：/newlong（卡片问其余的），或 /newlong <要做的事>"),
     "long.carded": ("A card asks the agent, the folder, then the task.", "卡片会依次问智能体、目录，再请你回复要做的事。"),
     "long.usage": (
         "**Long stories**: one agent session (Claude Code or Codex) mirrored to a thread here, so "
         "you can follow it and talk to it from anywhere. The session's own record is the truth; the "
         "terminal or the phone drives it, one at a time.\n\n"
         "**Start one from here**\n"
-        "- `/long new`: a card asks the agent, the folder, then the task (reply to its question)\n"
-        "- `/long new [claude|codex] [folder] <task>`: the same in one line\n\n"
+        "- `/newlong`: a card asks the agent, the folder, then the task (reply to its question). "
+        "📂 Other folder… takes any folder as a reply: a name under ~/projects or a path; a miss lists "
+        "what is there (a fragment works as a search)\n"
+        "- `/newlong [claude|codex] [folder] <task>`: the same in one line (a folder that isn't "
+        "there starts nothing)\n"
+        "- `/newlong [claude|codex] [folder] --short 12:test <task>`: the session works for step test of "
+        "short story #12, as its child story (it gets the number in `$BUDDY_SHORT`)\n"
+        "- `/newlong --open [claude|codex] [folder] <task>`: 🔓 open, like a session in your terminal "
+        "(your ssh agent, `gh`, every folder; the buddy's own keys stay hidden). Without it: 🔒 the gate's "
+        "sandbox (only its folder, no keys). Its tools: `[long.open]` in buddy.toml over `[long]`\n\n"
         "**Start one in a terminal** (inside screen, so the phone can type into it)\n"
         "- Claude Code: `BUDDY_LONG=\"<name>\" claude`\n"
         "- Codex: `BUDDY_LONG=\"<name>\" buddy-long codex`\n"
@@ -397,8 +535,14 @@ Anything else goes to Claude Code, in the same session as your last message in t
         "**长篇故事**：把一个智能体会话（Claude Code 或 Codex）镜像到这里的一个线程，让你随时随地关注它、和它对话。"
         "会话自己的记录是唯一的事实来源；终端或手机驱动它，同一时间只有一方。\n\n"
         "**在这里发起**\n"
-        "- `/long new`：卡片依次问智能体、目录，再请你回复要做的事\n"
-        "- `/long new [claude|codex] [目录] <要做的事>`：一行写完\n\n"
+        "- `/newlong`：卡片依次问智能体、目录，再请你回复要做的事。"
+        "📂 其他目录… 可以回复任意目录：~/projects 下的名字或路径；找不到时列出那里有什么（输入片段就能搜索）\n"
+        "- `/newlong [claude|codex] [目录] <要做的事>`：一行写完（目录不存在就不发起）\n"
+        "- `/newlong [claude|codex] [目录] --short 12:test <要做的事>`：会话作为子故事负责短篇故事 #12 的 test 步骤"
+        "（编号在 `$BUDDY_SHORT` 里）\n"
+        "- `/newlong --open [claude|codex] [目录] <要做的事>`：🔓 开放，像你在终端里开的会话"
+        "（你的 ssh agent、`gh`、所有目录；buddy 自己的密钥仍然看不到）。不加：🔒 闸门的沙盒（只有它的目录，没有密钥）。"
+        "它的工具：buddy.toml 里 `[long.open]` 覆盖 `[long]`\n\n"
         "**在终端发起**（在 screen 里，手机才能往里输入）\n"
         "- Claude Code：`BUDDY_LONG=\"<名字>\" claude`\n"
         "- Codex：`BUDDY_LONG=\"<名字>\" buddy-long codex`\n"
@@ -423,6 +567,31 @@ Anything else goes to Claude Code, in the same session as your last message in t
     "long.title.start": ("📟 a new long story", "📟 新的长篇故事"),
     "long.pick_engine": ("Which agent?", "用哪个智能体？"),
     "long.pick_folder": ("In which folder?", "在哪个目录？"),
+    "long.other_folder": ("📂 Other folder…", "📂 其他目录…"),
+    "long.type_path": ("✏️ Type a path", "✏️ 输入路径"),
+    "long.ask_path": ("✏️ Which folder? Reply to this message with its path: ~/… or /…, or a name under "
+                      "~/projects (reply “cancel” to start nothing).",
+                      "✏️ 用哪个目录？请回复这条消息，写上路径：~/… 或 /…，或 ~/projects 下的名字（回复“取消”则不发起）。"),
+    "long.ask_folder": ("📂 `{near}` holds: {subs}\n\nWhich folder? Reply to this message with a name under "
+                        "~/projects, or a full path (~/… or /…); end it with / to see what is inside "
+                        "(reply “cancel” to start nothing).",
+                        "📂 `{near}` 里有：{subs}\n\n用哪个目录？请回复这条消息：~/projects 下的名字，或完整路径（~/… 或 /…）；"
+                        "以 / 结尾可以看看里面有什么（回复“取消”则不发起）。"),
+    "long.no_folder": ("✖ No folder `{typed}`.", "✖ 没有目录 `{typed}`。"),
+    "long.no_such_folder": ("✖ No folder `{folder}`: nothing started. Check the path, or leave it out to "
+                            "use the workspace.",
+                            "✖ 没有目录 `{folder}`，没有发起。请检查路径，或者不写路径，就用默认工作区。"),
+    "long.pick_mode": ("🔒 Sandboxed: only its folder is writable; no ssh, gh or keyring.\n"
+                       "🔓 Open: like a session in your terminal (your ssh agent, gh, every folder); "
+                       "the buddy's own keys stay hidden. Which one?",
+                       "🔒 沙盒：只能写它自己的目录；没有 ssh、gh、钥匙环。\n"
+                       "🔓 开放：像你在终端开的会话（你的 ssh agent、gh、所有目录）；buddy 自己的密钥仍然看不到。选哪个？"),
+    "long.mode.sandbox_btn": ("🔒 Sandboxed", "🔒 沙盒"),
+    "long.mode.open_btn": ("🔓 Open", "🔓 开放"),
+    "long.mode.open_short": ("(🔓 open)", "（🔓 开放）"),
+    "long.mode.open": ("🔓 Open, your choice: your ssh agent, gh and every folder, like your terminal; "
+                       "the buddy's own keys stay hidden. Its later turns run open too.",
+                       "🔓 开放，你选的：你的 ssh agent、gh 和所有目录，像你的终端；buddy 自己的密钥仍然看不到。之后的每一轮也是开放的。"),
     "long.ask_task": ("{engine} in `{folder}`: what should it do? Answer by replying to this message "
                       "(reply “cancel” to start nothing).",
                       "{engine}，目录 `{folder}`：要它做什么？请回复这条消息（回复“取消”则不发起）。"),

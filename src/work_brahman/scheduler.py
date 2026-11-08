@@ -126,6 +126,22 @@ class Scheduler:
         self.paused = json.loads(self.paused_path.read_text()) if self.paused_path.exists() else None
         self.lock = threading.Lock()
 
+    def adopted(self, meta: dict, p) -> None:
+        """A job a restart left running (procs.adopt) ended: close its run record. The job
+        posts its own results; only the record the scheduler would have closed is left."""
+        tag = meta.get("tag") or {}
+        if not tag.get("run"):
+            return
+        run = Run(self.state, tag.get("kind", ""), tag.get("name", ""), tag.get("trigger", ""), tag["run"])
+        if run.rec.get("status") != "running":
+            return
+        status = "ok" if p.returncode == 0 else "failed"
+        fields = {"exit_code": p.returncode, "adopted": True}
+        if status != "ok":
+            fields["output"] = tail((p.stderr or "") + (p.stdout or ""))
+        run.finish(status, **fields)
+        log.info("%s: %s after a restart (%s)", tag.get("key"), status, run.id)
+
     def pause(self, where: str, who: str) -> list[str]:
         """Start nothing new until resume(); the running tasks will end as "stopped" once
         killed (the caller kills them with procs.kill_all()). Returns those tasks."""
@@ -226,7 +242,8 @@ class Scheduler:
         cmd += ["--act", act] if act else []
         log.info("%s: run %s (%s)", key, run.id, trigger)
         try:
-            p = procs.run(cmd, env=env, timeout=timeout)  # in its own group: STOP kills it all
+            p = procs.run(cmd, env=env, timeout=timeout, kind="job",  # STOP kills it all
+                          tag={"run": run.id, "key": key, "kind": kind, "name": name, "trigger": trigger})
             code, out, status = p.returncode, (p.stderr or "") + (p.stdout or ""), None
         except subprocess.TimeoutExpired as e:
             code, status = None, "timeout"
