@@ -21,13 +21,11 @@ import tomllib
 from pathlib import Path
 
 from . import asks, configure, install, long_live, long_stories as longs, portable, procs, short_stories as shorts, teams, text, topics
-from .bitable import Bitable
 from .bot import Bot, Sessions
 from .channel import Linked, post_all
 from .duties import DUTIES
 from .engine import ClaudeCode, long_engines
 from .families import FAMILIES
-from .feishu import DOMAINS, Feishu
 from .runs import VERSION, from_env, tail
 from .scheduler import Scheduler
 from .telegram import Telegram
@@ -37,6 +35,7 @@ log = logging.getLogger("buddy")
 
 
 def feishu_domain(cfg: dict):
+    from .feishu import DOMAINS  # Lark's SDK takes 1.5 s to import (30 s under Wine): only when used
     return DOMAINS[cfg.get("domain", "feishu")]
 
 
@@ -206,6 +205,8 @@ def _terminal() -> dict:
 
 def _claude_pid() -> int | None:
     """The `claude` process this hook runs under: the nearest ancestor of that name."""
+    if portable.WINDOWS:  # parent() knows no ancestors there; and os.getppid needs
+        return None       # PssCaptureSnapshot, which Wine lacks: it crashed `buddy short start`
     pid = os.getppid()
     for _ in range(12):
         up = portable.parent(pid)  # /proc on Linux, ps on macOS
@@ -622,6 +623,7 @@ def main() -> int:
     engine = ClaudeCode(**cfg.get("claude", {}))
     channels = []
     if os.environ.get("FEISHU_APP_ID"):
+        from .feishu import Feishu
         channels.append(Feishu(os.environ["FEISHU_APP_ID"], os.environ["FEISHU_APP_SECRET"],
                                cfg.get("domain", "feishu")))
     if os.environ.get("LARK_APP_ID"):  # a Lark app beside a Feishu one: its ids are lark:...
@@ -629,6 +631,7 @@ def main() -> int:
             print("LARK_APP_ID is a second Lark app: FEISHU_APP_ID is already on domain = \"lark\" "
                   "(set domain = \"feishu\" if that one is Feishu)", file=sys.stderr)
             return 2
+        from .feishu import Feishu
         channels.append(Feishu(os.environ["LARK_APP_ID"], os.environ.get("LARK_APP_SECRET", ""),
                                "lark", prefix="lark:"))
     if os.environ.get("TELEGRAM_BOT_TOKEN"):
@@ -697,6 +700,7 @@ def main() -> int:
         if port:  # the workbench, on 127.0.0.1 only
             Web(int(port), state, bot, scheduler, cfg, home, chat, families).start()
         if "bitable" in cfg and os.environ.get("FEISHU_APP_ID"):  # the Lark Base workbench
+            from .bitable import Bitable
             Bitable(os.environ["FEISHU_APP_ID"], os.environ["FEISHU_APP_SECRET"],
                     feishu_domain(cfg), state, cfg).start()
         bot.serve()
@@ -711,6 +715,7 @@ def main() -> int:
         if not os.environ.get("FEISHU_APP_ID"):
             print("the Base needs FEISHU_APP_ID/FEISHU_APP_SECRET", file=sys.stderr)
             return 2
+        from .bitable import Bitable
         b = Bitable(os.environ["FEISHU_APP_ID"], os.environ["FEISHU_APP_SECRET"], feishu_domain(cfg), state, cfg)
         print(f"{b.sync()} rows sent; {b.url()}")
         return 0

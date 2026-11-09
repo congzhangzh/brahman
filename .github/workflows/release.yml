@@ -46,13 +46,18 @@ jobs:
         include:
           - os: ubuntu-22.04      # an older glibc: the executable runs on more Linux systems
             asset: buddy-linux-x86_64
+          - os: ubuntu-22.04-arm  # Linux on ARM64 (Raspberry Pi 5, Graviton, Ampere), native
+            asset: buddy-linux-arm64
           - os: windows-latest
             asset: buddy-windows-x64.exe
+          - os: windows-11-arm    # Windows on ARM (Snapdragon laptops, a Mac's VM), native, not x64 under Prism
+            asset: buddy-windows-arm64.exe
           - os: macos-15          # Apple silicon
             asset: buddy-macos-arm64
           - os: macos-15-intel
             asset: buddy-macos-x86_64
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20   # a hang fails in 20 minutes, not GitHub's 6 hours (a build takes 3-5)
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v7
