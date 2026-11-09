@@ -80,7 +80,9 @@ jobs:
           cfg="$home/.config/work_brahman/buddy.toml"
           # the version comes from the package metadata (importlib.metadata): PyInstaller ships it
           # only with --copy-metadata; without it the executable says "buddy n/a" (20261108.3)
-          { "$b" || true; } | grep -q "^buddy ${GITHUB_REF_NAME#v}"
+          # the version from the tree, not the tag: a dry run (workflow_dispatch) has no tag
+          v=$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)
+          { "$b" || true; } | grep -q "^buddy $v"
           "$b" --help | grep -q "start here"
           "$b" init --yes --telegram-token 0:x --language en | grep -q wrote
           { "$b" init --yes --telegram-token 0:x 2>&1 || true; } | grep -q "already set up"  # refuses, exit 2
