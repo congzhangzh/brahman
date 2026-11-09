@@ -205,17 +205,15 @@ def init(args) -> int:
 
 
 def install_skills() -> list[str]:
-    """The skills that come with the buddy, into ~/.claude/skills; one that is there stays."""
-    src = next((p for p in (HERE / "skills", HERE.parent.parent / "skills") if p.is_dir()), None)
-    if src is None:
-        return []
-    dest = Path("~/.claude/skills").expanduser()
-    out = []
-    for skill in sorted(p for p in src.iterdir() if (p / "SKILL.md").exists()):
-        if not (dest / skill.name).exists():
-            shutil.copytree(skill, dest / skill.name)
-            out.append(f"{dest / skill.name} (new)")
-    return out
+    """The skills that come with the buddy, into ~/.claude/skills, as `buddy setup` does it:
+    linked (copied by the one-file executable), ours kept current, the user's left alone."""
+    from .workbench import skill_steps
+    done = []
+    for what, state, do in skill_steps(Path(os.path.expanduser("~"))):
+        if do is not None:
+            do()
+            done.append(f"{what}: {state}")
+    return done
 
 
 def allow(args) -> int:

@@ -370,6 +370,15 @@ def main() -> int:
     t.add_argument("--port", type=int, default=8787, help="the web workbench's port")
     t.add_argument("--yes", action="store_true", help="ask nothing: flags and defaults only")
     t.add_argument("--force", action="store_true", help="start over; the old files are kept as backups")
+    t = sub.add_parser("setup", help="the platform around the buddy: its skills, the working rules, pys",
+                       description="Agent skills into ~/.claude/skills, the working rules into "
+                       "~/.claude/rules/brahman-*.md, and pys (the terminal multiplexer) with its own setup. "
+                       "A dry run unless --yes; run it again any time: what is ours is kept current, "
+                       "what you changed is left alone.")
+    t.add_argument("--yes", action="store_true", help="do it (without: say what it would do)")
+    t.add_argument("--without", action="append", metavar="RULE", help="leave a rules file out, and keep it "
+                   "out (e.g. brahman-git-roles); may be given more than once")
+    t.add_argument("--no-pys", action="store_true", help="leave pys out")
     t = sub.add_parser("allow", help="pair an id the bot told you (tg:..., ou_...): it may use the bot")
     t.add_argument("id")
     t.add_argument("--chat", default="", help="its chat, for Lark (oc_...); a Telegram DM's is its id")
@@ -517,9 +526,10 @@ def main() -> int:
     args = ap.parse_args()
     if args.cmd is None:  # `buddy` on its own: where things stand
         return _status(args.config)
-    if args.cmd in ("init", "allow", "config", "doctor", "service"):  # setting up: no channel, no state
+    if args.cmd in ("init", "allow", "config", "doctor", "service", "setup"):  # setting up: no channel, no state
+        from . import workbench
         return {"init": install.init, "allow": install.allow, "config": configure.config,
-                "doctor": install.doctor, "service": install.service}[args.cmd](args)
+                "doctor": install.doctor, "service": install.service, "setup": workbench.setup}[args.cmd](args)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     args.config = str(install.config_path(args.config))
