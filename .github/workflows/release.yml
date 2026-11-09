@@ -64,7 +64,7 @@ jobs:
       - name: Build
         shell: bash
         run: |
-          uv venv --python 3.12 .venv-build
+          uv venv --python 3.14 .venv-build
           bin=.venv-build/bin; [ "$RUNNER_OS" = Windows ] && bin=.venv-build/Scripts
           uv pip install --python .venv-build . pyinstaller
           printf 'from work_brahman.cli import main\nraise SystemExit(main())\n' > buddy_entry.py

@@ -18,7 +18,7 @@ question only: whose turn is it? See `book/2-design.md` for where a duty sits.
 Changes first, then the whole list:
 
 1. one line per thread that turned to me: `↩ your turn: repo#N title (who, when)`;
-2. the list of every thread, in two parts (聪哥, 2026-10-25): **Latest**, the threads
+2. the list of every thread, in two parts (the owner, 2026-10-25): **Latest**, the threads
    active in the last `latest_days` (default 3), newest first; then **Most talked in**,
    all the others, the ones I spoke in most first (💬, the tool's `mine`: my comments,
    reviews and replies among the last ones fetched, plus 1 if I opened it). The turn stays

@@ -3,6 +3,10 @@
 A small, extensible work buddy: talk to **Claude Code** from **Feishu / Lark** or
 **Telegram** on your phone, run **scheduled jobs**, and grow it with **portable skills**.
 
+![The buddy in a terminal: install, init, doctor, then a short story started, marked and listed](https://github.com/congzhangzh/brahman/releases/latest/download/buddy-demo.gif)
+
+Recorded for every release, in a clean container as a made-up user ([the same as a video](https://github.com/congzhangzh/brahman/releases/latest/download/buddy-demo.mp4)).
+
 **The guide** ([English](../book/README.md) · [中文](../book/README.zh-CN.md)): why
 brahman exists, how it is designed, a real sample taken up the ladder, and a template to
 copy for your own work.
