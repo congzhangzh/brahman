@@ -143,6 +143,9 @@ jobs:
           export HOME="$home" USERPROFILE="$home" XDG_CONFIG_HOME="$home/.config" XDG_STATE_HOME="$home/.state"
           buddy setup | grep -q "install as a uv tool"   # no pys yet: the dry run says how it comes
           buddy setup --yes
+          # pys went where uv puts tools for this (new) user; look it up again after the HOME switch
+          # (20261108.13's dry run looked before it, and Linux and macOS did not find pys)
+          export PATH="$(uv tool dir --bin):$PATH"
           pys --help | grep -q "usage: pys"
           test -e "$home/.claude/skills/pys-drive" && test -e "$home/.claude/skills/pr-review"
           test -f "$home/.claude/rules/brahman-git-roles.md" && test -f "$home/.claude/rules/brahman-short-stories.md"
