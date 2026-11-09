@@ -97,7 +97,8 @@ jobs:
         shell: bash
         run: |
           uv build --wheel --out-dir wheel
-          uv run --isolated --no-project --with wheel/*.whl buddy --help | grep -q "start here"
+          # --python 3.14: a runner's own Python may be older (Windows has 3.12, 3.13), below the buddy's floor
+          uv run --isolated --no-project --python 3.14 --with wheel/*.whl buddy --help | grep -q "start here"
       - name: Into the draft release, named for its platform
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
