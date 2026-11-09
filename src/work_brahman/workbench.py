@@ -52,6 +52,13 @@ def _digest(path: Path) -> str:
     return h.hexdigest()
 
 
+def _same(link: Path, target: Path) -> bool:
+    """The link leads to that folder. Compared as real paths, not as the link's text: Windows
+    spells a link's target its own way (\\\\?\\C:\\..., another case), so the text never matches
+    and every run would relink (20261108.10, found on a real Windows 11)."""
+    return os.path.normcase(os.path.realpath(link)) == os.path.normcase(os.path.realpath(target))
+
+
 def _ours_link(dest: Path, kind: str) -> bool:
     """A link we made: it points into a buddy's own skills or rules (this install or an older one,
     even one that is gone now)."""
@@ -86,7 +93,7 @@ def skill_steps(home: Path) -> list[tuple[str, str, object]]:
             else:
                 steps.append((f"skill {skill.name}", "yours (changed or not ours): left alone", None))
             continue
-        if dest.is_symlink() and Path(os.readlink(dest)) == skill:
+        if dest.is_symlink() and _same(dest, skill):
             steps.append((f"skill {skill.name}", "up to date (linked)", None))
         elif not dest.exists() and not dest.is_symlink():
             steps.append((f"skill {skill.name}", "link (new)", lambda s=skill, d=dest: _link(s, d)))
@@ -94,7 +101,10 @@ def skill_steps(home: Path) -> list[tuple[str, str, object]]:
             steps.append((f"skill {skill.name}", "relink (an older or gone install of ours)",
                            lambda s=skill, d=dest: _link(s, d)))
         elif stamp.exists() and json.loads(stamp.read_text()).get("sha256") == _digest(dest):
-            steps.append((f"skill {skill.name}", "replace our old copy with a link", lambda s=skill, d=dest: _link(s, d)))
+            if _digest(dest) == want:  # our copy, current: where symlinks are not allowed (Windows
+                steps.append((f"skill {skill.name}", "up to date (copied)", None))  # without Developer Mode)
+            else:  # our copy, older: a link if this system allows one, else a fresh copy
+                steps.append((f"skill {skill.name}", "update our copy", lambda s=skill, d=dest: _link(s, d)))
         else:
             steps.append((f"skill {skill.name}", "yours (changed or not ours): left alone", None))
     return steps

@@ -95,6 +95,13 @@ jobs:
           "$b" service install --dry-run > /dev/null
           { "$b" || true; } | grep -q "checks ok"
           test -f "$cfg"
+          # buddy setup (20261108.10 on): a dry run writes nothing, --yes writes the rules, and a
+          # rerun has nothing to do (20261108.10 on Windows without symlinks re-copied every time)
+          "$b" setup --no-pys | grep -q "rule brahman-git-roles"
+          test ! -e "$home/.claude/rules"
+          "$b" setup --yes --no-pys > /dev/null
+          test -f "$home/.claude/rules/brahman-git-roles.md" && test -f "$home/.claude/rules/brahman-short-stories.md"
+          "$b" setup --no-pys | grep -q "nothing to do"
       - name: The wheel on this OS, as uv installs it
         shell: bash
         run: |
@@ -110,6 +117,39 @@ jobs:
           src=dist/buddy; [ "$RUNNER_OS" = Windows ] && src=dist/buddy.exe
           mkdir -p out && cp "$src" "out/${{ matrix.asset }}"
           gh release upload "$GITHUB_REF_NAME" "out/${{ matrix.asset }}" --clobber
+
+  setup-with-pys:
+    # buddy setup for real, pys and all: the wheel installed by uv, pys from PyPI as a uv tool,
+    # pys's own setup, the rules; on each kind of system
+    needs: [draft]
+    if: always() && (needs.draft.result == 'success' || needs.draft.result == 'skipped')
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+      - name: buddy setup --yes, as a new user
+        shell: bash
+        run: |
+          set -x
+          uv build --wheel --out-dir wheel
+          uv tool install --python 3.14 wheel/*.whl
+          export PATH="$(uv tool dir --bin):$PATH"
+          home="$RUNNER_TEMP/home"; mkdir -p "$home"
+          export HOME="$home" USERPROFILE="$home" XDG_CONFIG_HOME="$home/.config" XDG_STATE_HOME="$home/.state"
+          buddy setup | grep -q "install as a uv tool"   # no pys yet: the dry run says how it comes
+          buddy setup --yes
+          pys --help | grep -q "usage: pys"
+          test -e "$home/.claude/skills/pys-drive" && test -e "$home/.claude/skills/pr-review"
+          test -f "$home/.claude/rules/brahman-git-roles.md" && test -f "$home/.claude/rules/brahman-short-stories.md"
+          buddy setup --yes   # again: pys found, its own setup again; ours up to date
+          # and then nothing of ours to do: 20261108.10 relinked every run on Windows (a link's text
+          # never matched its folder there)
+          buddy setup --no-pys | grep -q "nothing to do"
 
   wheel:
     needs: [draft]
@@ -129,7 +169,7 @@ jobs:
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [executable, wheel]  # every platform passed, or this never runs
+    needs: [executable, wheel, setup-with-pys]  # every platform passed, or this never runs
     runs-on: ubuntu-latest
     permissions:
       contents: write
