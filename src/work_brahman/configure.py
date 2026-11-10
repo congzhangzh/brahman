@@ -230,6 +230,10 @@ def config(args) -> int:
     while True:
         print(_menu(path, s, before))
         c = _ask("choose").strip().lower()
+        if install.STDIN_ENDED:  # its input ran out: nothing more will be chosen
+            if s != before:
+                print("the input ended with changes unsaved: nothing saved", file=sys.stderr)
+            return 0 if s == before else 1
         was = copy.deepcopy(s)
         if c == "1":
             s["language"] = _ask("language, zh-CN or en", s["language"])

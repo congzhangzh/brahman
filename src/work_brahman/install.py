@@ -143,12 +143,24 @@ def _keep(path: Path) -> Path:
     return old
 
 
+STDIN_ENDED = False  # set once a prompt met the end of its input (a pipe, a script)
+
+
 def _ask(prompt: str, default: str = "", secret: bool = False) -> str:
-    if secret:
-        import getpass
-        got = getpass.getpass(f"{prompt}: ")
-    else:
-        got = input(f"{prompt}{f' [{default}]' if default else ''}: ")
+    """A line typed, or the default. At the end of the input it answers as Enter would (a "[y/N]"
+    is N) instead of an EOFError traceback (2026-11-10, `printf ... | buddy config` on macOS),
+    and says so in STDIN_ENDED, so a menu that loops can stop."""
+    global STDIN_ENDED
+    try:
+        if secret:
+            import getpass
+            got = getpass.getpass(f"{prompt}: ")
+        else:
+            got = input(f"{prompt}{f' [{default}]' if default else ''}: ")
+    except EOFError:
+        print()
+        STDIN_ENDED = True
+        return default
     return got.strip() or default
 
 
