@@ -3,10 +3,10 @@ short stories. A team has no steps and no end, so it is not a story: roles join,
 and retire, and the team goes on.
 
     buddy team new app-release-kit --rm app-rm app-release-kit-1 --book role-release-manager.md
-    buddy team join app-release-kit xrdp-cq --role xrdp --area "xrdp, sesman" --project ~/projects/xrdp
+    buddy team join app-release-kit server-a1 --role server --area "the server, its daemon" --project ~/projects/server
     buddy team join web-release-kit --role po --kind po          a role already on another team
-    buddy team handover xrdp xrdp-cq xrdp-g2                     the same for an RM or a PO
-    buddy team leave web-release-kit po | retire xrdp xrdp-g2 | show NAME | check NAME | list
+    buddy team handover server server-a1 server-g2                    the same for an RM or a PO
+    buddy team leave web-release-kit po | retire server server-g2 | show NAME | check NAME | list
 
 Only what can't be observed is kept, written by `buddy team` alone (the RM runs it): a file per
 role (roles/<role>.json: its generations, so a role in two teams has one history) and one per

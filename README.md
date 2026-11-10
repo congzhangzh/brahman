@@ -277,8 +277,8 @@ the banded facts do. 💬 Reply under it goes to the RM.
 
 ```bash
 buddy-team new app-release-kit --rm app-rm app-release-kit-1 --book role-release-manager.md
-buddy-team join app-release-kit xrdp-cq --role xrdp --area "xrdp, sesman" --project ~/projects/xrdp
-buddy-team handover xrdp xrdp-cq xrdp-g2      # the same for the RM's own role
+buddy-team join app-release-kit server-a1 --role server --area "the server, its daemon" --project ~/projects/server
+buddy-team handover server server-a1 server-g2     # the same for the RM's own role
 buddy-team show app-release-kit               # exact ctx, now; check: the owner's replies
 ```
 

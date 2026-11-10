@@ -351,7 +351,7 @@ function render() {
     return `<div class="wf"><div><b>${esc(wfName(g.name))} ${running ? `<span class="mute">${tr("running_now")}</span>` : ""}</b>
       <small>${kindName(g.kind)}${g.schedule ? " · " + esc(g.schedule) : g.kind === "chat" ? tr("wf.chat") : g.kind === "family" ? " · " + esc(g.about) : tr("wf.unscheduled")}</small>
       <small>${tr(g.kind === "family" ? (g.name === "team" ? "wf.teams" : "wf.stories") : "wf.runs", { n: rs.length })} · ${failed ? `<span class="bad-t">${tr("wf.failed", { n: failed })}</span>` : tr("wf.failed", { n: 0 })} · ${cost} · ${tr("wf.denied", { n: sum(rs, "denied") })}</small></div>
-      <div class="dots${g.kind === "family" ? " scroll" : ""}">${shown(rs, sel, g.kind).map(r => `<button class="dot ${r.team ? "team" : ""} ${FAILED.has(r.status) ? "failed" : r.status === "running" ? "running" : r.status === "quota" ? "quota" : r.status === "stopped" ? "stopped" : quiet(r) ? "quiet" : ""} ${r === sel ? "sel" : ""}" data-run="${esc(r.id)}" title="${esc(r.story ? `#${r.story.id} ${r.story.title}` : r.team ? r.trigger : r.status === "quota" ? `${r.id} · ${statusName("quota")}` : r.id)}">${r.team ? "" : `${day(r.started)} ${hm(r.started)}`}<i>${label(r)}</i></button>`).join("")}${rs.length > shown(rs, sel, g.kind).length ? `<span class="mute">${tr("wf.quiet", { n: rs.length - shown(rs, sel, g.kind).length })}</span>` : ""}</div></div>`;
+      <div class="dots${g.kind === "family" ? " scroll" : ""}">${shown(rs, sel, g.kind).map(r => `<button class="dot ${r.team ? "team" : ""} ${FAILED.has(r.status) ? "failed" : r.status === "running" ? "running" : r.status === "quota" ? "quota" : r.status === "stopped" ? "stopped" : quiet(r) ? "quiet" : ""} ${r === sel ? "sel" : ""}" data-run="${esc(r.id)}" title="${esc(r.story ? `#${r.story.id} ${r.story.title}` : r.team ? r.trigger : r.status === "quota" ? `${r.id} · ${tr("quota_title")}` : r.id)}">${r.team ? "" : `${day(r.started)} ${hm(r.started)}`}<i>${label(r)}</i></button>`).join("")}${rs.length > shown(rs, sel, g.kind).length ? `<span class="mute">${tr("wf.quiet", { n: rs.length - shown(rs, sel, g.kind).length })}</span>` : ""}</div></div>`;
   }).join("");
   if (!sel) { document.getElementById("diagram").innerHTML = `<div class="mute">${tr("no_runs")}</div>`; document.getElementById("observe").innerHTML = ""; return; }
 
@@ -387,7 +387,9 @@ function render() {
 // A long story into a terminal, through pys: attach shows the window that holds it, resume opens
 // one in its folder (buddy-long take). Codex has no take: its command, to type by hand.
 function longBar(L) {
-  const cmd = L.engine === "codex" ? `cd ${L.cwd} && codex resume ${L.session_id}` : "";
+  const sq = s => `'${String(s).replace(/'/g, `'\\''`)}'`;  // a shell word, whatever the folder's name holds
+  const cmd = L.engine === "codex" ? `cd ${sq(L.cwd)} && codex resume ${sq(L.session_id)}` : "";
+  if (!S.data.pys && L.engine !== "codex" && !(L.held && L.mux !== "pys")) return `<div class="choices" style="grid-column:1/-1;margin-bottom:6px"><span class="mute">${tr("long.no_pys")}</span></div>`;
   const btn = L.held ? (L.mux === "pys" ? `<button data-long="${L.n}" data-what="attach">${tr("long.attach")}</button>` : `<span class="mute">${tr("long.held_screen")}</span>`)
     : L.engine === "codex" ? `<span class="mute">${tr("long.codex_by_hand")}</span> <code>${esc(cmd)}</code>`
     : `<button data-long="${L.n}" data-what="resume">${tr("long.resume")}</button>`;

@@ -244,6 +244,12 @@ class WebChat(_Posts):
         tmp.replace(self.path)
 
 
+def pys_path() -> str:
+    """Where pys is, or "" when this machine has none (the page then shows no attach/resume)."""
+    p = shutil.which("pys") or os.path.expanduser("~/.local/bin/pys")
+    return p if os.path.isfile(p) else ""
+
+
 def page() -> bytes:
     """The workbench page with its words in every language (text.py's page.* keys); it starts
     in the buddy's, and its EN / 中文 switch changes them in place."""
@@ -400,7 +406,17 @@ class Web:
         s = longs.load(self.state, int(n)) if n.isdigit() else None
         if s is None or what not in ("attach", "resume"):
             return 400, "n (a long story's number) and what (attach|resume)"
-        pys = shutil.which("pys") or os.path.expanduser("~/.local/bin/pys")
+        pys = pys_path()
+        if not pys:  # buddy setup only looks for pys: a user without it gets a word, not a dropped call
+            return 409, "pys is not installed (uv tool install py-screen)"
+        try:
+            return self._long(s, what, pys)
+        except subprocess.TimeoutExpired:
+            return 504, "pys did not answer within 10 s"
+        except OSError as e:
+            return 502, f"pys could not run: {e}"
+
+    def _long(self, s: dict, what: str, pys: str) -> tuple[int, dict | str]:
         if what == "attach":
             if not (longs.held(s) and s.get("mux") == "pys" and s.get("window") != ""):
                 return 409, "no pys window holds it: resume it"
@@ -458,4 +474,4 @@ class Web:
                 log.exception("family %s: runs failed", f.name)
         return {"now": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "workflows": workflows, "sops": SOPS,
                 "runs": runs, "asks": asks, "paused": paused, "running": running,
-                "meter": self.meter()}
+                "meter": self.meter(), "pys": bool(pys_path())}

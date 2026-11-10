@@ -15,7 +15,7 @@ Roles" and claude_md/global/team.md).
 | team | one per kit, named after it: a roster of roles, each with its kind |
 | role | a long-lived duty, carried by one live generation at a time; one file, one history, even when several teams name it |
 | kind | `rm` (release manager, exactly one per team) · `po` (product owner, at most one, may serve several teams) · `member` (one area) |
-| generation | the session carrying the role (`claude --name`): `xrdp-cq` (g1) → `xrdp-g2` |
+| generation | the session carrying the role (`claude --name`): `server-a1` (g1) → `server-g2` |
 | book | `role-<role>.md` in the role's project memory (`--book` names another file) |
 | age | years (compactions, from the transcript) and ctx now (the status line) |
 

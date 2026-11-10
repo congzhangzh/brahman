@@ -34,6 +34,14 @@ from . import portable
 log = logging.getLogger(__name__)
 
 SLICE = "buddy.slice"
+
+
+def kind_slice(kind: str) -> str:
+    """A kind's slice, inside SLICE (a dash in a slice's name means "inside"), so kill_all's stop
+    of SLICE reaches every unit: buddy.slice -> buddy-job.slice as before. It was "buddy-<kind>"
+    whatever SLICE said, so a test run that set its own SLICE still put its units in
+    buddy-test.slice, inside the live buddy's slice (2026-11-10)."""
+    return f"{SLICE.removesuffix('.slice')}-{kind}.slice"
 LAUNCHER = Path(__file__).with_name("unitexec.py")
 MARGIN = 120  # RuntimeMaxSec past the caller's timeout: an adopted run never runs forever
 POLL = 0.25
@@ -118,7 +126,7 @@ def _start(name: str, cmd: list[str], *, input, timeout, kind, tag, cwd, env) ->
              f"StandardError=file:{d / 'err'}"]
     if timeout:
         props.append(f"RuntimeMaxSec={int(timeout) + MARGIN}")
-    argv = ["systemd-run", "--user", "--quiet", "--collect", f"--slice=buddy-{kind}.slice",
+    argv = ["systemd-run", "--user", "--quiet", "--collect", f"--slice={kind_slice(kind)}",
             f"--unit={name}", f"--description=buddy {kind}: {' '.join(meta['cmd'])}"]
     argv += [x for p in props for x in ("-p", p)]
     argv += ["--", sys.executable, "-I", str(LAUNCHER), str(d)]
