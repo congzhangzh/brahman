@@ -10,7 +10,7 @@ brings what is ours up to date and leaves alone what is the user's.
 - rules: the working rules as drop-ins in ~/.claude/rules/brahman-*.md, which Claude Code loads
   for every session. A file the user changed is theirs from then on; `--without <name>` leaves
   one out (and keeps it out). The user's own CLAUDE.md is read after them, so a line there wins.
-- pys: the terminal multiplexer, its own package with its own setup. Installed as a uv tool
+- pys: the terminal multiplexer, its own package (py-screen) with its own setup. Installed as a uv tool
   (the buddy never imports it, and it needs Python 3.14 whatever the buddy runs on), then
   `pys setup --yes`. With no uv, setup says where pys's own bundle is.
 """
@@ -28,7 +28,8 @@ from pathlib import Path
 from .runs import VERSION
 
 HERE = Path(__file__).resolve().parent
-PYS_SPEC = "py-screen-mux>=20261109.2"  # brings `pys setup` and its config.d drop-in
+PYS_SPEC = "py-screen>=20261110.1"  # pys's package (it was py-screen-mux until 20261109.2)
+PYS_OLD = "py-screen-mux"  # stopped at 20261109.2, no shim: an install by this name is moved
 PYS_BUNDLES = "https://github.com/congzhangzh/py-screen/releases/latest"
 STAMP = ".brahman-buddy.json"  # in a skill we copied, and once in ~/.claude/rules: what we wrote
 
@@ -188,10 +189,23 @@ def _remember_without(dest_dir: Path, without: list[str]) -> None:
     stamp_path.write_text(json.dumps(stamp, indent=1) + "\n")
 
 
+def _uv_tools(uv: str) -> set[str]:
+    """The tools uv has installed, by name (`uv tool list`: "name vX.Y" lines, then their commands)."""
+    try:
+        out = subprocess.run([uv, "tool", "list"], capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    return {line.split()[0] for line in out.splitlines() if line and not line.startswith((" ", "-"))}
+
+
 def pys_steps(skip: bool) -> list[tuple[str, str, object]]:
     if skip:
         return [("pys", "skipped (--no-pys)", None)]
     pys, uv = shutil.which("pys"), shutil.which("uv")
+    if uv and PYS_OLD in _uv_tools(uv):  # the old name gets no new release: move it
+        return [("pys", f"move from {PYS_OLD} (no longer released) to {PYS_SPEC}, then its own setup",
+                 lambda u=uv: _run([u, "tool", "uninstall", PYS_OLD]) and _run([u, "tool", "install", PYS_SPEC])
+                 and _run_pys_setup(u))]
     if pys:
         return [("pys", f"found ({pys}): run its own setup", lambda p=pys: _run([p, "setup", "--yes"]))]
     if uv:

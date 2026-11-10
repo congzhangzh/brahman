@@ -143,6 +143,7 @@ jobs:
           export HOME="$home" USERPROFILE="$home" XDG_CONFIG_HOME="$home/.config" XDG_STATE_HOME="$home/.state"
           buddy setup | grep -q "install as a uv tool"   # no pys yet: the dry run says how it comes
           buddy setup --yes
+          uv tool list | grep -q "^py-screen v"
           # pys went where uv puts tools for this (new) user; look it up again after the HOME switch
           # (20261108.13's dry run looked before it, and Linux and macOS did not find pys)
           export PATH="$(uv tool dir --bin):$PATH"
@@ -153,6 +154,13 @@ jobs:
           # and then nothing of ours to do: 20261108.10 relinked every run on Windows (a link's text
           # never matched its folder there)
           buddy setup --no-pys | grep -q "nothing to do"
+          # a machine from before the rename: py-screen-mux (stopped at 20261109.2, no shim) is moved
+          uv tool uninstall py-screen
+          uv tool install --python 3.14 py-screen-mux==20261109.2
+          buddy setup | grep -q "move from py-screen-mux"
+          buddy setup --yes
+          uv tool list | grep -q "^py-screen v" && ! uv tool list | grep -q "^py-screen-mux "
+          pys --help | grep -q "usage: pys"
 
   wheel:
     needs: [draft]
