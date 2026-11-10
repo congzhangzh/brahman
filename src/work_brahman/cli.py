@@ -370,15 +370,16 @@ def main() -> int:
     t.add_argument("--port", type=int, default=8787, help="the web workbench's port")
     t.add_argument("--yes", action="store_true", help="ask nothing: flags and defaults only")
     t.add_argument("--force", action="store_true", help="start over; the old files are kept as backups")
-    t = sub.add_parser("setup", help="the platform around the buddy: its skills, the working rules, pys",
+    t = sub.add_parser("setup", help="the platform around the buddy: its skills, the working rules; pys checked",
                        description="Agent skills into ~/.claude/skills, the working rules into "
-                       "~/.claude/rules/brahman-*.md, and pys (the terminal multiplexer) with its own setup. "
-                       "A dry run unless --yes; run it again any time: what is ours is kept current, "
-                       "what you changed is left alone.")
+                       "~/.claude/rules/brahman-*.md, and a check for pys (the terminal multiplexer, "
+                       "installed and set up on its own: never by this). A dry run unless --yes; run it "
+                       "again any time: what is ours is kept current, what you changed is left alone, and "
+                       "what it leaves alone is a warning with a hint.")
     t.add_argument("--yes", action="store_true", help="do it (without: say what it would do)")
     t.add_argument("--without", action="append", metavar="RULE", help="leave a rules file out, and keep it "
                    "out (e.g. brahman-git-roles); may be given more than once")
-    t.add_argument("--no-pys", action="store_true", help="leave pys out")
+    t.add_argument("--no-pys", action="store_true", help="don't look for pys")
     t = sub.add_parser("allow", help="pair an id the bot told you (tg:..., ou_...): it may use the bot")
     t.add_argument("id")
     t.add_argument("--chat", default="", help="its chat, for Lark (oc_...); a Telegram DM's is its id")

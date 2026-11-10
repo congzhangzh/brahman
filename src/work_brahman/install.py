@@ -206,13 +206,16 @@ def init(args) -> int:
 
 def install_skills() -> list[str]:
     """The skills that come with the buddy, into ~/.claude/skills, as `buddy setup` does it:
-    linked (copied by the one-file executable), ours kept current, the user's left alone."""
+    linked (copied by the one-file executable), ours kept current, the user's left alone (a
+    warning with its hint)."""
     from .workbench import skill_steps
     done = []
-    for what, state, do in skill_steps(Path(os.path.expanduser("~"))):
+    for what, state, do, hint in skill_steps(Path(os.path.expanduser("~"))):
         if do is not None:
             do()
             done.append(f"{what}: {state}")
+        elif hint:
+            done.append(f"{what}: ⚠ {state}\n  hint: {hint}")
     return done
 
 

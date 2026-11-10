@@ -119,8 +119,9 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" "out/${{ matrix.asset }}" --clobber
 
   setup-with-pys:
-    # buddy setup for real, pys and all: the wheel installed by uv, pys from PyPI as a uv tool,
-    # pys's own setup, the rules; on each kind of system
+    # buddy setup for real, beside pys: the wheel installed by uv; setup only looks for pys (it never
+    # installs, moves or sets it up: 2026-11-10), so a missing pys is a warning with a hint; then
+    # pys installed the way the hint says, found, and its own setup; the rules; on each kind of system
     needs: [draft]
     if: always() && (needs.draft.result == 'success' || needs.draft.result == 'skipped')
     strategy:
@@ -132,7 +133,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v7
-      - name: buddy setup --yes, as a new user
+      - name: buddy setup --yes, as a new user, then pys beside it
         shell: bash
         run: |
           set -x
@@ -141,26 +142,25 @@ jobs:
           export PATH="$(uv tool dir --bin):$PATH"
           home="$RUNNER_TEMP/home"; mkdir -p "$home"
           export HOME="$home" USERPROFILE="$home" XDG_CONFIG_HOME="$home/.config" XDG_STATE_HOME="$home/.state"
-          buddy setup | grep -q "install as a uv tool"   # no pys yet: the dry run says how it comes
+          buddy setup | grep -q "not found: not installed by buddy setup"   # no pys: a warning
+          buddy setup | grep -q "uv tool install py-screen"                 # and its hint
           buddy setup --yes
-          uv tool list | grep -q "^py-screen v"
-          # pys went where uv puts tools for this (new) user; look it up again after the HOME switch
-          # (20261108.13's dry run looked before it, and Linux and macOS did not find pys)
-          export PATH="$(uv tool dir --bin):$PATH"
-          pys --help | grep -q "usage: pys"
-          test -e "$home/.claude/skills/pys-drive" && test -e "$home/.claude/skills/pr-review"
+          if uv tool list | grep -q "^py-screen v"; then exit 1; fi           # setup installed none (`! cmd` never fails under set -e)
+          test -e "$home/.claude/skills/pr-review"
           test -f "$home/.claude/rules/brahman-git-roles.md" && test -f "$home/.claude/rules/brahman-short-stories.md"
-          buddy setup --yes   # again: pys found, its own setup again; ours up to date
-          # and then nothing of ours to do: 20261108.10 relinked every run on Windows (a link's text
-          # never matched its folder there)
-          buddy setup --no-pys | grep -q "nothing to do"
-          # a machine from before the rename: py-screen-mux (stopped at 20261109.2, no shim) is moved
-          uv tool uninstall py-screen
-          uv tool install --python 3.14 py-screen-mux==20261109.2
-          buddy setup | grep -q "move from py-screen-mux"
-          buddy setup --yes
-          uv tool list | grep -q "^py-screen v" && ! uv tool list | grep -q "^py-screen-mux "
+          # the way the hint says; uv puts it where tools go for this (new) user, not yet on PATH
+          # (20261108.13's dry run looked before the HOME switch, and Linux and macOS did not find pys)
+          uv tool install --python 3.14 py-screen
+          buddy setup | grep -Eq "but not on PATH|pys .*found \("   # Linux, macOS: not on PATH; Windows found it before
+          export PATH="$(uv tool dir --bin):$PATH"
+          buddy setup | grep -q "pys .*found ("
+          pys setup --yes
           pys --help | grep -q "usage: pys"
+          test -e "$home/.claude/skills/pys-drive"
+          # and then nothing of ours to do, and no warning: 20261108.10 relinked every run on
+          # Windows (a link's text never matched its folder there)
+          buddy setup | grep -q "nothing to do"
+          if buddy setup | grep -q "warning"; then exit 1; fi
 
   wheel:
     needs: [draft]

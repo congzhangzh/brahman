@@ -6,13 +6,18 @@ brings what is ours up to date and leaves alone what is the user's.
 - skills: the buddy's agent skills in ~/.claude/skills. An installed package links them (they
   follow every upgrade); the one-file executable unpacks into a folder that goes away when it
   exits, so it copies them, with a stamp recording what it wrote. A same-named skill that is
-  neither our link nor our untouched copy is the user's: left alone and named.
+  neither our link nor our untouched copy is the user's: left alone. A link of ours that leads
+  into a checkout that is still there (a work in progress: another clone, a worktree) is never
+  moved to this buddy's copy. Every link setup does not make is a warning with a hint: why, and
+  what to do to have ours.
 - rules: the working rules as drop-ins in ~/.claude/rules/brahman-*.md, which Claude Code loads
   for every session. A file the user changed is theirs from then on; `--without <name>` leaves
   one out (and keeps it out). The user's own CLAUDE.md is read after them, so a line there wins.
-- pys: the terminal multiplexer, its own package (py-screen) with its own setup. Installed as a uv tool
-  (the buddy never imports it, and it needs Python 3.14 whatever the buddy runs on), then
-  `pys setup --yes`. With no uv, setup says where pys's own bundle is.
+- pys: the terminal multiplexer, its own package (py-screen) with its own install and its own
+  `pys setup`. buddy setup never installs, moves or sets it up (2026-11-10: it may be a work in
+  progress the user runs from a checkout): it says whether pys is there, and when it
+  is not, a warning says how to get it (uv tool install py-screen, or pys's own bundle). The
+  offline workbench archive still carries pys; its installer puts it in place.
 """
 
 from __future__ import annotations
@@ -24,14 +29,23 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Callable, NamedTuple
 
 from .runs import VERSION
 
 HERE = Path(__file__).resolve().parent
-PYS_SPEC = "py-screen>=20261110.1"  # pys's package (it was py-screen-mux until 20261109.2)
-PYS_OLD = "py-screen-mux"  # stopped at 20261109.2, no shim: an install by this name is moved
+PYS_PACKAGE = "py-screen"  # pys's package, installed on its own (never by buddy setup)
 PYS_BUNDLES = "https://github.com/congzhangzh/py-screen/releases/latest"
 STAMP = ".brahman-buddy.json"  # in a skill we copied, and once in ~/.claude/rules: what we wrote
+
+
+class Step(NamedTuple):
+    """One line of the plan. do is None when there is nothing to do; a hint makes it a warning:
+    something setup did not do, why, and what the user can do about it."""
+    what: str
+    state: str
+    do: Callable[[], object] | None = None
+    hint: str = ""
 
 
 def _bundled(kind: str) -> Path | None:
@@ -69,46 +83,87 @@ def _ours_link(dest: Path, kind: str) -> bool:
     return f"work_brahman{os.sep}{kind}{os.sep}" in target or f"brahman{os.sep}{kind}{os.sep}" in target
 
 
-def skill_steps(home: Path) -> list[tuple[str, str, object]]:
-    """(what, state, do) for each bundled skill; do is None when there is nothing to do."""
+def _installed_or_gone(link: Path) -> bool:
+    """A link of ours that setup may move: it leads nowhere now, or into an installed package
+    (site-packages). One that leads into a checkout that is still there is someone's work in
+    progress (another clone, a worktree), and stays."""
+    if not os.path.exists(link):
+        return True
+    parts = {p.lower() for p in Path(os.path.realpath(link)).parts}
+    return bool(parts & {"site-packages", "dist-packages"})
+
+
+def _remove_hint(dest: Path) -> str:
+    """How to remove a link itself, never what it leads to."""
+    return f'rmdir "{dest}"' if os.name == "nt" else f'rm "{dest}"'
+
+
+def _checkout_link(skill: Path, dest: Path) -> Step:
+    return Step(f"skill {skill.name}", "linked to a checkout of ours: left alone (a work in progress?)", None,
+                f"it leads to {os.path.realpath(dest)}, not to this buddy's {skill}. Keep it while you work "
+                f"there; to use this buddy's instead: {_remove_hint(dest)} (the link only), then buddy setup --yes")
+
+
+def _users_skill(skill: Path, dest: Path) -> Step:
+    what = f"a link to {os.readlink(dest)}" if dest.is_symlink() else "a folder that is not our untouched copy"
+    return Step(f"skill {skill.name}", "yours (changed or not ours): left alone", None,
+                f"{dest} is {what}, so ours ({skill}) is not linked. To take ours: move yours aside "
+                f"(rename it to {dest.name}.mine), then buddy setup --yes")
+
+
+def skill_steps(home: Path) -> list[Step]:
+    """A Step for each bundled skill."""
     src = _bundled("skills")
     if src is None:
-        return [("skills", "none bundled with this buddy", None)]
+        return [Step("skills", "none bundled with this buddy")]
     dest_dir = home / ".claude" / "skills"
     steps = []
     for skill in sorted(p for p in src.iterdir() if (p / "SKILL.md").exists()):
         dest = dest_dir / skill.name
+        what = f"skill {skill.name}"
         want = _digest(skill)
         stamp = dest / STAMP
         if _frozen():  # the one-file's folder goes away when it exits: copy, with a stamp
             if not dest.exists() and not dest.is_symlink():
-                steps.append((f"skill {skill.name}", "copy (new)", lambda s=skill, d=dest, w=want: _copy(s, d, w)))
+                steps.append(Step(what, "copy (new)", lambda s=skill, d=dest, w=want: _copy(s, d, w)))
+            elif dest.is_symlink() and _ours_link(dest, "skills"):
+                if _installed_or_gone(dest):
+                    steps.append(Step(what, "replace our old link with a copy",
+                                      lambda s=skill, d=dest, w=want: _copy(s, d, w)))
+                else:
+                    steps.append(_checkout_link(skill, dest))
             elif stamp.exists() and json.loads(stamp.read_text()).get("sha256") == _digest(dest):
                 if _digest(dest) == want:
-                    steps.append((f"skill {skill.name}", "up to date", None))
+                    steps.append(Step(what, "up to date"))
                 else:
-                    steps.append((f"skill {skill.name}", "update our copy", lambda s=skill, d=dest, w=want: _copy(s, d, w)))
-            elif _ours_link(dest, "skills"):
-                steps.append((f"skill {skill.name}", "replace our old link with a copy",
-                               lambda s=skill, d=dest, w=want: _copy(s, d, w)))
+                    steps.append(Step(what, "update our copy", lambda s=skill, d=dest, w=want: _copy(s, d, w)))
             else:
-                steps.append((f"skill {skill.name}", "yours (changed or not ours): left alone", None))
+                steps.append(_users_skill(skill, dest))
             continue
         if dest.is_symlink() and _same(dest, skill):
-            steps.append((f"skill {skill.name}", "up to date (linked)", None))
+            steps.append(Step(what, "up to date (linked)"))
         elif not dest.exists() and not dest.is_symlink():
-            steps.append((f"skill {skill.name}", "link (new)", lambda s=skill, d=dest: _link(s, d)))
+            steps.append(Step(what, "link (new)", lambda s=skill, d=dest: _link(s, d)))
         elif _ours_link(dest, "skills"):
-            steps.append((f"skill {skill.name}", "relink (an older or gone install of ours)",
-                           lambda s=skill, d=dest: _link(s, d)))
+            if _installed_or_gone(dest):
+                steps.append(Step(what, "relink (an older or gone install of ours)",
+                                  lambda s=skill, d=dest: _link(s, d)))
+            else:
+                steps.append(_checkout_link(skill, dest))
         elif stamp.exists() and json.loads(stamp.read_text()).get("sha256") == _digest(dest):
             if _digest(dest) == want:  # our copy, current: where symlinks are not allowed (Windows
-                steps.append((f"skill {skill.name}", "up to date (copied)", None))  # without Developer Mode)
+                steps.append(Step(what, "up to date (copied, not linked)", None,  # without Developer Mode)
+                                  _NO_SYMLINK_HINT))
             else:  # our copy, older: a link if this system allows one, else a fresh copy
-                steps.append((f"skill {skill.name}", "update our copy", lambda s=skill, d=dest: _link(s, d)))
+                steps.append(Step(what, "update our copy", lambda s=skill, d=dest: _link(s, d)))
         else:
-            steps.append((f"skill {skill.name}", "yours (changed or not ours): left alone", None))
+            steps.append(_users_skill(skill, dest))
     return steps
+
+
+_NO_SYMLINK_HINT = ("this system did not allow a symlink, so it is a copy: it changes only when buddy setup "
+                    "--yes runs again. On Windows, turn on Developer Mode (Settings, System, For developers), "
+                    "then buddy setup --yes links it")
 
 
 def _copy(src: Path, dest: Path, digest: str) -> None:
@@ -129,17 +184,18 @@ def _link(src: Path, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     try:
         dest.symlink_to(src, target_is_directory=True)
-    except OSError:  # Windows without Developer Mode can't make symlinks: a copy then
+    except OSError as e:  # Windows without Developer Mode can't make symlinks: a copy then
         shutil.copytree(src, dest)
         (dest / STAMP).write_text(json.dumps({"by": f"brahman-buddy {VERSION}", "sha256": _digest(src)}) + "\n")
+        print(f"  {_warn('⚠')} {dest.name}: copied, not linked ({e})\n      hint: {_NO_SYMLINK_HINT}")
 
 
-def rule_steps(home: Path, without: list[str]) -> list[tuple[str, str, object]]:
-    """(what, state, do) for each bundled rules file. The stamp file records what we wrote and
+def rule_steps(home: Path, without: list[str]) -> list[Step]:
+    """A Step for each bundled rules file. The stamp file records what we wrote and
     what the user left out, so a rerun keeps both choices."""
     src = _bundled("rules")
     if src is None:
-        return [("rules", "none bundled with this buddy", None)]
+        return [Step("rules", "none bundled with this buddy")]
     dest_dir = home / ".claude" / "rules"
     stamp_path = dest_dir / STAMP
     stamp = json.loads(stamp_path.read_text()) if stamp_path.exists() else {}
@@ -150,23 +206,23 @@ def rule_steps(home: Path, without: list[str]) -> list[tuple[str, str, object]]:
         name = rule.stem
         if name in left_out:
             if dest.exists() and wrote.get(rule.name) == _digest(dest):
-                steps.append((f"rule {name}", "remove ours (--without)", lambda d=dest: d.unlink()))
+                steps.append(Step(f"rule {name}", "remove ours (--without)", lambda d=dest: d.unlink()))
             elif dest.exists():
-                steps.append((f"rule {name}", "left out (--without); your changed copy stays", None))
+                steps.append(Step(f"rule {name}", "left out (--without); your changed copy stays", None))
             else:
-                steps.append((f"rule {name}", "left out (--without)", None))
+                steps.append(Step(f"rule {name}", "left out (--without)", None))
             continue
         want = _digest(rule)
         if not dest.exists():
-            steps.append((f"rule {name}", "write (new)", lambda r=rule, d=dest: _write_rule(r, d, without)))
+            steps.append(Step(f"rule {name}", "write (new)", lambda r=rule, d=dest: _write_rule(r, d, without)))
         elif _digest(dest) == want:
-            steps.append((f"rule {name}", "up to date", None))
+            steps.append(Step(f"rule {name}", "up to date", None))
         elif wrote.get(rule.name) == _digest(dest):
-            steps.append((f"rule {name}", "update ours", lambda r=rule, d=dest: _write_rule(r, d, without)))
+            steps.append(Step(f"rule {name}", "update ours", lambda r=rule, d=dest: _write_rule(r, d, without)))
         else:
-            steps.append((f"rule {name}", "changed by you: left alone", None))
+            steps.append(Step(f"rule {name}", "changed by you: left alone", None))
     if set(without) - set(stamp.get("without", [])):
-        steps.append(("rules", f"remember --without {' '.join(sorted(set(without)))}",
+        steps.append(Step("rules", f"remember --without {' '.join(sorted(set(without)))}",
                       lambda d=dest_dir: _remember_without(d, without)))
     return steps
 
@@ -189,63 +245,54 @@ def _remember_without(dest_dir: Path, without: list[str]) -> None:
     stamp_path.write_text(json.dumps(stamp, indent=1) + "\n")
 
 
-def _uv_tools(uv: str) -> set[str]:
-    """The tools uv has installed, by name (`uv tool list`: "name vX.Y" lines, then their commands)."""
-    try:
-        out = subprocess.run([uv, "tool", "list"], capture_output=True, text=True, timeout=30).stdout
-    except (OSError, subprocess.SubprocessError):
-        return set()
-    return {line.split()[0] for line in out.splitlines() if line and not line.startswith((" ", "-"))}
-
-
-def pys_steps(skip: bool) -> list[tuple[str, str, object]]:
+def pys_steps(skip: bool) -> list[Step]:
+    """pys is only looked for: its install and its own `pys setup` are the user's (a released
+    pys or a work in progress from a checkout, setup can't tell and must not replace either)."""
     if skip:
-        return [("pys", "skipped (--no-pys)", None)]
+        return [Step("pys", "skipped (--no-pys)")]
     pys, uv = shutil.which("pys"), shutil.which("uv")
-    if uv and PYS_OLD in _uv_tools(uv):  # the old name gets no new release: move it
-        return [("pys", f"move from {PYS_OLD} (no longer released) to {PYS_SPEC}, then its own setup",
-                 lambda u=uv: _run([u, "tool", "uninstall", PYS_OLD]) and _run([u, "tool", "install", PYS_SPEC])
-                 and _run_pys_setup(u))]
     if pys:
-        return [("pys", f"found ({pys}): run its own setup", lambda p=pys: _run([p, "setup", "--yes"]))]
+        return [Step("pys", f"found ({pys}); its own setup is yours to run: pys setup (a dry run)")]
     if uv:
-        return [("pys", f"install as a uv tool ({PYS_SPEC}), then its own setup",
-                 lambda u=uv: _run([u, "tool", "install", PYS_SPEC]) and _run_pys_setup(u))]
-    return [("pys", f"not installed and no uv: take pys's own bundle (its Python inside): {PYS_BUNDLES}", None)]
-
-
-def _run(cmd: list[str]) -> bool:
-    print("  $ " + " ".join(cmd), flush=True)
-    return subprocess.run(cmd).returncode == 0
-
-
-def _run_pys_setup(uv: str) -> bool:
-    """uv's tool bin may not be on PATH yet: ask uv where it put pys."""
-    pys = shutil.which("pys")
-    if not pys:
         out = subprocess.run([uv, "tool", "dir", "--bin"], capture_output=True, text=True).stdout.strip()
-        cand = Path(out) / ("pys.exe" if os.name == "nt" else "pys")
-        pys = str(cand) if cand.exists() else None
-    if not pys:
-        print("  pys was installed but is not on PATH: run `uv tool update-shell`, then `pys setup --yes`")
-        return False
-    return _run([pys, "setup", "--yes"])
+        cand = Path(out) / ("pys.exe" if os.name == "nt" else "pys") if out else None
+        if cand and cand.exists():
+            return [Step("pys", f"installed ({cand}) but not on PATH", None,
+                         "run uv tool update-shell, open a new terminal, then pys setup --yes")]
+        how = f"uv tool install {PYS_PACKAGE}, then pys setup --yes"
+    else:
+        how = f"its own bundle (its Python inside): {PYS_BUNDLES}, or uv, then uv tool install {PYS_PACKAGE}"
+    return [Step("pys", "not found: not installed by buddy setup", None,
+                 f"pys, the terminal multiplexer the buddy's sessions run in, is installed on its own: {how}")]
+
+
+def _warn(text: str) -> str:
+    """Yellow on a terminal that shows colour; plain in a pipe, a log, or with NO_COLOR."""
+    if os.environ.get("NO_COLOR") or not sys.stdout.isatty():
+        return text
+    return f"\033[1;33m{text}\033[0m"
 
 
 def setup(args) -> int:
     home = Path(os.path.expanduser("~"))
     without = [w.removesuffix(".md") for w in (args.without or [])]
     steps = skill_steps(home) + rule_steps(home, without) + pys_steps(args.no_pys)
-    todo = [s for s in steps if s[2] is not None]
-    width = max(len(w) for w, _, _ in steps)
+    todo = [s for s in steps if s.do is not None]
+    warned = [s for s in steps if s.hint]
+    width = max(len(s.what) for s in steps)
     print(f"buddy setup ({'doing it' if args.yes else 'a dry run: --yes does it'}), brahman-buddy {VERSION}")
-    for what, state, do in steps:
-        print(f"  {'→' if do else '·'} {what:<{width}}  {state}")
+    for what, state, do, hint in steps:
+        if hint:
+            print(_warn(f"  ⚠ {what:<{width}}  {state}") + f"\n      hint: {hint}")
+        else:
+            print(f"  {'→' if do else '·'} {what:<{width}}  {state}")
+    if warned:
+        print(_warn(f"{len(warned)} warning{'s' * (len(warned) > 1)} (⚠): left as they are; each hint says what to do"))
     if not args.yes:
         print(f"{len(todo)} to do. Run `buddy setup --yes` to do it." if todo else "nothing to do.")
         return 0
     failed = []
-    for what, _, do in todo:
+    for what, _, do, _ in todo:
         try:
             if do() is False:
                 failed.append(what)
