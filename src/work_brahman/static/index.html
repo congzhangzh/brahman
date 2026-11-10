@@ -66,11 +66,19 @@ main { display:flex; flex-direction:column; gap:10px; padding:10px 20px 24px; } 
 .wf:first-of-type { border-top:none; }
 .wf b { display:block; } .wf small { display:block; color:var(--mute); font-size:var(--small); }
 .dots { display:flex; gap:4px; flex-wrap:wrap; }
+.dots.scroll { max-height:132px; overflow-y:auto; align-content:flex-start; padding-right:4px; }  /* every story and team: scroll for the older ones */
+.dot.team { width:auto; padding:1px 8px; }
+/* a team's members, each with its short tasks (a button selects the story); ?role= highlights one */
+.mrow { padding:6px 8px; border-bottom:1px solid var(--line); border-radius:var(--r-sm); }
+.mrow.hl { background:#fff4d1; outline:2px solid var(--warn); }
+.mrow .chips { display:flex; flex-wrap:wrap; gap:4px; margin-top:4px; max-height:84px; overflow-y:auto; }
+.mrow .chip { font-size:11px; padding:1px 6px; }
 .dot { width:58px; padding:1px 3px; border-radius:var(--r-sm); border:1px solid var(--line); font-size:10.5px; text-align:center; background:#fff; }
 .dot i { display:block; font-style:normal; font-weight:600; color:var(--ok); }
 .dot.quiet i { color:var(--mute); }
 .dot.failed { border-color:var(--bad); background:var(--bad-bg); } .dot.failed i { color:var(--bad); }
 .dot.stopped i, .dot.interrupted i { color:var(--bad); }
+.dot.quota { border-color:var(--warn); } .dot.quota i { color:var(--warn); }  /* reached a chat; Lark's monthly quota refused the rest */
 .dot.running { border-color:var(--warn); animation:pulse 1.6s infinite; } .dot.running i { color:var(--warn); }
 .dot.sel { background:var(--sel); border-color:var(--gold); box-shadow:0 0 0 3px var(--glow); }
 @keyframes pulse { 50% { box-shadow:0 0 0 5px var(--glow); } }
@@ -155,7 +163,7 @@ pre.log.bad { border-color:var(--bad); }
   <section class="level"><h2 data-t="h.l3">Level 3 · Observation<span id="l3h"></span></h2><div class="observe" id="observe"></div></section>
 </main>
 <script>
-const S = { run: null, part: "", data: null, drafts: {}, topic: "" };  // topic: the chat tab's conversation, "" = main  // drafts: a story's reply being typed
+const S = { run: null, part: "", data: null, drafts: {}, topic: "", detail: {}, fetching: {}, role: "", scrollRole: false, fromLink: false, notFound: "" };  // topic: the chat tab's conversation, "" = main  // drafts: a story's reply being typed
 // The page's words in each language (text.py's "page." keys, and the SOP labels as "label."):
 // web.py fills TEXTS in when it serves the page and sets <html lang> to buddy.toml's language.
 // The page starts in ?lang= (this load only), else the choice kept in this browser (EN / 中文),
@@ -218,7 +226,7 @@ const hm = s => (s || "").slice(11, 16), day = s => (s || "").slice(5, 10);
 const quiet = r => r.status === "ok" && /^no (changes|moves)$/.test(r.result || "");
 const STORY = { running: "⏳", ok: "✓", failed: "✗", stopped: "■" };
 const MARK = { todo: "⏳", doing: "▶️", done: "✅", failed: "❌", skipped: "⏭" };
-const label = r => r.story ? `${STORY[r.status] || ""} ${r.story.parent ? "↳ " : ""}#${r.story.id}` : r.status === "running" ? tr("status.running") : FAILED.has(r.status) ? "✗ " + statusName(r.status)
+const label = r => r.team ? `👥 ${r.team.name}` : r.story ? `${STORY[r.status] || ""} ${r.story.parent ? "↳ " : ""}#${r.story.id}` : r.status === "running" ? tr("status.running") : r.status === "quota" ? tr("status.quota") : FAILED.has(r.status) ? "✗ " + statusName(r.status)
   : r.status === "stopped" ? tr("status.stopped") : r.kind === "chat" ? tr("status.chat") : quiet(r) ? tr("status.quiet") : tr(r.steps.some(s => s.step === "post" || s.step === "ask") ? "status.posted" : "status.ok");
 
 async function post(path, body) {
@@ -240,9 +248,24 @@ async function load() {
 
 // A duty checks every 10 minutes and is mostly quiet: show the latest few, then only the
 // runs that did something (posted, asked, failed, stopped, a chat), and count the rest.
-function shown(rs, sel) {
-  return rs.filter((r, k) => k < 8 || !quiet(r) || r === sel).slice(0, 40);
+// A family (short and long stories, teams) shows every one: its row scrolls instead.
+function shown(rs, sel, kind) {
+  return kind === "family" ? rs : rs.filter((r, k) => k < 8 || !quiet(r) || r === sel).slice(0, 40);
 }
+// A story's or a team's whole record, fetched when its light tile is picked (S.detail, by id).
+// A finished story is kept; a running one or a team is fetched again after 15 s.
+function detail(r) {
+  const d = S.detail[r.id], fresh = d && (d.run.status !== "running" && !r.team || Date.now() - d.at < 15000);
+  if (fresh) return d.run;
+  if (!S.fetching[r.id]) {
+    S.fetching[r.id] = true;
+    fetch(`/api/run?id=${encodeURIComponent(r.id)}`, { cache: "no-store" }).then(x => x.ok ? x.json() : null)
+      .then(run => { if (run) S.detail[r.id] = { run, at: Date.now() }; }).catch(() => {})
+      .finally(() => { delete S.fetching[r.id]; render(); });
+  }
+  return d ? d.run : null;
+}
+const recent = r => Date.now() - new Date(r.started).getTime() < 3 * 86400e3;
 
 // The corner: a title and its film as one unit, in two modes the switch flips together:
 // what the bench does (plain words, the system film) and why (the message, the evolution
@@ -270,8 +293,10 @@ function corner(D) {
   const m = D.meter, el = document.getElementById("meter");
   if (!m || !el) return;
   el.querySelector("i").style.width = (m.digital + m.human ? m.digital_pct : 50) + "%";
-  el.lastElementChild.textContent = tr("meter", { d: m.digital_pct, h: m.human_pct });
-  el.title = tr("meter_title", { days: m.days, dn: m.digital, hn: m.human });
+  const a = m.all || m;
+  el.lastElementChild.innerHTML = esc(tr("meter", { d: m.digital_pct, h: m.human_pct, n: m.digital + m.human, days: m.days, from: day(m.since) }))
+    + "<br>" + esc(tr("meter_all", { d: a.digital_pct, h: a.human_pct, n: a.digital + a.human, from: day(a.since) }));
+  el.title = tr("meter_title", { days: m.days, dn: m.digital, hn: m.human }) + "\n" + tr("meter_title_all", { from: day(a.since), dn: a.digital, hn: a.human });
   if (!rotN) rotate();  // the first line at once, then every 8 s
 }
 let rotN = 0;
@@ -312,7 +337,12 @@ function render() {
   // Level 1: every configured job and duty, plus the chats, with the last 3 days of runs.
   const groups = D.workflows.map(w => ({ ...w, key: `${w.kind}:${w.name}` }));
   for (const r of D.runs) if (!groups.some(g => g.key === `${r.kind}:${r.name}`)) groups.push({ kind: r.kind, name: r.name, schedule: "", key: `${r.kind}:${r.name}` });
-  const sel = D.runs.find(r => r.id === S.run) || D.runs.find(r => r.status !== "ok" && r.status !== "running") || D.runs[0];
+  if (S.run && S.fromLink && !D.runs.some(r => r.id === S.run)) {  // a stale or mistyped link: say so, drop it
+    S.notFound = S.run; S.run = null; S.role = ""; history.replaceState(null, "", location.pathname + location.search);
+  }
+  S.fromLink = false;
+  notFound();  // before any view returns: each of them redraws only its own boxes
+  const sel = D.runs.find(r => r.id === S.run) || D.runs.find(r => r.status !== "ok" && r.status !== "running" && recent(r)) || D.runs[0];
   document.getElementById("workflows").innerHTML = groups.map(g => {
     const rs = D.runs.filter(r => `${r.kind}:${r.name}` === g.key);
     const failed = rs.filter(r => FAILED.has(r.status)).length;
@@ -320,11 +350,16 @@ function render() {
     const running = D.running.some(k => k.startsWith(g.key)) || rs.some(r => r.story && r.status === "running");
     return `<div class="wf"><div><b>${esc(wfName(g.name))} ${running ? `<span class="mute">${tr("running_now")}</span>` : ""}</b>
       <small>${kindName(g.kind)}${g.schedule ? " · " + esc(g.schedule) : g.kind === "chat" ? tr("wf.chat") : g.kind === "family" ? " · " + esc(g.about) : tr("wf.unscheduled")}</small>
-      <small>${tr(g.kind === "family" ? "wf.stories" : "wf.runs", { n: rs.length })} · ${failed ? `<span class="bad-t">${tr("wf.failed", { n: failed })}</span>` : tr("wf.failed", { n: 0 })} · ${cost} · ${tr("wf.denied", { n: sum(rs, "denied") })}</small></div>
-      <div class="dots">${shown(rs, sel).map(r => `<button class="dot ${FAILED.has(r.status) ? "failed" : r.status === "running" ? "running" : r.status === "stopped" ? "stopped" : quiet(r) ? "quiet" : ""} ${r === sel ? "sel" : ""}" data-run="${esc(r.id)}" title="${esc(r.story ? `#${r.story.id} ${r.story.title}` : r.id)}">${day(r.started)} ${hm(r.started)}<i>${label(r)}</i></button>`).join("")}${rs.length > shown(rs, sel).length ? `<span class="mute">${tr("wf.quiet", { n: rs.length - shown(rs, sel).length })}</span>` : ""}</div></div>`;
+      <small>${tr(g.kind === "family" ? (g.name === "team" ? "wf.teams" : "wf.stories") : "wf.runs", { n: rs.length })} · ${failed ? `<span class="bad-t">${tr("wf.failed", { n: failed })}</span>` : tr("wf.failed", { n: 0 })} · ${cost} · ${tr("wf.denied", { n: sum(rs, "denied") })}</small></div>
+      <div class="dots${g.kind === "family" ? " scroll" : ""}">${shown(rs, sel, g.kind).map(r => `<button class="dot ${r.team ? "team" : ""} ${FAILED.has(r.status) ? "failed" : r.status === "running" ? "running" : r.status === "quota" ? "quota" : r.status === "stopped" ? "stopped" : quiet(r) ? "quiet" : ""} ${r === sel ? "sel" : ""}" data-run="${esc(r.id)}" title="${esc(r.story ? `#${r.story.id} ${r.story.title}` : r.team ? r.trigger : r.status === "quota" ? `${r.id} · ${statusName("quota")}` : r.id)}">${r.team ? "" : `${day(r.started)} ${hm(r.started)}`}<i>${label(r)}</i></button>`).join("")}${rs.length > shown(rs, sel, g.kind).length ? `<span class="mute">${tr("wf.quiet", { n: rs.length - shown(rs, sel, g.kind).length })}</span>` : ""}</div></div>`;
   }).join("");
   if (!sel) { document.getElementById("diagram").innerHTML = `<div class="mute">${tr("no_runs")}</div>`; document.getElementById("observe").innerHTML = ""; return; }
 
+  if ((sel.story && sel.story.lite) || sel.team) {
+    const whole = detail(sel);
+    if (!whole) { document.getElementById("diagram").innerHTML = `<div class="mute">${tr("loading")}</div>`; document.getElementById("observe").innerHTML = ""; return; }
+    return whole.team ? team(whole) : story(whole, focused);
+  }
   if (sel.story) return story(sel, focused);
 
   // Level 2: the architecture, lit by the selected run: its real steps, in order.
@@ -339,13 +374,24 @@ function render() {
     <button class="${cls("responsible", failed || asked)} resp" data-part="responsible"><b>${tr("resp")}</b>${failed ? tr("resp.failed", { status: statusName(sel.status) }) : asked ? trn("resp.asked", asked) : tr("resp.none")}${tr("resp.stop")}</button>
     <button class="${cls("input", true)}" data-part="input"><b>${tr("input")}</b>${esc(sel.trigger)}</button>
     <div class="flow">${steps.map((s, k) => `<button class="${cls("step:" + s, true, failed && k === steps.length - 1)}" data-part="step:${esc(s)}"><b>${tr("step", { n: k + 1 })}</b>${esc(s)}</button>`).join('<span class="arrow">→</span>') || `<span class="mute">${tr("no_steps")}</span>`}</div>
-    <button class="${cls("effect", !!post || sel.kind === "chat", failed)}" data-part="effect"><b>${tr("effect")}</b>${post ? tr("posted_to", { n: Object.keys(post.chats || {}).length }) : esc((sel.result || sel.error || sel.status).split("\n")[0].slice(0, 60))}</button>
+    <button class="${cls("effect", !!post || sel.kind === "chat", failed)}" data-part="effect"><b>${tr("effect")}</b>${post ? tr("posted_to", { n: Object.values(post.chats || {}).filter(Boolean).length }) : esc((sel.result || sel.error || sel.status).split("\n")[0].slice(0, 60))}</button>
     <div></div><button class="${cls("tools", tools.length)} tools" data-part="tools"><b>${tr("tools")}</b>${esc(tools.join(" · ") || "—")}</button><div></div>
     <button class="${cls("observability", true)} obs" data-part="observability"><b>${tr("obs")}</b>${tr("obs.record", { id: esc(sel.id), version: esc(sel.version) })}${failed ? tr("obs.box") : ""}</button>`;
 
   // Level 3: the part that was clicked, or the whole run.
   document.getElementById("l3h").textContent = `${wfName(sel.name)} · ${S.part ? partName(S.part) : tr("whole_run")}`;
   document.getElementById("observe").innerHTML = runSketch(sel) + observe(sel);
+  if (sel.long) document.getElementById("diagram").insertAdjacentHTML("afterbegin", longBar(sel.long));
+}
+
+// A long story into a terminal, through pys: attach shows the window that holds it, resume opens
+// one in its folder (buddy-long take). Codex has no take: its command, to type by hand.
+function longBar(L) {
+  const cmd = L.engine === "codex" ? `cd ${L.cwd} && codex resume ${L.session_id}` : "";
+  const btn = L.held ? (L.mux === "pys" ? `<button data-long="${L.n}" data-what="attach">${tr("long.attach")}</button>` : `<span class="mute">${tr("long.held_screen")}</span>`)
+    : L.engine === "codex" ? `<span class="mute">${tr("long.codex_by_hand")}</span> <code>${esc(cmd)}</code>`
+    : `<button data-long="${L.n}" data-what="resume">${tr("long.resume")}</button>`;
+  return `<div class="choices" style="grid-column:1/-1;margin-bottom:6px">${btn} <span class="mute" id="long-said"></span></div>`;
 }
 
 // The SOP a run is drawn on: its kind's (runs.SOPS, in /api/data), unless the run recorded a
@@ -496,7 +542,7 @@ function story(r, focused) {
     node(`resp ${st.stop || unread ? "lit" : ""}`, tr("resp"),
       st.stop ? tr("story.stop", { where: esc(appName(st.stop.where)), at: hm(st.stop.at) }) : unread ? trn("story.unread", unread)
         : live ? tr("story.you") : tr("story.ended"))
-    + node("lit", tr("story.input"), esc(r.trigger))
+    + node("lit", tr("story.input"), esc(r.trigger) + memberLink(r.member))
     + `<div class="flow">${r.steps.map((m, k) => node(m.status === "failed" ? "bad" : m.status === "todo" ? "todo" : m.status === "doing" ? "doing" : "lit",
         `${tr("story.mark", { n: k + 1 })}${m.planned ? "" : tr("story.unplanned")}`, `${MARK[m.status]} ${esc(m.step)}${m.at ? ` <span class="mute">${hm(m.at)}</span>` : ""}`)).join('<span class="arrow">→</span>')
         || `<span class="mute">${tr("story.no_marks")}</span>`}</div>`
@@ -512,6 +558,50 @@ function story(r, focused) {
     <h3 style="margin-top:8px">${tr("story_file")}</h3><pre class="log">${esc(JSON.stringify(st, null, 1))}</pre></div>`;
   const box = document.getElementById(`reply-${n}`);
   if (box && focused === box.id) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
+}
+
+// A team in levels 2 and 3: its history (joins, handovers, retirements) is the flow, and its
+// card, as it is now, is level 3. /team NAME <text> in the chat writes to its RM.
+function team(r) {
+  const tm = r.team, node = (cls, title, body) => `<div class="node ${cls}"><b>${title}</b>${body}</div>`;
+  document.getElementById("l2h").textContent = tr("team.l2h", { team: tm.name });
+  document.getElementById("diagram").innerHTML = node("lit", tr("story.input"), esc(r.trigger))
+    + `<div class="flow">${r.steps.map(e => node("lit", `${day(e.at)} ${hm(e.at)}`, esc(e.step))).join('<span class="arrow">→</span>')
+      || `<span class="mute">${tr("story.no_marks")}</span>`}</div>`;
+  document.getElementById("l3h").textContent = tr("team.card", { team: tm.name });
+  const kind = k => k === "rm" ? "RM" : k === "po" ? "PO" : "·";
+  const rows = (tm.rows || []).map(x => `<div class="mrow ${x.role === S.role ? "hl" : ""}" id="role-${esc(x.role)}">
+      <b>${kind(x.kind)} ${esc(x.role)}</b> <span class="mute">${esc(x.name)}${x.area ? " · " + esc(x.area) : ""}</span>
+      <div class="chips">${x.stories.map(s => `<button class="chip" data-run="short-story:${s.n}" title="${esc(s.title)}">${STORY[s.status === "done" ? "ok" : s.status] || ""} #${s.n} ${esc(s.title.slice(0, 36))}</button>`).join("")
+        || `<span class="mute">${tr("team.no_stories")}</span>`}</div></div>`).join("");
+  document.getElementById("observe").innerHTML = `<div class="story"><h3>${tr("team.members")}</h3>${rows}
+    <div class="mute" style="margin-top:4px">${tr("team.recorded_only")}</div>
+    <details open style="margin-top:8px"><summary>${tr("team.card_text")}</summary>${md(tm.markdown)}</details>
+    <div class="choices"><button data-team-prefill="${esc(tm.name)}">${tr("team.write")}</button></div></div>`;
+  if (S.scrollRole) {  // once, when a link named the role
+    const el = document.getElementById(`role-${S.role}`);
+    if (el) el.scrollIntoView({ block: "center" });
+    S.scrollRole = false;
+  }
+}
+
+// A stale or mistyped link's note, in its own line above level 2 (no view redraws it).
+function notFound() {
+  let el = document.getElementById("notfound");
+  if (!el) {
+    el = document.createElement("div"); el.id = "notfound"; el.className = "bad-t";
+    const d = document.getElementById("diagram"); d.parentNode.insertBefore(el, d);
+  }
+  el.textContent = S.notFound ? tr("not_found", { what: S.notFound }) : "";
+  el.hidden = !S.notFound;
+}
+
+// A story's member: a link to its team's view with that role highlighted; a role on two teams
+// whose story recorded neither: a link to each.
+function memberLink(m) {
+  if (!m) return "";
+  const a = team => `<a href="#team=${encodeURIComponent(team)}&role=${encodeURIComponent(m.role)}">${esc(tr("story.member", { role: m.role, team }))}</a>`;
+  return "<br>" + (m.team ? a(m.team) : m.teams.map(a).join(" / "));
 }
 
 function observe(r) {
@@ -609,7 +699,7 @@ document.addEventListener("click", e => {
   if (b.dataset.ask) { b.disabled = true; return post("/api/answer", { ask: b.dataset.ask, choice: b.dataset.choice }); }
   if (b.dataset.stop) return post("/api/stop");
   if (b.dataset.resume) return post("/api/resume");
-  if (b.dataset.teamPrefill) { const box = document.getElementById("say"); box.value = `/team ${b.dataset.teamPrefill} `; return box.focus(); }
+  if (b.dataset.teamPrefill) { if (document.getElementById("chatview").hidden) tab("chat"); const box = document.getElementById("say"); box.value = `/team ${b.dataset.teamPrefill} `; return box.focus(); }
   if (b.dataset.shortPrefill) { const box = document.getElementById("say"); box.value = `/short ${b.dataset.shortPrefill} `; return box.focus(); }
   if (b.dataset.shortAnswer) { const [, n, what] = b.dataset.shortAnswer.split(":"); b.disabled = true; return post("/api/short", { n: +n, what }); }
   if (b.dataset.shortStop) { b.disabled = true; return post("/api/short", { n: +b.dataset.shortStop, what: "stop" }); }
@@ -619,11 +709,35 @@ document.addEventListener("click", e => {
     box.value = ""; delete S.drafts[n];
     return post("/api/short", { n: +n, what: "reply", text });
   }
-  if (b.dataset.run) { S.run = b.dataset.run; S.part = ""; }
+  if (b.dataset.long) {
+    b.disabled = true;
+    fetch("/api/long", { method: "POST", headers: { "Content-Type": "application/json", "X-Buddy": "1" },
+      body: JSON.stringify({ n: +b.dataset.long, what: b.dataset.what }) })
+      .then(async r => { const said = document.getElementById("long-said"); if (said) said.textContent = r.ok ? tr("long.done", { w: (await r.json()).window }) : await r.text(); })
+      .finally(() => { b.disabled = false; setTimeout(load, 1500); });
+    return;
+  }
+  if (b.dataset.run) { S.run = b.dataset.run; S.part = ""; S.role = ""; S.notFound = ""; toHash(S.run); }
   else if (b.dataset.part) S.part = S.part === b.dataset.part ? "" : b.dataset.part;
   else return;
   render();
 });
+// A link to a story or to a team's member: #story=12, #team=<kit>&role=<role>. It survives a
+// reload and can be shared: picking a tile writes it, a pasted link or the back button reads it.
+function fromHash() {
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (h.get("story")) { S.run = `short-story:${h.get("story")}`; S.role = ""; }
+  else if (h.get("team")) { S.run = `team:${h.get("team")}`; S.role = h.get("role") || ""; S.scrollRole = !!S.role; }
+  else return;
+  S.part = ""; S.fromLink = true; S.notFound = "";
+}
+function toHash(id) {
+  const [fam, key] = [id.slice(0, id.indexOf(":")), id.slice(id.indexOf(":") + 1)];
+  const h = fam === "short-story" ? `#story=${key}` : fam === "team" ? `#team=${encodeURIComponent(key)}` : "";
+  history.replaceState(null, "", location.pathname + location.search + h);
+}
+window.addEventListener("hashchange", () => { fromHash(); render(); });
+fromHash();
 load();
 setInterval(load, 5000);
 try { S.topic = localStorage.getItem("topic") || ""; if (localStorage.getItem("tab") === "chat") tab("chat"); } catch (_) {}

@@ -109,6 +109,37 @@ def live(r: dict) -> dict | None:
     return g if g and not g.get("retired") else None
 
 
+def sessions_to_roles(state: Path) -> dict[str, str]:
+    """Every session that ever carried a role (each generation's name) -> that role. A session
+    named in two roles maps to the last one read (not in the data as of 2026-11-10: 13 sessions,
+    13 names); the team view's rows still list its stories under both."""
+    return {g["name"]: r["role"] for r in all_roles(state) for g in r.get("generations", [])}
+
+
+def member(story: dict, index: dict[str, str], team_of: dict[str, list[str]]) -> dict | None:
+    """The team member a short story belongs to, from its `who` (a session's name): its role
+    and the team to show it in. The team the story recorded first, then the role's only team;
+    a role on several teams with none recorded gives them all ("teams"), for the page to ask."""
+    role_name = index.get(story.get("who") or "")
+    if not role_name:
+        return None
+    teams = team_of.get(role_name, [])
+    if story.get("team") in teams:
+        return {"role": role_name, "team": story["team"]}
+    if len(teams) == 1:
+        return {"role": role_name, "team": teams[0]}
+    return {"role": role_name, "team": "", "teams": teams} if teams else None
+
+
+def team_index(state: Path) -> dict[str, list[str]]:
+    """role -> the teams whose roster has it."""
+    out: dict[str, list[str]] = {}
+    for tm in all_teams(state):
+        for x in tm["roster"]:
+            out.setdefault(x["role"], []).append(tm["team"])
+    return out
+
+
 def teams_of(state: Path, role_name: str) -> list[str]:
     return [tm["team"] for tm in all_teams(state) if any(x["role"] == role_name for x in tm["roster"])]
 

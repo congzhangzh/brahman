@@ -92,10 +92,27 @@ class Linked:
         return self.chats[0] if chat in self.chats else chat
 
 
-def post_all(channels: list[Channel], chats: list[str], markdown: str, **kw) -> dict[str, bool]:
-    """Post to each chat through the channel that owns it. Returns chat -> posted."""
+QUOTA = "quota"  # a run status: it reached a chat, and only Lark's monthly quota stopped the rest
+
+
+def post_all(channels: list[Channel], chats: list[str], markdown: str, *,
+             why: dict | None = None, **kw) -> dict[str, bool]:
+    """Post to each chat through the channel that owns it. Returns chat -> posted; `why`,
+    when given, gets the reason for each chat it missed ("quota", "failed", "no channel")."""
     done = {}
     for chat in chats:
         ch = next((c for c in channels if c.owns(chat)), None)
         done[chat] = bool(ch) and ch.post(chat, markdown, **kw)
+        if not done[chat] and why is not None:
+            why[chat] = "no channel" if not ch else (getattr(ch, "failure", lambda c: "")(chat) or "failed")
     return done
+
+
+def outcome(posted: dict[str, bool], why: dict[str, str]) -> str:
+    """A post's run status: "ok", QUOTA when it reached a chat and every miss was Lark's
+    quota (shown as such, not as a failure: the owner got it), else "failed"."""
+    if all(posted.values()):
+        return "ok"
+    if any(posted.values()) and why and all(w == QUOTA for w in why.values()):
+        return QUOTA
+    return "failed"

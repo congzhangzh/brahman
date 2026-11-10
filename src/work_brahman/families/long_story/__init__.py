@@ -34,16 +34,17 @@ class LongStory:
         """Its row in the workbench's level 1: the family is the workflow."""
         return {"kind": "family", "name": self.name, "schedule": "", "about": t("long.about")}
 
-    def runs(self, days: int = 3) -> list[dict]:
+    def runs(self, days: int | None = 3, full: int | None = None) -> list[dict]:
         """Its stories as level 1 runs, newest first: those a terminal holds, and those that
-        did something in the last `days`. Shaped like a run record (runs.py); its steps are
-        the story's own log (terminal, say, turn, wait, away)."""
-        since = time.time() - days * 86400
+        did something in the last `days` (None: every story). Shaped like a run record
+        (runs.py); its steps are the story's own log (terminal, say, turn, wait, away). Few
+        and small (18 are 40 KiB), so always whole: `full` is not needed here."""
+        since = time.time() - days * 86400 if days is not None else None
         out = []
         for s in reversed(longs.all_stories(self.state_dir)):
             events = s.get("events", [])
             last = events[-1]["at"] if events else s["started"]
-            if not longs.held(s) and time.mktime(time.strptime(last[:19], LOCAL)) < since:
+            if since is not None and not longs.held(s) and time.mktime(time.strptime(last[:19], LOCAL)) < since:
                 continue
             t0 = time.mktime(time.strptime(s["started"][:19], LOCAL))
             out.append({
@@ -53,7 +54,10 @@ class LongStory:
                 "started": s["started"], "ended": None if longs.held(s) else last, "version": "",
                 "steps": [{k: v for k, v in e.items() if k != "text"} | {"note": e["text"]} for e in events],
                 "result": events[-1]["text"] if events else "",
-                "fitness": {"seconds": int(time.time() - t0)}})
+                "fitness": {"seconds": int(time.time() - t0)},
+                "long": {"n": s["id"], "engine": s.get("engine", "claude-code"), "held": longs.held(s),
+                         "mux": s.get("mux") or ("screen" if s.get("sty") else ""), "window": s.get("window", ""),
+                         "cwd": s["cwd"], "session_id": s.get("session_id", "")}})
         return out
 
     def markdown(self, arg: str = "") -> str:

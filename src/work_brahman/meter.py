@@ -7,7 +7,9 @@ Counted from the records the buddy already keeps, never estimated:
 - **human**: what the owner decided or said. A chat message, an ask answered (not one STOP
   closed), a short story's reply or stop, a long story's message, start, or Allow / Deny.
 
-Neither side is the goal: the meter shows the mix, part digital and part human.
+Neither side is the goal: the meter shows the mix, part digital and part human. The page
+shows two windows (2026-11-10, the owner: "the last 7 days, and all of it"): the last DAYS
+days, which rise and fall with the work, and everything since the first record.
 """
 
 import json
@@ -20,8 +22,11 @@ DAYS = 7
 WORKED = {"agent", "post", "act", "render"}  # steps that mean a run did something
 
 
-def meter(state: Path, days: int = DAYS) -> dict:
-    since = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() - days * 86400))
+def meter(state: Path, days: int | None = DAYS) -> dict:
+    """The counts since `days` ago (None: since the first record); "since" is where the
+    window starts: the first record's time for all of it."""
+    since = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() - days * 86400)) if days else ""
+    first = ""
     digital = human = 0
     for d in sorted((state / "runs").glob("*")):
         if d.name < since[:10]:
@@ -33,6 +38,7 @@ def meter(state: Path, days: int = DAYS) -> dict:
                 continue
             if r.get("started", "") < since:
                 continue
+            first = min(first or r.get("started", ""), r.get("started", "") or first)
             steps = {s.get("step") for s in r.get("steps", [])}
             digital += bool(steps & WORKED)
             human += r.get("kind") == "chat"  # a message the owner sent
@@ -44,6 +50,7 @@ def meter(state: Path, days: int = DAYS) -> dict:
         if a.get("answer") and not a["answer"].get("stopped") and a["answer"].get("at", "") >= since:
             human += 1
     for s in shorts.all_stories(state):
+        first = min(first or s["started"], s["started"]) if s["started"] >= since else first
         digital += sum(1 for m in s["marks"] if (m.get("at") or "") >= since)
         human += sum(1 for r in s.get("replies", []) if r["at"] >= since)
         human += bool(s.get("stop") and s["stop"]["at"] >= since)
@@ -53,6 +60,6 @@ def meter(state: Path, days: int = DAYS) -> dict:
                 digital += e["step"] == "turn"
                 human += e["step"] in ("say", "new", "decide")
     total = digital + human
-    return {"digital": digital, "human": human, "days": days,
+    return {"digital": digital, "human": human, "days": days, "since": since or first,
             "digital_pct": round(100 * digital / total) if total else 0,
             "human_pct": 100 - round(100 * digital / total) if total else 0}

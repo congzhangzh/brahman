@@ -21,6 +21,7 @@ wide <pre> block out of its columns, and links inside <pre> don't work.
 import html
 import http.client
 import json
+import threading
 import logging
 import re
 import socket
@@ -242,7 +243,10 @@ class Telegram:
             params["reply_parameters"] = {"message_id": int(reply_to),
                                           "allow_sending_without_reply": True}
         r = self._call("sendMessage", **params)
-        if r is None and home:  # 🏠 was closed or deleted: forget it, post to the chat itself
+        # 🏠 closed or deleted (Telegram says so): forget it, post to the chat itself. Not on
+        # any failure: a network blip ("Connection reset by peer", 2026-11-10 10:10) made the
+        # next post open a second 🏠 主线 while the first was still there.
+        if r is None and home and _topic_gone(_last.why):
             homes = self._homes()
             homes.pop(chat, None)
             self.homes.write_text(json.dumps(homes))
@@ -273,10 +277,21 @@ class Telegram:
                 why = json.load(e).get("description", "")
             except ValueError:
                 why = ""
+            _last.why = why
             log.error("telegram %s: HTTP %s %s", method, e.code, why)
         except (urllib.error.URLError, OSError) as e:
+            _last.why = ""
             log.error("telegram %s: %s", method, getattr(e, "reason", e))
         return None
+
+
+_last = threading.local()  # this thread's last refused call: Telegram's description of why
+
+
+def _topic_gone(why: str | None) -> bool:
+    """Telegram says the topic a message went to is no more (deleted, closed, never was)."""
+    w = (why or "").lower()
+    return any(k in w for k in ("thread not found", "topic_deleted", "topic_closed", "topic_id_invalid"))
 
 
 def _stop() -> tuple[str, str]:

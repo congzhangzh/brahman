@@ -186,7 +186,20 @@ def read(rec: dict) -> dict:
     message came in on; records written before 2026-10-26 named the app instead."""
     if rec.get("kind") == "chat" and rec.get("name") != "chat":
         rec = {**rec, "name": "chat", "trigger": f"{rec.get('trigger', 'message')} on {rec.get('name')}"}
+    if rec.get("status") == "failed" and _quota_only(rec):
+        rec = {**rec, "status": "quota"}
     return rec
+
+
+def _quota_only(rec: dict) -> bool:
+    """A record from before 2026-11-10 (which knew no "quota" status) whose post reached a chat
+    and missed only Lark chats, with Lark's quota error in its black box: the owner got it, so
+    it reads as "quota", like the runs after it. The file itself stays as it was written."""
+    post = next((s for s in rec.get("steps", []) if s.get("step") == "post"), None)
+    chats = (post or {}).get("chats") or {}
+    missed = [c for c, ok in chats.items() if not ok]
+    return (any(chats.values()) and bool(missed) and all(c.startswith(("oc_", "lark:")) for c in missed)
+            and "99991403" in (rec.get("output") or ""))
 
 
 def tail(text: str | None) -> str:

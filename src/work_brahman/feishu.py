@@ -12,6 +12,7 @@ lark:oc_... and lark:ou_..., so a chat id always says which app owns it.
 """
 
 import json
+import threading
 from typing import Callable
 
 import lark_oapi as lark
@@ -32,6 +33,8 @@ from .channel import Incoming
 from .text import t
 
 DOMAINS = {"feishu": lark.FEISHU_DOMAIN, "lark": lark.LARK_DOMAIN}
+QUOTA_CODE = 99991403  # "This month's API call quota has been exceeded"
+_last = threading.local()  # the code of this thread's last failed call, for failure()
 MAX_TEXT = 8000  # keep replies readable on a phone; the full answer stays in the session
 MAX_CARD = 24_000  # UTF-8 bytes of Markdown; Lark rejects a card whose JSON is over 30 KB
 # The SDK logs the full connect URL, including its access_key and ticket, at INFO.
@@ -133,8 +136,14 @@ class Feishu:
             self.reply_text(msg.message_id, ("⚠️ " if failed else "") + markdown
                        + (f"\n\n({note})" if note else ""), bool(msg.thread))
 
+    def failure(self, chat: str) -> str:
+        """Why the last post in this thread missed: "quota" when Lark refused it for the
+        month's API quota (the run reached the other chats: not a failure of ours), else ""."""
+        return "quota" if getattr(_last, "code", None) == QUOTA_CODE else ""
+
     def post(self, chat: str, markdown: str, *, title: str, subtitle: str = "",
              failed: bool = False, note: str = "", thread: str = "") -> bool:
+        _last.code = None
         c = card(markdown, title=("⚠️ " if failed else "") + title, subtitle=subtitle,
                  color="red" if failed else "blue", note=note)
         if thread:  # a topic's thread: a reply in it, to its root
@@ -251,6 +260,7 @@ def _text(s: str) -> str:
 def _check(resp) -> str | None:
     """The message id of a successful call ("" for a patch), None after logging a failure."""
     if not resp.success():
+        _last.code = resp.code
         lark.logger.error(f"feishu: {resp.code} {resp.msg} log_id={resp.get_log_id()}")
         return None
     return getattr(getattr(resp, "data", None), "message_id", None) or ""  # a patch has no data

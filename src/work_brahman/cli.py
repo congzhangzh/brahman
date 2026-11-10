@@ -22,7 +22,7 @@ from pathlib import Path
 
 from . import asks, configure, install, long_live, long_stories as longs, portable, procs, short_stories as shorts, teams, text, topics
 from .bot import Bot, Sessions
-from .channel import Linked, post_all
+from .channel import QUOTA, Linked, outcome, post_all
 from .duties import DUTIES
 from .engine import ClaudeCode, long_engines
 from .families import FAMILIES
@@ -830,11 +830,12 @@ def run_family(families: dict, name: str, fcfg: dict, channels: list, state: Pat
         return 2
     markdown = f.scheduled()
     run.step("render", chars=len(markdown))
-    posted = post_all(channels, chats, markdown, title=text.workflow(name), subtitle=text.stamp("day_date"))
-    ok = all(posted.values())
-    run.step("post", chats=posted, ok=ok)
-    run.finish("ok" if ok else "failed", result=tail(markdown))
-    return 0 if ok else 1
+    why = {}
+    posted = post_all(channels, chats, markdown, title=text.workflow(name), subtitle=text.stamp("day_date"), why=why)
+    status = outcome(posted, why)
+    run.step("post", chats=posted, ok=status == "ok", **({"missed": why} if why else {}))
+    run.finish(status, result=tail(markdown))
+    return 0 if status != "failed" else 1
 
 
 def run_duty(duties: dict, name: str, channels: list, state: Path, linked: Linked,
@@ -875,13 +876,14 @@ def run_duty(duties: dict, name: str, channels: list, state: Path, linked: Linke
         print(f"no configured channel for {chats!r}", file=sys.stderr)
         run.finish("failed", error=f"no channel for {chats}")
         return 2
+    why = {}
     posted = post_all(channels, chats, changes, title=text.workflow(name), subtitle=text.stamp("day_time"),
-                      note="" if act else getattr(d, "note", ""))
-    ok = all(posted.values())
-    run.step("post", chats=posted, ok=ok)
+                      note="" if act else getattr(d, "note", ""), why=why)
+    status = outcome(posted, why)
+    run.step("post", chats=posted, ok=status == "ok", **({"missed": why} if why else {}))
     if run.rec["status"] == "running":
-        run.finish("ok" if ok else "failed", result=tail(changes))
-    return 0 if ok and run.rec["status"] == "ok" else 1
+        run.finish(status, result=tail(changes))
+    return 0 if run.rec["status"] in ("ok", QUOTA) else 1
 
 
 if __name__ == "__main__":

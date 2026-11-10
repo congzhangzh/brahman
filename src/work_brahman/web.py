@@ -30,11 +30,14 @@ import json
 import logging
 import os
 import re
+import subprocess
+import shutil
 import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from . import long_stories as longs, portable, topics
 from .meter import meter
@@ -59,8 +62,10 @@ def _owner(client_port: int, server_port: int) -> bool:
 TOKENS = next((p for p in (HERE.parent.parent / "design" / "tokens.css",  # in the repository
                            HERE / "static" / "tokens.css") if p.exists()),  # in a wheel (the kit copies it)
               HERE / "static" / "tokens.css")
-DAYS = 3        # how far back the page shows runs
+DAYS = 3        # how far back the page shows the duties' and jobs' runs (stories and teams: all)
 MAX_RUNS = 600
+FULL = 40       # stories sent whole each time; older ones are light tiles, fetched when picked
+METER_EVERY = 60  # s: the meter reads every record (0.2-0.3 s each window), the page asks every 5 s
 
 
 CHAT = "web:local"  # the web's chat id, linked to my other chats; the sender id too
@@ -284,6 +289,10 @@ class Web:
                     return self._send(200, TOKENS.read_bytes() if TOKENS.exists() else b"", "text/css")
                 if path == "/api/data":
                     return self._json(web.data())
+                if path == "/api/run":  # one story or team whole: a light tile was picked
+                    key = parse_qs(urlparse(self.path).query).get("id", [""])[0]
+                    run = web.detail(key)
+                    return self._json(run) if run else self._send(404, b"no such run", "text/plain")
                 if path == "/api/chat":
                     return self._json({"on": web.chat is not None,
                                        "messages": web.chat.history() if web.chat else [],
@@ -331,6 +340,9 @@ class Web:
                         return self._send(400, b"n, what (stop|reply|a<q>.<i>), and text for a reply",
                                           "text/plain")
                     action = f"short:{n}:{what}"
+                elif path == "/api/long":  # attach to its pys window, or resume it in a new one
+                    code, out = web.long(str(body.get("n", "")), body.get("what"))
+                    return self._json(out) if code == 200 else self._send(code, out.encode(), "text/plain")
                 elif path in ("/api/stop", "/api/resume"):
                     action = path.rsplit("/", 1)[-1]
                 else:
@@ -372,6 +384,53 @@ class Web:
         side = self.chat or type("WebSide", (), {"name": "web", "owns": lambda s, c: False})()
         threading.Thread(target=self.bot._press, args=(side, msg), daemon=True).start()
 
+    def meter(self) -> dict:
+        """The last DAYS days, with all of it as "all"; counted again at most every METER_EVERY s."""
+        at, m = getattr(self, "_meter", (0.0, None))
+        if m is None or time.time() - at > METER_EVERY:
+            m = meter(self.state) | {"all": meter(self.state, None)}
+            self._meter = (time.time(), m)
+        return m
+
+    def long(self, n: str, what) -> tuple[int, dict | str]:
+        """A long story into a terminal, through pys (2026-11-10, the owner: "attach or resume by
+        pys"): attach shows the pys window that holds it; resume opens a pys window in its folder
+        and runs `buddy-long take N` there (the buddy hands it over, then `claude --resume`).
+        Codex: take is Claude's only, so the page shows the command instead."""
+        s = longs.load(self.state, int(n)) if n.isdigit() else None
+        if s is None or what not in ("attach", "resume"):
+            return 400, "n (a long story's number) and what (attach|resume)"
+        pys = shutil.which("pys") or os.path.expanduser("~/.local/bin/pys")
+        if what == "attach":
+            if not (longs.held(s) and s.get("mux") == "pys" and s.get("window") != ""):
+                return 409, "no pys window holds it: resume it"
+            r = subprocess.run([pys, "select", str(s["window"])], capture_output=True, text=True, timeout=10)
+            return (200, {"ok": True, "window": s["window"]}) if r.returncode == 0 else (502, r.stderr.strip() or "pys select failed")
+        if longs.held(s):
+            return 409, "a terminal holds it: attach"
+        if s.get("engine", "claude-code") != "claude-code":
+            return 409, "a Codex story is resumed by hand"
+        if not os.path.isdir(s["cwd"]):
+            return 409, f"its folder is gone: {s['cwd']}"
+        r = subprocess.run([pys, "new", "--select", "--", "bash"], cwd=s["cwd"], capture_output=True, text=True, timeout=10)
+        try:
+            wid = json.loads(r.stdout)["wid"]
+        except (ValueError, KeyError, TypeError):
+            return 502, (r.stderr or r.stdout).strip() or "pys new failed"
+        subprocess.run([pys, "send", "--enter", str(wid), f"buddy-long take {s['id']}"], capture_output=True, timeout=10)
+        log.info("long story #%s: resumed in pys window %s", s["id"], wid)
+        return 200, {"ok": True, "window": wid}
+
+    def detail(self, key: str) -> dict | None:
+        """A family's run whole, by its id ("short-story:12", "team:kit")."""
+        family, _, rest = key.partition(":")
+        f = next((f for f in self.families if f.name == family and hasattr(f, "detail")), None)
+        try:
+            return f.detail(rest) if f and rest else None
+        except Exception:
+            log.exception("family %s: detail %s failed", family, rest)
+            return None
+
     def data(self) -> dict:
         runs = []
         days = sorted((self.state / "runs").glob("*"))[-DAYS:]
@@ -394,9 +453,9 @@ class Web:
         workflows = self.workflows + [f.workflow() for f in self.families]
         for f in self.families:  # after the duties' runs: a failed run there is picked first
             try:
-                runs += f.runs(DAYS)
+                runs += f.runs(None, FULL)
             except Exception:
                 log.exception("family %s: runs failed", f.name)
         return {"now": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "workflows": workflows, "sops": SOPS,
                 "runs": runs, "asks": asks, "paused": paused, "running": running,
-                "meter": meter(self.state)}
+                "meter": self.meter()}

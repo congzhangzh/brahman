@@ -86,8 +86,13 @@ def find(state: Path, chat: str, handle: str) -> dict | None:
     return next((s for s in all_stories(state) if s["threads"].get(chat) == handle), None)
 
 
+ENGINE_NAMES = {"claude-code": "Claude", "codex": "Codex"}
+
+
 def label(story: dict) -> str:
-    return t("long.label", n=story["id"], title=story["title"])
+    """"[Claude] #7 title": the engine first, as the owner reads his chats (2026-11-10)."""
+    engine = story.get("engine", "claude-code")
+    return t("long.label", engine=ENGINE_NAMES.get(engine, engine), n=story["id"], title=story["title"])
 
 
 def pick(engines: dict, kind: str, mode: str = "") -> object | None:
