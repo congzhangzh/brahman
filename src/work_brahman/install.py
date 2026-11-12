@@ -209,6 +209,8 @@ def init(args) -> int:
             print(f"{where.capitalize()} app {got['app_id']} made; you are {got['open_id'] or '?'}")
             chat = hello(got["app_id"], got["secret"], where, got["open_id"]) if got["open_id"] else ""
             linked_by_scan[where] = chat
+            print("note: a QR scan makes a PersonalAgent app; if its chats refuse thread replies, topics and "
+                  "long stories answer in the main chat and buddy doctor says so (threads: make the app by hand)")
             print(f"your chat {chat} is linked: the bot wrote to you there" if chat else
                   "your chat isn't linked yet: write anything to the bot, then link it in the "
                   "workbench's Setup tab (or buddy tui, L)")
@@ -528,6 +530,13 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
                 (f"{seen[0]['allow']} (you wrote from it {seen[0]['times']}×; or Link in the Setup tab, L in buddy tui)"
                  if seen else f"write anything to the bot, then Link in the Setup tab (L in buddy tui), or "
                  f"buddy allow {mine_id} --chat {chat}<your direct chat with the bot>") + ", then restart the buddy")
+    from .feishu import threads_refusals  # a thread reply refused: the buddy replied in the main chat
+    for app_id, r in threads_refusals().items():
+        if app_id in (os.environ.get("FEISHU_APP_ID"), os.environ.get("LARK_APP_ID")):
+            row(None, f"{r['app'].capitalize()} app {app_id}: thread replies refused (code {r['code']}, {r['at']}): "
+                      "topics and long stories answer in the main chat instead",
+                "for threads, make the app by hand (README, section 1: a self-built app with the Bot "
+                "capability); a QR scan makes a PersonalAgent app, which may not take threads")
     for r in wrote[:5]:  # wrote, refused, not paired since
         row(None, f"wrote but not paired: {r['sender']} on {r['channel']} ({r['times']}×, last {r['last']})",
             f"if that is you: {r['allow']}, then restart the buddy")

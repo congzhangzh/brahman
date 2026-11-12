@@ -40,6 +40,35 @@ MAX_TEXT = 8000  # keep replies readable on a phone; the full answer stays in th
 MAX_CARD = 24_000  # UTF-8 bytes of Markdown; Lark rejects a card whose JSON is over 30 KB
 # The SDK logs the full connect URL, including its access_key and ticket, at INFO.
 LOG_LEVEL = lark.LogLevel.WARNING
+QUOTA_CODES = (99991403,)  # the month's API quota: a plain reply fails the same way, no fallback
+
+
+def _threads_file():
+    from pathlib import Path
+    import os
+    return Path(os.environ.get("XDG_STATE_HOME", "~/.local/state")).expanduser() / "work_brahman" / "threads.json"
+
+
+def threads_refused(app_id: str, name: str, code) -> None:
+    """Keep that this app's thread replies were refused, and with which code (doctor reads it)."""
+    import time
+    f = _threads_file()
+    try:
+        data = json.loads(f.read_text())
+    except (OSError, ValueError):
+        data = {}
+    if app_id in data:
+        return
+    data[app_id] = {"app": name, "code": code, "at": time.strftime("%Y-%m-%d %H:%M")}
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(data, indent=1))
+
+
+def threads_refusals() -> dict:
+    try:
+        return json.loads(_threads_file().read_text())
+    except (OSError, ValueError):
+        return {}
 
 
 def ws_module():
@@ -95,7 +124,16 @@ class Feishu:
         body = (ReplyMessageRequestBody.builder().msg_type(msg_type).content(content)
                 .reply_in_thread(in_thread).build())
         req = ReplyMessageRequest.builder().message_id(message_id).request_body(body).build()
-        return _check(self.api.im.v1.message.reply(req))
+        got = _check(self.api.im.v1.message.reply(req))
+        code = _last.code
+        if got is None and in_thread and code not in QUOTA_CODES:
+            # A thread reply refused (an app made by a QR scan is a PersonalAgent, and its chats may
+            # not take threads; 2026-11-12): the same reply in the main chat, and the refusal kept,
+            # so buddy doctor can say it and how to get threads (an app made by hand).
+            got = self._reply(message_id, msg_type, content, False)
+            if got is not None:
+                threads_refused(self.app_id, self.name, code)
+        return got
 
     def _send(self, chat_id: str, msg_type: str, content: str) -> str | None:
         body = (CreateMessageRequestBody.builder().receive_id(chat_id.removeprefix(self.prefix)).msg_type(msg_type)
