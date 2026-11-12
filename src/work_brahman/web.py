@@ -27,6 +27,8 @@ No secret is ever sent to the page; it sends a new one, or "-" to remove one.
     POST /api/setup/check    {"name": ..., "url": ...}: a signed ping to one peer, answered signed
     POST /api/setup/pair     {"sender": ..., "restart": bool}: pair someone who wrote to the bot
                              (refused.json, never a typed id), its chat linked; then a restart
+    POST /api/setup/link     {"chat": ..., "restart": bool}: link a chat a paired person wrote from
+    POST /api/setup/ignore_chat {"chat": ...}: forget such a chat
     POST /api/setup/ignore   {"sender": ...}: forget who wrote (back only if it writes again)
     POST /api/setup/ping     {"chat": ...}: "🏓 ping <code>" into that linked chat (pings.py); `pong`
                              typed back there closes the loop; GET shows each chat's last ping
@@ -421,7 +423,8 @@ class Web:
                 "peers": settings.peers(), "log": settings.log(last=300),
                 "chats": [{"chat": c, "channel": next((ch.name for ch in self.bot.channels if ch.owns(c)), "")}
                           for c in linked] if self.bot else [],
-                "pings": pings.pings(self.state), "refused": pings.refused(self.state, allowed)}
+                "pings": pings.pings(self.state), "refused": pings.refused(self.state, allowed),
+                "unlinked": pings.unlinked(self.state, set(linked) | set(s["chats"] if s else ()))}
 
     def setup_post(self, what: str, body: dict) -> dict | None:
         from . import configure
@@ -450,6 +453,14 @@ class Web:
             if ok and body.get("restart"):
                 notes.append(settings.restart_soon())
             return {"ok": ok, "notes": notes, "restarting": bool(ok and body.get("restart"))}
+        if what == "link":  # a chat a paired person wrote from: linked; then, if asked, a restart
+            ok, notes = settings.link(path, self.state, str(body.get("chat", "")))
+            if ok and body.get("restart"):
+                notes.append(settings.restart_soon())
+            return {"ok": ok, "notes": notes, "restarting": bool(ok and body.get("restart"))}
+        if what == "ignore_chat":
+            chat = str(body.get("chat", ""))
+            return {"ok": pings.unlink_forget(self.state, chat), "notes": [f"{chat} ignored"]}
         if what == "ignore":  # who wrote, not wanted: off the list (back only if it writes again)
             sender = str(body.get("sender", ""))
             return {"ok": pings.forget(self.state, sender), "notes": [f"{sender} ignored"]}

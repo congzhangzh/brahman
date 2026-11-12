@@ -179,6 +179,7 @@ def init(args) -> int:
         print(f"Telegram: a token from {GET['telegram']} (empty: skip).")
         token = _ask("Telegram bot token", secret=True)
     apps = {"lark": [args.lark_app_id, args.lark_app_secret, ""], "feishu": [args.feishu_app_id, args.feishu_app_secret, ""]}
+    linked_by_scan: dict[str, str] = {}  # brand -> the chat a scan linked (hello)
     for brand, title, where in (("lark", "Lark, international", GET["lark"]), ("feishu", "Feishu, China", GET["feishu"])):
         app = apps[brand]
         scanning = getattr(args, f"{brand}_scan", False)
@@ -206,7 +207,15 @@ def init(args) -> int:
                 app[:] = [None, "", ""]
             apps[where][:] = [got["app_id"], got["secret"], got["open_id"]]
             print(f"{where.capitalize()} app {got['app_id']} made; you are {got['open_id'] or '?'}")
+            chat = hello(got["app_id"], got["secret"], where, got["open_id"]) if got["open_id"] else ""
+            linked_by_scan[where] = chat
+            print(f"your chat {chat} is linked: the bot wrote to you there" if chat else
+                  "your chat isn't linked yet: write anything to the bot, then link it in the "
+                  "workbench's Setup tab (or buddy tui, L)")
     (lark_id, lark_secret, lark_me), (feishu_id, feishu_secret, feishu_me) = apps["lark"], apps["feishu"]
+    # chats a scan linked (hello): the first app's as they are, the second's as lark:...
+    scan_chats = [c for c in (linked_by_scan.get("feishu" if feishu_id else "lark", ""),
+                              ("lark:" + linked_by_scan["lark"]) if feishu_id and linked_by_scan.get("lark") else "") if c]
     if not token and not lark_id and not feishu_id:
         print("no chat set: give a Telegram token (--telegram-token), a Lark app (--lark-app-id, "
               "--lark-app-secret) or a Feishu app (--feishu-app-id, --feishu-app-secret)", file=sys.stderr)
@@ -217,8 +226,11 @@ def init(args) -> int:
     first, second = ((feishu_id, feishu_secret), (lark_id, lark_secret)) if feishu_id else ((lark_id, lark_secret), (None, ""))
     path.parent.mkdir(parents=True, exist_ok=True)
     kept = [str(_keep(p)) for p in (path, env) if p.exists()]
-    path.write_text(TOML.format(date=time.strftime("%Y-%m-%d"), workspace=workspace,
-                                domain=domain, language=language, port=args.port))
+    toml = TOML.format(date=time.strftime("%Y-%m-%d"), workspace=workspace, domain=domain,
+                       language=language, port=args.port)
+    if scan_chats:
+        toml = toml.replace("\nchats = []", "\nchats = [" + ", ".join(f'"{c}"' for c in scan_chats) + "]", 1)
+    path.write_text(toml)
     secrets = [f"TELEGRAM_BOT_TOKEN={token or ''}",
                f"FEISHU_APP_ID={first[0] or ''}", f"FEISHU_APP_SECRET={first[1] or ''}",
                f"LARK_APP_ID={second[0] or ''}", f"LARK_APP_SECRET={second[1] or ''}",
@@ -250,6 +262,28 @@ def install_skills() -> list[str]:
         elif hint:
             done.append(f"{what}: ⚠ {state}\n  hint: {hint}")
     return done
+
+
+def hello(app_id: str, secret: str, domain: str, open_id: str) -> str:
+    """Right after a QR scan: the new app writes to the one who scanned, by open_id, and the
+    answer names the chat that made, so it is linked at once (the owner, 2026-11-12: on the Mac
+    a scan paired him but linked no chat, so cards, asks and pings had nowhere to go). The
+    chat's oc_ id, or "" when the platform refuses (scopes not granted yet: write to the bot
+    once, and the Setup tab offers to link that chat)."""
+    import json
+    base = {"lark": "https://open.larksuite.com", "feishu": "https://open.feishu.cn"}[domain]
+    try:
+        t = _get(base + "/open-apis/auth/v3/tenant_access_token/internal", {"app_id": app_id, "app_secret": secret})
+        if t.get("code"):
+            return ""
+        r = _get(base + "/open-apis/im/v1/messages?receive_id_type=open_id",
+                 {"receive_id": open_id, "msg_type": "text",
+                  "content": json.dumps({"text": "✅ buddy: this is your chat with me; it is linked. "
+                                                 "Asks, cards and pings come here."})},
+                 token=t["tenant_access_token"])
+        return "" if r.get("code") else (r.get("data") or {}).get("chat_id", "")
+    except Exception:  # noqa: BLE001 - linking later is the fallback
+        return ""
 
 
 def scan_app(brand: str) -> dict:
@@ -489,9 +523,11 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
                     "(Callbacks) → long connection → add 卡片回传交互 (card.action.trigger); publish a version")
         if any(mine(a, person) for a in allowed) and not any(mine(c, chat) for c in linked):
             mine_id = next(a for a in allowed if mine(a, person))
-            row(None, f"{app}: {mine_id} paired, but no chat linked there: cards and asks won't reach it",
-                (f"{here[0]['allow']}" if here else f"buddy allow {mine_id} --chat {chat}<your direct chat with the bot>")
-                + ", then restart the buddy")
+            seen = [u for u in pings.unlinked(state, linked) if mine(u["chat"], chat)]
+            row(None, f"{app}: {mine_id} paired, but no chat linked there: cards, asks and pings won't reach it",
+                (f"{seen[0]['allow']} (you wrote from it {seen[0]['times']}×; or Link in the Setup tab, L in buddy tui)"
+                 if seen else f"write anything to the bot, then Link in the Setup tab (L in buddy tui), or "
+                 f"buddy allow {mine_id} --chat {chat}<your direct chat with the bot>") + ", then restart the buddy")
     for r in wrote[:5]:  # wrote, refused, not paired since
         row(None, f"wrote but not paired: {r['sender']} on {r['channel']} ({r['times']}×, last {r['last']})",
             f"if that is you: {r['allow']}, then restart the buddy")

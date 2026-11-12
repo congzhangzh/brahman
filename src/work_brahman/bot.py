@@ -102,6 +102,8 @@ class Bot:
                                  t("bot.not_paired", sender=msg.sender,
                                    chat="" if msg.chat == msg.sender else f" --chat {msg.chat}"))
             return
+        if self.state and ch.name != "web" and msg.chat not in self.linked.chats:
+            pings.unlinked_seen(self.state, ch.name, msg.sender, msg.chat)  # paired, chat not linked
         if self.state and ch.name != "web":  # the owner is on the phone: `speak` goes quiet
             _touch(self.state.parent / "speak" / "remote")
         if msg.action:

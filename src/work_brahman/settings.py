@@ -197,6 +197,26 @@ def pair(path: Path, state: Path, sender: str) -> tuple[bool, list[str]]:
     return ok, ([f"paired {sender} on {who['channel']}, its chat {who['chat']} linked"] + notes[1:]) if ok else notes
 
 
+def link(path: Path, state: Path, chat: str) -> tuple[bool, list[str]]:
+    """Link a chat a paired person wrote from (pings.unlinked, never a typed id): into linked
+    chats, so cards, asks and pings go there. (written, notes); used after a restart."""
+    from . import pings
+    if not path.exists():
+        return False, [f"not set up: {path} is missing"]
+    before = configure.load(path)
+    who = next((r for r in pings.unlinked(state, before["chats"]) if r["chat"] == chat), None)
+    if who is None:
+        return False, [f"{chat}: nobody paired wrote from it (or it is linked already)"]
+    s = copy.deepcopy(before)
+    change(s, "chats", s["chats"] + [chat])
+    if who["sender"] not in s["allowed"]:
+        change(s, "allowed", s["allowed"] + [who["sender"]])
+    ok, notes = write(path, s, before)
+    if ok:
+        pings.unlink_forget(state, chat)
+    return ok, ([f"linked {chat} on {who['channel']}"] + notes[1:]) if ok else notes
+
+
 def restart_soon(name: str = "buddy", delay: float = 1.5) -> str:
     """Restart the buddy's service a moment from now, so the page that asked gets its answer
     first. --no-block: systemd takes the job and this process may end with the unit. Only the

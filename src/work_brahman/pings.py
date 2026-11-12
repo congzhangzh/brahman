@@ -86,6 +86,33 @@ def refused(state: Path, allowed=()) -> list[dict]:
     return sorted(out, key=lambda e: e["last"], reverse=True)
 
 
+def unlinked_seen(state: Path, channel: str, sender: str, chat: str) -> None:
+    """A paired person wrote from a chat that isn't linked (a QR scan pairs but can't link:
+    the Mac, 2026-11-12): kept, so the Setup tab offers Link and doctor prints the line."""
+    with LOCK:
+        data = _read(state / "unlinked.json")
+        e = data.get(chat, {"first": _now(), "times": 0})
+        e.update(channel=channel, sender=sender, last=_now(), times=e["times"] + 1)
+        data[chat] = e
+        _write(state / "unlinked.json", data)
+
+
+def unlinked(state: Path, linked=()) -> list[dict]:
+    """Chats a paired person wrote from that aren't linked, newest first, with the line."""
+    data = _read(state / "unlinked.json")
+    out = [{"chat": c, **e, "allow": allow_line(e["sender"], c)} for c, e in data.items() if c not in linked]
+    return sorted(out, key=lambda e: e["last"], reverse=True)
+
+
+def unlink_forget(state: Path, chat: str) -> bool:
+    with LOCK:
+        data = _read(state / "unlinked.json")
+        if data.pop(chat, None) is None:
+            return False
+        _write(state / "unlinked.json", data)
+    return True
+
+
 def send(state: Path, channels, chat: str) -> dict:
     """Post a ping into chat through its channel; what happened is kept and returned."""
     ch = next((c for c in channels if c.owns(chat)), None)

@@ -790,7 +790,7 @@ async function setupLoad(first) {
   if (first || !SV.cfgDirty) { SV.cfg = s.config; drawConfig(); }
   if (first || !SV.peersDirty) { SV.peers = s.peers; drawPeers(); }
   document.getElementById("sv-logtext").textContent = s.log.join("\n") || tr("setup.no_log");
-  SV.chats = s.chats; SV.pings = s.pings; SV.refused = s.refused; drawPings(); drawBanner();
+  SV.chats = s.chats; SV.pings = s.pings; SV.refused = s.refused; SV.unlinked = s.unlinked; drawPings(); drawBanner();
   if (first && !SV.ran) { SV.ran = true; setupDoctor(false); }
 }
 async function setupDoctor(full) {
@@ -815,8 +815,12 @@ function drawPings() {
     `<div class="drow"><span class="warn">⚠️</span> ${esc(r.sender)} · ${esc(r.channel)} · ${esc(tr("setup.times", { n: r.times }))} · ${esc(r.last)}<div class="dim"><code>${esc(r.allow)}</code> <button class="act" data-spair="${esc(r.sender)}" data-schat="${esc(r.chat)}">${esc(tr("setup.pair"))}</button> <button class="act" data-signore="${esc(r.sender)}">${esc(tr("setup.ignore"))}</button></div></div>`).join("")
     || `<div class="dim">${esc(tr("setup.no_refused"))}</div>`;
 }
-function drawBanner() {  // who wrote to the bot and isn't paired: one click pairs them, on every Setup view
-  document.getElementById("sv-banner").innerHTML = (SV.refused || []).map(r =>
+function drawBanner() {  // who wrote to the bot and isn't paired, or wrote from a chat not linked: one click
+  document.getElementById("sv-banner").innerHTML = (SV.unlinked || []).map(r =>
+    `<div class="who"><span>⚠️ ${esc(tr("setup.unlinked", { sender: r.sender, chat: r.chat, app: r.channel }))}</span>
+     <button class="act go" data-qlink="${esc(r.chat)}" data-restart="1">${esc(tr("setup.link_restart"))}</button>
+     <button class="act" data-qlink="${esc(r.chat)}">${esc(tr("setup.link_only"))}</button>
+     <button class="act" data-signorechat="${esc(r.chat)}">${esc(tr("setup.ignore"))}</button></div>`).join("") + (SV.refused || []).map(r =>
     `<div class="who"><span>⚠️ ${esc(tr("setup.wrote", { sender: r.sender, app: r.channel, n: r.times, last: r.last.slice(11) }))}</span>
      <button class="act go" data-qpair="${esc(r.sender)}" data-restart="1">${esc(tr("setup.pair_restart"))}</button>
      <button class="act" data-qpair="${esc(r.sender)}">${esc(tr("setup.pair_only"))}</button>
@@ -883,9 +887,15 @@ document.addEventListener("click", async e => {
     SV.bannerMsg = r.notes.join(" · "); SV.bannerBad = !r.ok;
     return setupLoad(false);
   }
-  if (b.dataset.qpair) {
+  if (b.dataset.signorechat) {
+    const r = await svPost("/api/setup/ignore_chat", { chat: b.dataset.signorechat });
+    SV.bannerMsg = r.notes.join(" · "); SV.bannerBad = !r.ok;
+    return setupLoad(false);
+  }
+  if (b.dataset.qpair || b.dataset.qlink) {
     const restart = !!b.dataset.restart;
-    const r = await svPost("/api/setup/pair", { sender: b.dataset.qpair, restart });
+    const r = b.dataset.qlink ? await svPost("/api/setup/link", { chat: b.dataset.qlink, restart })
+                              : await svPost("/api/setup/pair", { sender: b.dataset.qpair, restart });
     SV.bannerMsg = r.notes.join(" · "); SV.bannerBad = !r.ok; drawBanner();
     if (r.restarting) {  // the buddy goes away for a moment: wait for it, then read the setup again
       const t0 = Date.now();

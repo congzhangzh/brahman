@@ -169,8 +169,31 @@ class Model:
             self.set("chats", self.s["chats"] + [r["chat"]])
         return f"{r['sender']} paired (its chat {r['chat']} linked): w writes it, then restart the buddy"
 
+    def unlinked(self) -> list[dict]:
+        """Chats a paired person wrote from that aren't linked (pings.py), newest first."""
+        from . import pings
+        return pings.unlinked(self.state, set(self.s["chats"]) if self.s else set())
+
+    def quick_link(self) -> str:
+        """L: link the chat a paired person wrote from last (written at once, with a backup)."""
+        chats = self.unlinked()
+        if not chats:
+            return "no chat to link"
+        if self.config_dirty:
+            return "Config has unwritten changes: w writes them first (or q drops them)"
+        ok, notes = settings.link(self.path, self.state, chats[0]["chat"])
+        if ok:
+            self.before = configure.load(self.path)
+            self.s = copy.deepcopy(self.before)
+        self.cnotes = notes
+        return " · ".join(notes[:1] if ok else notes)
+
     def banner(self) -> str:
-        """Who wrote to the bot and isn't paired, on every view: P pairs them."""
+        """Who wrote from a chat not linked (L links it), or wrote unpaired (P pairs them)."""
+        chats = self.unlinked()
+        if chats:
+            c = chats[0]
+            return f"⚠ {c['sender']} writes from {c['chat']} on {c['channel']}, not linked: L links it"
         who = self.refused()
         if not who:
             return ""
@@ -458,6 +481,11 @@ def run(path: Path) -> int:  # pragma: no cover - the terminal part
                 from . import pings
                 pings.forget(m.state, who)
                 m.status = f"{who} ignored"
+                continue
+            if k == ord("L"):  # link the chat a paired person wrote from, from any view
+                m.status = m.quick_link()
+                if m.status.startswith("linked") and (ask(scr, "restart the buddy now, so it uses this? y/N") or "n").lower() == "y":
+                    m.status = settings.restart_soon(delay=0.2)
                 continue
             if k == ord("P"):  # the quick pair, from any view
                 m.status = m.quick_pair()
