@@ -9,7 +9,7 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import asks, long_live, long_stories as longs, procs, short_stories as shorts, teams, topics
+from . import asks, long_live, long_stories as longs, pings, procs, short_stories as shorts, teams, topics
 from .channel import Channel, Incoming, Linked, post_all
 from .engine import Codex, Engine
 from .runs import Run, note_step, tail
@@ -92,8 +92,12 @@ class Bot:
         if self._seen_before(f"{msg.chat}/{msg.message_id}"):
             return
         if msg.sender not in self.allowed:
-            log.warning("refused message from %s", msg.sender)
-            if not self.allowed:  # not paired yet: tell the owner which id to allow
+            log.warning("refused message from %s in %s (%s)", msg.sender, msg.chat, ch.name)
+            if self.state:  # the Setup tab and doctor show it, with its `buddy allow` line
+                pings.refuse(self.state, ch.name, msg.sender, msg.chat)
+            # Nobody of this app paired yet (a Feishu added beside a paired Lark and Telegram,
+            # 2026-11-12): tell the sender how to pair. Someone is: a stranger gets silence.
+            if not pings.paired_here(self.allowed, msg.sender):
                 self.pool.submit(ch.reply, msg,
                                  t("bot.not_paired", sender=msg.sender,
                                    chat="" if msg.chat == msg.sender else f" --chat {msg.chat}"))
@@ -105,6 +109,9 @@ class Bot:
             return
         if msg.text is None:
             self.pool.submit(ch.reply, msg, t("bot.text_only"))
+            return
+        if self.state and (p := pings.pong(self.state, msg.chat, msg.text)):  # the Setup tab's ping
+            self.pool.submit(ch.reply, msg, t("bot.pong", code=p["code"], channel=ch.name))
             return
         if msg.text.strip() in STOP_WORDS | {t("btn.stop_key")}:  # not queued behind anything: a stop must stop now
             threading.Thread(target=self._safe, args=(self.stop, ch, msg), daemon=True).start()
@@ -218,6 +225,12 @@ class Bot:
 
     def _press(self, ch: Channel, msg: Incoming) -> None:
         """A button: ■ Stop, ▶ Resume, or an answer to an ask."""
+        if msg.action.startswith("ask:ping-"):  # the Setup tab's ping card (from a chat or the page)
+            p = pings.button(self.state, msg.chat, msg.action) if self.state else None
+            # a press is no message to reply to (Feishu: 99992354): a new one says it
+            ch.post(msg.chat, t("bot.pong_button", code=p["code"], channel=ch.name) if p else t("bot.ping_old"),
+                    title="🏓 pong")
+            return
         if msg.action == "stop":
             return self._safe(self.stop, ch, msg)
         if msg.action == "resume":

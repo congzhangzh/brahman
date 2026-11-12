@@ -178,16 +178,35 @@ def init(args) -> int:
     if token is None and asking:
         print(f"Telegram: a token from {GET['telegram']} (empty: skip).")
         token = _ask("Telegram bot token", secret=True)
-    lark_id, lark_secret = args.lark_app_id, args.lark_app_secret
-    if lark_id is None and asking:
-        print(f"Lark, international (optional): App ID and Secret from {GET['lark']} (empty: skip).")
-        lark_id = _ask("Lark App ID")
-        lark_secret = _ask("Lark App Secret", secret=True) if lark_id else ""
-    feishu_id, feishu_secret = args.feishu_app_id, args.feishu_app_secret
-    if feishu_id is None and asking:
-        print(f"Feishu, China (optional): App ID and Secret from {GET['feishu']} (empty: skip).")
-        feishu_id = _ask("Feishu App ID")
-        feishu_secret = _ask("Feishu App Secret", secret=True) if feishu_id else ""
+    apps = {"lark": [args.lark_app_id, args.lark_app_secret, ""], "feishu": [args.feishu_app_id, args.feishu_app_secret, ""]}
+    for brand, title, where in (("lark", "Lark, international", GET["lark"]), ("feishu", "Feishu, China", GET["feishu"])):
+        app = apps[brand]
+        scanning = getattr(args, f"{brand}_scan", False)
+        if app[0] is None and asking and not scanning:
+            print(f"{title} (optional): App ID and Secret from {where}, or `scan`: a QR code makes the "
+                  "app for you (empty: skip).")
+            app[0] = _ask(f"{brand.capitalize()} App ID")
+            scanning = app[0].strip().lower() == "scan"
+            if not scanning:
+                app[1] = _ask(f"{brand.capitalize()} App Secret", secret=True) if app[0] else ""
+        if scanning:
+            try:
+                got = scan_app(brand)
+            except RuntimeError as e:
+                print(f"{title}: {e}", file=sys.stderr)
+                return 2
+            # a Feishu scan on a Lark tenant makes a Lark app (the SDK switches by itself): it goes
+            # where it belongs, unless a Lark app is given already
+            where = got["domain"]
+            if where != brand:
+                if apps[where][0]:
+                    print(f"{title}: the scan made a {where.capitalize()} app, but one is given already; "
+                          f"scan it again as {where}, or leave that one out", file=sys.stderr)
+                    return 2
+                app[:] = [None, "", ""]
+            apps[where][:] = [got["app_id"], got["secret"], got["open_id"]]
+            print(f"{where.capitalize()} app {got['app_id']} made; you are {got['open_id'] or '?'}")
+    (lark_id, lark_secret, lark_me), (feishu_id, feishu_secret, feishu_me) = apps["lark"], apps["feishu"]
     if not token and not lark_id and not feishu_id:
         print("no chat set: give a Telegram token (--telegram-token), a Lark app (--lark-app-id, "
               "--lark-app-secret) or a Feishu app (--feishu-app-id, --feishu-app-secret)", file=sys.stderr)
@@ -203,7 +222,9 @@ def init(args) -> int:
     secrets = [f"TELEGRAM_BOT_TOKEN={token or ''}",
                f"FEISHU_APP_ID={first[0] or ''}", f"FEISHU_APP_SECRET={first[1] or ''}",
                f"LARK_APP_ID={second[0] or ''}", f"LARK_APP_SECRET={second[1] or ''}",
-               "BUDDY_ALLOWED_IDS="]
+               "BUDDY_ALLOWED_IDS=" + ",".join(
+                   x for x in ((feishu_me if feishu_id else lark_me),  # the first app's ids as they are
+                               (f"lark:{lark_me}" if feishu_id and lark_me else "")) if x)]
     env.touch(mode=0o600)
     env.chmod(0o600)
     env.write_text("# Written by `buddy init`. Secrets: keep this file to yourself (chmod 600).\n"
@@ -229,6 +250,12 @@ def install_skills() -> list[str]:
         elif hint:
             done.append(f"{what}: ⚠ {state}\n  hint: {hint}")
     return done
+
+
+def scan_app(brand: str) -> dict:
+    """The app made by a QR scan (feishu_scan.py), with the scopes the buddy needs."""
+    from . import feishu_scan
+    return feishu_scan.scan(brand, [s for s, _, need in SCOPES if need is True])
 
 
 def allow(args) -> int:
@@ -358,9 +385,27 @@ def line(ok, what: str, how: str = "") -> str:
 
 def doctor(args) -> int:
     """One line per check: ✅ works, ⚠️ off or worth fixing, ❌ the buddy can't run."""
-    rows = checks(config_path(args.config), offline=args.offline, name=args.name)
-    print("\n".join(line(*r) for r in rows))
+    rows = all_checks(config_path(args.config), offline=args.offline, name=args.name,
+                      peers=getattr(args, "peers", False))
+    if getattr(args, "json", False):  # for scripts and cron: the same rows, the same exit code
+        print(json.dumps([{"ok": ok, "what": what, "how": how} for ok, what, how in rows], ensure_ascii=False, indent=1))
+    else:
+        print("\n".join(line(*r) for r in rows))
     return 1 if any(r[0] is False for r in rows) else 0
+
+
+def all_checks(path: Path, *, offline: bool = False, name: str = "buddy", peers: bool = False, pinger=None) -> list[tuple]:
+    """The buddy's checks, then (peers) the peer build's (peer.doctor: the secret, where serve
+    listens, a signed ping both ways to every peer), each of those named "peer: ..."."""
+    rows = checks(path, offline=offline, name=name)
+    if peers:
+        from . import peer as P
+        cfg = P.load(os.environ)
+        if not os.environ.get(P.ENV) and not cfg["points"]:  # not used here: off, not broken
+            rows.append((None, "peer: off (no peers, no BRAHMAN_PEER_SECRET)", "buddy tui → Peers, if two brahmans should pass bundles"))
+        else:
+            rows += [(ok, f"peer: {what}", how) for ok, what, how in P.doctor(cfg, os.environ, pinger)]
+    return rows
 
 
 def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tuple]:
@@ -409,6 +454,47 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
     allowed = [x for x in os.environ.get("BUDDY_ALLOWED_IDS", "").split(",") if x.strip()]
     row(True if allowed else None, f"paired: {', '.join(allowed)}" if allowed else "not paired yet",
         "" if allowed else "write to your bot; it answers with your id: buddy allow <id>")
+    # Each app set up (its id and token) needs someone paired there, and a chat linked there for
+    # cards and asks: a Feishu added beside a paired Lark and Telegram was silent (2026-11-12).
+    linked = list(cfg.get("me", {}).get("chats", []))
+    from . import pings
+    state = Path(os.environ.get("XDG_STATE_HOME", "~/.local/state")).expanduser() / "work_brahman"
+    wrote = pings.refused(state, allowed)  # who wrote and was refused: their exact `buddy allow` line
+    apps = [("Telegram", tg, "tg:", "tg:"), (first or "", os.environ.get("FEISHU_APP_ID"), "ou_", "oc_"),
+            ("Lark (lark: ids)", os.environ.get("LARK_APP_ID"), "lark:ou_", "lark:oc_")]
+    for app, on, person, chat in apps:
+        if not on:
+            continue
+        mine = lambda x, p: x.startswith(p) and not (p in ("ou_", "oc_") and x.startswith("lark:"))  # noqa: E731
+        here = [w for w in wrote if mine(w["sender"], person)]
+        if not any(mine(a, person) for a in allowed):
+            if here:  # it wrote already: the line is known, id and chat
+                w = here[0]
+                row(None, f"{app}: set up, but nobody paired there; {w['sender']} wrote {w['times']}× (last {w['last']})",
+                    f"if that is you: {w['allow']}  (or Pair in buddy tui → Config, or the workbench's Setup tab), "
+                    "then restart the buddy: systemctl --user restart buddy")
+            else:
+                row(None, f"{app}: set up, but nobody paired there",
+                    f"1) write anything to its bot (a direct message); 2) it answers with your line, "
+                    f"buddy allow {person}… --chat {chat}…, and buddy doctor shows it here too; 3) run it, or Pair "
+                    "in buddy tui → Config; 4) restart the buddy")
+        elif person != "tg:":  # Lark and Feishu: card buttons need a callback no API shows; a press proves it
+            done = [p for c, p in pings.pings(state).items() if mine(c, chat) and p.get("button_at")]
+            if done:
+                row(True, f"{app}: card buttons work (卡片回传交互, card.action.trigger): pressed {done[0]['button_at'][5:16]}")
+            else:
+                row(None, f"{app}: card buttons not tested yet (卡片回传交互, card.action.trigger: asks, ■ Stop)",
+                    "Setup tab → Ping → Send ping to this app's chat, then press 🏓 Pong on the card; if it shows "
+                    "an error, switch it on: developer console → 事件与回调 (Events & Callbacks) → 回调配置 "
+                    "(Callbacks) → long connection → add 卡片回传交互 (card.action.trigger); publish a version")
+        if any(mine(a, person) for a in allowed) and not any(mine(c, chat) for c in linked):
+            mine_id = next(a for a in allowed if mine(a, person))
+            row(None, f"{app}: {mine_id} paired, but no chat linked there: cards and asks won't reach it",
+                (f"{here[0]['allow']}" if here else f"buddy allow {mine_id} --chat {chat}<your direct chat with the bot>")
+                + ", then restart the buddy")
+    for r in wrote[:5]:  # wrote, refused, not paired since
+        row(None, f"wrote but not paired: {r['sender']} on {r['channel']} ({r['times']}×, last {r['last']})",
+            f"if that is you: {r['allow']}, then restart the buddy")
     for tool, needed, part, how in TOOLS:
         found = shutil.which(tool)
         row(True if found else (False if needed else None),

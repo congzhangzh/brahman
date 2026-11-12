@@ -267,36 +267,39 @@ def _same_window(a: dict, b: dict) -> bool:
     return all(a.get(k) == b.get(k) for k in ("mux", "session", "window", "pid", "started"))
 
 
+STATES = ("busy", "free")  # the title's last word (the owner's rule, 2026-11-11)
+
+
 def window_title(state: Path, window: dict, name: str, free: bool = False) -> str:
-    """The title of a pys window, short (the owner's rule: `rel·kit #253 #249`, `review·cc #248
-    PRs`, at most about 24 characters): what its session gave, with the numbers of the running
-    stories held there, newest first, where its `#…` stood (else after its first word). Only
-    numbers: the card has the titles. Older stories are left out when it would grow too long,
-    but the newest always shows. A name of one word without `·` ("bash") is its program's: the
-    session's own name stands in, and no role is guessed. With no story left: the session's part
-    alone, or `free·<session>` when it asks (done --free)."""
+    """The title of a pys window, `<name> [<job>] <state>` (the owner's rule, 2026-11-11:
+    `rel-rdp-g1 #333 busy`, `comp-shadow-g3 #331 keys busy`, `rev-freerdp-g2 free`; at most
+    about 24 characters, each tab in pys's status line shows its whole title). The name is the
+    session's first word; the job is the numbers of the running stories held in this window,
+    newest first, then the session's own work words; the state is last. Only numbers: the card
+    has the titles. When it would grow too long the work words go first, then older numbers; the
+    name, the newest number and the state always show. A name of one word with neither `-` nor
+    `·` ("bash") is its program's: the session's tag stands in. With a story running the state
+    is `busy`; with none, the session's name and work and its own state, or `<name> free` when
+    it asks (done --free)."""
     tag = window.get("tag") or "?"
     words = name.split()
-    if len(words) < 2 and "·" not in name:
+    given = words.pop() if words and words[-1] in STATES else ""
+    if not words or (len(words) == 1 and not given and not any(c in words[0] for c in "-·")):
         words = [tag]
-    marks = [i for i, x in enumerate(words) if x.startswith("#")]
-    head, tail = (words[:marks[0]], words[marks[-1] + 1:]) if marks else (words[:1], words[1:])
-    while head and head[-1] == "·":  # the long form, `release · kit · #253 …`
-        head.pop()
+    head, work = words[:1], [x for x in words[1:] if not x.startswith("#")]
     mine = sorted((s for s in all_stories(state) if s["status"] == "running" and s.get("window")
                    and _same_window(s["window"], window)), key=lambda s: -s["id"])
+    if free and not mine:
+        return f"{head[0]} free"
     if not mine:
-        if free:
-            own = head[0].split("·", 1) if head else []
-            return f"free·{own[1] if len(own) > 1 and '·' in head[0] else tag}"
-        return " ".join(head + tail)
+        return " ".join(head + work + ([given] if given else []))
     shown = []
-    for x in mine:  # the numbers come before the work's words: those go first when it is too long
-        if shown and len(" ".join(head + shown + [f"#{x['id']}"])) > TITLE_MAX:
+    for x in mine:
+        if shown and len(" ".join(head + shown + [f"#{x['id']}", "busy"])) > TITLE_MAX:
             break
         shown.append(f"#{x['id']}")
-    full = " ".join(head + shown + tail)
-    return full if len(full) <= TITLE_MAX else " ".join(head + shown)
+    full = " ".join(head + shown + work + ["busy"])
+    return full if len(full) <= TITLE_MAX else " ".join(head + shown + ["busy"])
 
 
 def retitle(state: Path, window: dict, free: bool = False) -> bool:

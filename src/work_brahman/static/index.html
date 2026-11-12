@@ -13,7 +13,26 @@
 <link rel="stylesheet" href="/tokens.css">
 <style>
 * { box-sizing: border-box; }
-[hidden] { display:none !important; }  /* main and #chatview are flex: hidden must still hide them */
+[hidden] { display:none !important; }
+/* the Setup tab (settings.py; the same as `buddy tui`): doctor, config, peers, the peer log */
+#setupview { max-width:1100px; margin:0 auto; width:100%; box-sizing:border-box; padding:10px 20px 24px; }
+#setupview .sub { display:flex; gap:6px; flex-wrap:wrap; margin:4px 0 10px; }
+#setupview .sub button { border:1px solid var(--line); background:var(--card); border-radius:999px; padding:2px 12px; font-size:12.5px; cursor:pointer; }
+#setupview .sub button.on { background:var(--sel); border-color:var(--gold); }
+#setupview .pane { background:var(--card); border:1px solid var(--line); border-radius:var(--r-lg); padding:12px 14px; overflow-x:auto; }
+#setupview .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0; }
+#setupview table { border-collapse:collapse; width:100%; font-size:13.5px; }
+#setupview td, #setupview th { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+#setupview th { color:var(--mute); font-weight:500; font-size:12.5px; }
+#setupview input { font:inherit; padding:4px 7px; border:1px solid var(--line); border-radius:var(--r-sm); background:var(--card); color:var(--ink); width:100%; box-sizing:border-box; min-width:7em; }
+#setupview .act { border:1px solid var(--line); background:var(--card); border-radius:var(--r-sm); padding:3px 10px; font-size:13px; cursor:pointer; }
+#setupview .act.go { border-color:var(--gold); background:var(--sel); }
+#setupview .ok { color:var(--ok); } #setupview .bad { color:var(--bad); } #setupview .warn { color:var(--warn); } #setupview .dim { color:var(--mute); font-size:12.5px; }
+#setupview .drow { padding:5px 0; border-bottom:1px solid var(--line); font-size:13.5px; } #setupview .drow:last-child { border:0; }
+#setupview pre { margin:0; font:12.5px/1.5 ui-monospace, monospace; white-space:pre-wrap; }
+#setupview .msg { min-height:1.3em; font-size:13px; }
+#sv-banner .who { border:1px solid var(--warn); border-left:4px solid var(--warn); border-radius:var(--r); background:var(--card); padding:8px 12px; margin:0 0 8px; font-size:13.5px; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  /* main and #chatview are flex: hidden must still hide them */
 body { margin:0; background:var(--paper); color:var(--ink); font:var(--text)/1.45 var(--font); }
 button { font:inherit; color:inherit; cursor:pointer; }
 code { font:12px var(--mono); background:var(--well); border:1px solid var(--line); border-radius:4px; padding:0 3px; }
@@ -148,13 +167,29 @@ pre.log.bad { border-color:var(--bad); }
 </style>
 </head>
 <body>
-<header><h1>brahman</h1><div class="tabs"><button data-tab="bench" class="on" data-t="tab.bench">Workbench</button><button data-tab="chat" data-t="tab.chat">Chat</button></div><span class="live" id="live" data-t="connecting"><i></i>connecting…</span><div class="corner"><video id="film" muted autoplay loop playsinline data-t-title="film_title" title="The film: click to watch it large"></video><div class="motto"><span class="mode"><button data-motto="what" data-t="motto.what">What</button><button data-motto="why" data-t="motto.why">Why</button></span><span class="humble" id="m-top"></span><span class="main" id="m-main"></span><span class="rot" id="rot"></span><span class="meter" id="meter"><span class="bar"><i></i></span><span></span></span></div></div><div class="langs" data-t-title="lang_title" title="the page's language"><button data-lang="en">EN</button><button data-lang="zh-CN">中文</button></div><button class="stop" data-stop="1" title="stop everything that is running or waiting, and pause the schedule" data-t="stop" data-t-title="stop_title">■ STOP</button></header>
+<header><h1>brahman</h1><div class="tabs"><button data-tab="bench" class="on" data-t="tab.bench">Workbench</button><button data-tab="chat" data-t="tab.chat">Chat</button><button data-tab="setup" data-t="tab.setup">Setup</button></div><span class="live" id="live" data-t="connecting"><i></i>connecting…</span><div class="corner"><video id="film" muted autoplay loop playsinline data-t-title="film_title" title="The film: click to watch it large"></video><div class="motto"><span class="mode"><button data-motto="what" data-t="motto.what">What</button><button data-motto="why" data-t="motto.why">Why</button></span><span class="humble" id="m-top"></span><span class="main" id="m-main"></span><span class="rot" id="rot"></span><span class="meter" id="meter"><span class="bar"><i></i></span><span></span></span></div></div><div class="langs" data-t-title="lang_title" title="the page's language"><button data-lang="en">EN</button><button data-lang="zh-CN">中文</button></div><button class="stop" data-stop="1" title="stop everything that is running or waiting, and pause the schedule" data-t="stop" data-t-title="stop_title">■ STOP</button></header>
 <div class="filmbox" id="filmbox" hidden><button class="x" id="filmx" data-t-title="film_close" title="close (Esc)">✕</button><video id="filmbig" controls playsinline></video></div>
 <div class="halt" id="halt" hidden></div>
 <div id="chatview" hidden>
   <div class="topics" id="topics"></div>
   <div class="thread" id="thread"></div>
   <div class="compose"><textarea id="say" placeholder="Message the buddy: the same session as Lark and Telegram, mirrored to them. Enter sends, Shift+Enter is a new line." data-t-placeholder="chat.say"></textarea><button id="send" data-t="send">Send</button></div>
+</div>
+<div id="setupview" hidden>
+  <div id="sv-banner"></div>
+  <div class="sub"><button data-sv="doctor" class="on" data-t="setup.doctor">Doctor</button><button data-sv="ping" data-t="setup.ping">Ping</button><button data-sv="config" data-t="setup.config">Config</button><button data-sv="peers" data-t="setup.peers">Peers</button><button data-sv="log" data-t="setup.log">Log</button></div>
+  <div class="pane" id="sv-doctor"><div class="row"><button class="act" data-sdoc="quick" data-t="setup.quick">Quick checks</button><button class="act go" data-sdoc="full" data-t="setup.full">Every check</button><span class="dim" data-t="setup.full_sub">every check calls the chat apps and the peers; buddy doctor --json is the same for scripts</span></div><div id="sv-drows"></div></div>
+  <div class="pane" id="sv-ping" hidden><div class="dim" data-t="setup.ping_sub">the buddy posts 🏓 ping into a chat through its own app; answer pong there and the row turns ✅ both ways</div>
+    <table><thead><tr><th data-t="setup.chat">Chat</th><th data-t="setup.app">App</th><th data-t="setup.sent">Sent</th><th data-t="setup.pong">Pong</th><th data-t="setup.button">Button</th><th></th></tr></thead><tbody id="sv-gpings"></tbody></table>
+    <h3 class="dim" style="margin:14px 0 4px" data-t="setup.refused">Wrote, but not paired</h3><div id="sv-refused"></div><div class="msg" id="sv-gmsg"></div></div>
+  <div class="pane" id="sv-config" hidden><div class="dim" id="sv-path"></div><table><thead><tr><th data-t="setup.setting">Setting</th><th data-t="setup.now">Now</th><th data-t="setup.new">New value</th></tr></thead><tbody id="sv-crows"></tbody></table>
+    <div class="row"><button class="act go" data-swrite="config" data-t="setup.write_config">Write buddy.toml and .env</button><span class="dim" data-t="setup.config_sub">secrets never come to this page: type a new one, or - to remove it; empty keeps it</span></div><div class="msg" id="sv-cmsg"></div>
+    <h3 class="dim" style="margin:14px 0 4px" data-t="setup.pair_helper">Pair: who wrote to the bot</h3><div class="dim" data-t="setup.pair_how">write anything to the bot in the new app (Feishu, Lark, Telegram); it shows up here; Pair writes the id and its chat, then restart the buddy</div><div id="sv-crefused" style="margin-top:6px"></div></div>
+  <div class="pane" id="sv-peers" hidden><p class="warn" data-t="setup.peer_warn">⚠️ One shared secret, plain HTTP: a LAN you own, a VPN or an SSH tunnel only, never the open internet.</p>
+    <div class="row"><label><span data-t="setup.side">This side</span> <input id="sv-name" style="width:11em"></label><label><span data-t="setup.bind">serve on</span> <input id="sv-bind" style="width:9em"></label><label><span data-t="setup.port">port</span> <input id="sv-port" style="width:5em"></label><span class="dim" id="sv-secret"></span></div>
+    <table><thead><tr><th data-t="setup.peer">Peer</th><th data-t="setup.address">Address</th><th data-t="setup.note">Note</th><th data-t="setup.check">Check</th><th></th></tr></thead><tbody id="sv-prows"></tbody></table>
+    <div class="row"><button class="act" data-spadd="1" data-t="setup.add">Add a peer</button><button class="act go" data-swrite="peers" data-t="setup.write_peers">Write peers.toml</button></div><div class="msg" id="sv-pmsg"></div></div>
+  <div class="pane" id="sv-log" hidden><pre id="sv-logtext"></pre></div>
 </div>
 <main id="bench">
   <section class="level"><h2 data-t="h.asks">Waiting for you<span data-t="h.asks_sub">the same cards as in Lark and Telegram; the first answer anywhere wins</span></h2><div id="asks"></div></section>
@@ -674,7 +709,9 @@ function tab(name) {
   document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
   document.getElementById("bench").hidden = name !== "bench";
   document.getElementById("chatview").hidden = name !== "chat";
+  document.getElementById("setupview").hidden = name !== "setup";
   try { localStorage.setItem("tab", name); } catch (_) {}
+  if (name === "setup") setupLoad(true);
   if (name === "chat") { chatSeen = ""; loadChat(); document.getElementById("say").focus(); }
 }
 setInterval(() => { if (!document.getElementById("chatview").hidden) loadChat(); }, 2000);
@@ -742,7 +779,158 @@ window.addEventListener("hashchange", () => { fromHash(); render(); });
 fromHash();
 load();
 setInterval(load, 5000);
-try { S.topic = localStorage.getItem("topic") || ""; if (localStorage.getItem("tab") === "chat") tab("chat"); } catch (_) {}
+// The Setup tab: settings.py through /api/setup (the same as `buddy tui`); no secret ever comes here.
+const SV = { cfg: null, peers: null, checks: {}, ran: false };
+const svPost = (path, body) => fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Buddy": "1" }, body: JSON.stringify(body || {}) }).then(r => r.json());
+const svMark = ok => ok === true ? '<span class="ok">✅</span>' : ok === false ? '<span class="bad">❌</span>' : '<span class="warn">⚠️</span>';
+const svSay = (id, t, bad) => { const m = document.getElementById(id); m.textContent = t; m.className = "msg " + (bad ? "bad" : "ok"); };
+async function setupLoad(first) {
+  const s = await fetch("/api/setup").then(r => r.json());
+  SV.path = s.path;
+  if (first || !SV.cfgDirty) { SV.cfg = s.config; drawConfig(); }
+  if (first || !SV.peersDirty) { SV.peers = s.peers; drawPeers(); }
+  document.getElementById("sv-logtext").textContent = s.log.join("\n") || tr("setup.no_log");
+  SV.chats = s.chats; SV.pings = s.pings; SV.refused = s.refused; drawPings(); drawBanner();
+  if (first && !SV.ran) { SV.ran = true; setupDoctor(false); }
+}
+async function setupDoctor(full) {
+  const box = document.getElementById("sv-drows"); box.textContent = tr(full ? "setup.checking_all" : "setup.checking");
+  const r = await svPost("/api/setup/doctor", { full });
+  const bad = r.rows.filter(x => x[0] === false).length;
+  box.innerHTML = `<div class="dim">${esc(tr(full ? "setup.ran_all" : "setup.ran_quick"))}</div>` + r.rows.map(([ok, what, how]) =>
+    `<div class="drow">${svMark(ok)} ${esc(what)}${how ? `<div class="dim">→ ${esc(how)}</div>` : ""}</div>`).join("")
+    + `<div class="drow ${bad ? "bad" : "ok"}">${esc(bad ? tr("setup.bad", { n: bad }) : tr("setup.no_bad"))}</div>`;
+  setupLoad(false);
+}
+function drawPings() {
+  const rows = (SV.chats || []).map(({ chat, channel }) => {
+    const p = (SV.pings || {})[chat];
+    const sent = !p ? '<span class="dim">–</span>' : p.ok ? `<span class="ok">✅ ${esc(p.code)} · ${esc(p.sent_at.slice(11))}</span>` : `<span class="bad">❌ ${esc(p.why || "")}</span>`;
+    const back = !p || !p.ok ? '<span class="dim">–</span>' : p.pong_at ? `<span class="ok">✅ ${esc(p.pong_at.slice(11))}</span>` : `<span class="warn">${esc(tr("setup.waiting_pong"))}</span>`;
+    const btn = !p || !p.ok ? '<span class="dim">–</span>' : p.button_at ? `<span class="ok">✅ ${esc(p.button_at.slice(11))}</span>` : `<span class="dim">${esc(tr("setup.press_pong"))}</span>`;
+    return `<tr><td>${esc(chat)}</td><td>${esc(channel || "?")}</td><td>${sent}</td><td>${back}</td><td>${btn}</td><td><button class="act" data-sping="${esc(chat)}">${esc(tr("setup.send_ping"))}</button></td></tr>`;
+  });
+  document.getElementById("sv-gpings").innerHTML = rows.join("") || `<tr><td colspan="6" class="dim">${esc(tr("setup.no_chats"))}</td></tr>`;
+  document.getElementById("sv-refused").innerHTML = document.getElementById("sv-crefused").innerHTML = (SV.refused || []).map(r =>
+    `<div class="drow"><span class="warn">⚠️</span> ${esc(r.sender)} · ${esc(r.channel)} · ${esc(tr("setup.times", { n: r.times }))} · ${esc(r.last)}<div class="dim"><code>${esc(r.allow)}</code> <button class="act" data-spair="${esc(r.sender)}" data-schat="${esc(r.chat)}">${esc(tr("setup.pair"))}</button> <button class="act" data-signore="${esc(r.sender)}">${esc(tr("setup.ignore"))}</button></div></div>`).join("")
+    || `<div class="dim">${esc(tr("setup.no_refused"))}</div>`;
+}
+function drawBanner() {  // who wrote to the bot and isn't paired: one click pairs them, on every Setup view
+  document.getElementById("sv-banner").innerHTML = (SV.refused || []).map(r =>
+    `<div class="who"><span>⚠️ ${esc(tr("setup.wrote", { sender: r.sender, app: r.channel, n: r.times, last: r.last.slice(11) }))}</span>
+     <button class="act go" data-qpair="${esc(r.sender)}" data-restart="1">${esc(tr("setup.pair_restart"))}</button>
+     <button class="act" data-qpair="${esc(r.sender)}">${esc(tr("setup.pair_only"))}</button>
+     <button class="act" data-signore="${esc(r.sender)}">${esc(tr("setup.ignore"))}</button>
+     <span class="dim"><code>${esc(r.allow)}</code></span></div>`).join("") + (SV.bannerMsg ? `<div class="msg ${SV.bannerBad ? "bad" : "ok"}">${esc(SV.bannerMsg)}</div>` : "");
+}
+function drawConfig() {
+  document.getElementById("sv-path").textContent = SV.path || "";
+  const rows = document.getElementById("sv-crows");
+  if (!SV.cfg) { rows.innerHTML = `<tr><td colspan="3" class="bad">${esc(tr("setup.not_set_up"))}</td></tr>`; return; }
+  rows.innerHTML = SV.cfg.map(f => {
+    const name = esc(tr("setup.f." + f.key)), ph = f.kind === "secret" ? tr("setup.ph_secret") : f.kind === "list" ? tr("setup.ph_list") : "";
+    const input = f.kind === "app"
+      ? `<input data-ck="${f.key}" data-ckpart="id" placeholder="${esc(tr("setup.ph_appid"))}"> <input data-ck="${f.key}" data-ckpart="secret" type="password" autocomplete="off" placeholder="${esc(tr("setup.ph_secret"))}">`
+      : `<input data-ck="${f.key}" ${f.kind === "secret" ? 'type="password" autocomplete="off"' : ""} placeholder="${esc(ph)}" value="${f.kind === "secret" ? "" : esc(Array.isArray(f.value) ? f.value.join(", ") : f.value)}">`;
+    return `<tr><td>${name}</td><td>${f.set ? "" : '<span class="warn">⚠️</span> '}${esc(f.shown)}</td><td>${input}</td></tr>`;
+  }).join("");
+  SV.cfgDirty = false;
+}
+function configChanges() {
+  const out = {};
+  for (const f of SV.cfg || []) {
+    const ins = [...document.querySelectorAll(`#sv-crows input[data-ck="${f.key}"]`)];
+    if (f.kind === "app") { const [id, sec] = ins.map(i => i.value.trim()); if (id || sec) out[f.key] = [id, sec]; continue; }
+    const v = ins[0].value.trim(), was = Array.isArray(f.value) ? f.value.join(", ") : String(f.value ?? "");
+    if (f.kind === "secret" ? v : v !== was) out[f.key] = f.kind === "list" ? v.split(",").map(x => x.trim()).filter(Boolean) : v;
+  }
+  return out;
+}
+function drawPeers() {
+  const p = SV.peers; if (!p) return;
+  document.getElementById("sv-name").value = p.cfg.name; document.getElementById("sv-bind").value = p.cfg.bind; document.getElementById("sv-port").value = p.cfg.port;
+  document.getElementById("sv-secret").innerHTML = p.secret ? `<span class="ok">✅</span> ${esc(tr("setup.secret_set"))}` : `<span class="warn">⚠️</span> ${esc(tr("setup.secret_unset"))}`;
+  const names = Object.keys(p.cfg.points).sort();
+  document.getElementById("sv-prows").innerHTML = names.map(k => {
+    const v = p.cfg.points[k], r = SV.checks[k];
+    const c = r ? (r.ok ? `<span class="ok">✅ ${r.skew} s · ${r.ms} ms</span>` : `<span class="bad">❌ ${esc(r.why)}</span>`) : '<span class="dim">–</span>';
+    return `<tr data-pk="${esc(k)}"><td><input class="k" value="${esc(k)}"></td><td><input class="u" style="min-width:17em" value="${esc(v.url)}"></td><td><input class="n" value="${esc(v.note)}"></td><td>${c}</td><td><button class="act" data-spchk="1">${esc(tr("setup.check"))}</button> <button class="act" data-spdel="1">${esc(tr("setup.delete"))}</button></td></tr>`;
+  }).join("") || `<tr><td colspan="5" class="dim">${esc(tr("setup.no_peers"))}</td></tr>`;
+  SV.peersDirty = false;
+}
+function readPeers() {
+  const points = {};
+  document.querySelectorAll("#sv-prows tr[data-pk]").forEach(tr_ => { const k = tr_.querySelector(".k").value.trim(); if (k) points[k] = { url: tr_.querySelector(".u").value.trim(), note: tr_.querySelector(".n").value.trim() }; });
+  return { name: document.getElementById("sv-name").value.trim(), bind: document.getElementById("sv-bind").value.trim(), port: +document.getElementById("sv-port").value, points };
+}
+document.addEventListener("input", e => { if (e.target.closest("#sv-crows")) SV.cfgDirty = true; if (e.target.closest("#sv-peers")) SV.peersDirty = true; });
+document.addEventListener("click", async e => {
+  const b = e.target.closest("#setupview button"); if (!b) return;
+  if (b.dataset.sv) {
+    document.querySelectorAll("#setupview .sub button").forEach(x => x.classList.toggle("on", x === b));
+    for (const v of ["doctor", "ping", "config", "peers", "log"]) document.getElementById("sv-" + v).hidden = v !== b.dataset.sv;
+    return setupLoad(false);
+  }
+  if (b.dataset.sdoc) return setupDoctor(b.dataset.sdoc === "full");
+  if (b.dataset.sping) {
+    svSay("sv-gmsg", tr("setup.pinging", { chat: b.dataset.sping }));
+    const r = await svPost("/api/setup/ping", { chat: b.dataset.sping });
+    svSay("sv-gmsg", r.ok ? tr("setup.pinged", { code: r.code }) : (r.why || "?"), !r.ok);
+    return setupLoad(false);
+  }
+  if (b.dataset.signore) {
+    const r = await svPost("/api/setup/ignore", { sender: b.dataset.signore });
+    SV.bannerMsg = r.notes.join(" · "); SV.bannerBad = !r.ok;
+    return setupLoad(false);
+  }
+  if (b.dataset.qpair) {
+    const restart = !!b.dataset.restart;
+    const r = await svPost("/api/setup/pair", { sender: b.dataset.qpair, restart });
+    SV.bannerMsg = r.notes.join(" · "); SV.bannerBad = !r.ok; drawBanner();
+    if (r.restarting) {  // the buddy goes away for a moment: wait for it, then read the setup again
+      const t0 = Date.now();
+      await new Promise(ok => setTimeout(ok, 3000));
+      while (Date.now() - t0 < 60000) {
+        try { await fetch("/api/setup"); break; } catch (_) { await new Promise(ok => setTimeout(ok, 1500)); }
+      }
+      SV.bannerMsg = tr("setup.back"); SV.bannerBad = false;
+    }
+    return setupLoad(true);
+  }
+  if (b.dataset.spair) {  // the same as `buddy allow <id> --chat <chat>`: in buddy.toml and .env, used after a restart
+    const f = k => (SV.cfg || []).find(x => x.key === k)?.value || [];
+    const changes = { allowed: [...f("allowed"), b.dataset.spair], chats: [...f("chats"), b.dataset.schat].filter((c, i, a) => c && a.indexOf(c) === i) };
+    const r = await svPost("/api/setup/config", { changes });
+    if (r.ok) { SV.cfg = r.config; drawConfig(); }
+    const where = b.closest("#sv-config") ? "sv-cmsg" : "sv-gmsg";
+    svSay(where, r.notes.join(" · "), !r.ok);
+    return setupLoad(false);  // the one just paired leaves the list
+  }
+  if (b.dataset.swrite === "config") {
+    const changes = configChanges();
+    if (!Object.keys(changes).length) return svSay("sv-cmsg", tr("setup.nothing"), true);
+    const r = await svPost("/api/setup/config", { changes });
+    if (r.ok) { SV.cfg = r.config; drawConfig(); }
+    return svSay("sv-cmsg", r.notes.join(" · "), !r.ok);
+  }
+  if (b.dataset.swrite === "peers") {
+    const r = await svPost("/api/setup/peers", { cfg: readPeers() });
+    if (r.ok) { SV.peers = r.peers; drawPeers(); }
+    return svSay("sv-pmsg", r.said, !r.ok);
+  }
+  if (b.dataset.spadd) { SV.peers.cfg = readPeers(); let n = "peer", i = 1; while (SV.peers.cfg.points[n]) n = "peer" + (++i); SV.peers.cfg.points[n] = { url: "http://", note: "" }; drawPeers(); SV.peersDirty = true; return; }
+  const row = b.closest("tr[data-pk]"); if (!row) return;
+  const k = row.dataset.pk;
+  if (b.dataset.spdel) { SV.peers.cfg = readPeers(); delete SV.peers.cfg.points[k]; drawPeers(); SV.peersDirty = true; return svSay("sv-pmsg", tr("setup.deleted", { name: k })); }
+  if (b.dataset.spchk) {
+    const kept = readPeers(); svSay("sv-pmsg", tr("setup.checking_one", { name: k }));
+    const r = await svPost("/api/setup/check", { name: k, url: row.querySelector(".u").value.trim() });
+    SV.checks[k] = r; SV.peers.cfg = kept; drawPeers(); SV.peersDirty = true;
+    svSay("sv-pmsg", r.ok ? tr("setup.same_secret", { name: k }) : `${k}: ${r.why}`, !r.ok); setupLoad(false);
+  }
+});
+setInterval(() => { if (!document.getElementById("setupview").hidden) setupLoad(false); }, 3000);  // who wrote shows up by itself
+try { S.topic = localStorage.getItem("topic") || ""; { const t0 = localStorage.getItem("tab"); if (t0 === "chat" || t0 === "setup") tab(t0); } } catch (_) {}
 </script>
 </body>
 </html>

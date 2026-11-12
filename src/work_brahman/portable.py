@@ -3,6 +3,8 @@ reads the same on both:
 
 - locked(path): an exclusive lock held while a block runs. POSIX: flock. Windows: msvcrt
   locks the file's first byte (a mandatory lock; LK_LOCK retries for 10 s, so this loops).
+- hold(path): that lock for the life of the process, without waiting (None: someone has it);
+  `buddy serve` takes one so a second buddy never fights the first for the chats.
 - alive(pid): is that process still running? POSIX: os.kill(pid, 0). Never that on Windows:
   there os.kill with 0 sends CTRL_C_EVENT to the process's console group, so it asks
   OpenProcess + GetExitCodeProcess instead (259 = STILL_ACTIVE).
@@ -48,6 +50,32 @@ def locked(path: Path):
         finally:
             f.seek(0)
             msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+def hold(path: Path):
+    """Take path's lock for the life of this process, without waiting: the open file (keep
+    it; closing it, or exiting, frees the lock), or None when another process holds it. The
+    holder's pid is in path + ".pid" (a side file: Windows' lock keeps the locked byte from
+    being read)."""
+    f = open(path, "a+")
+    try:
+        if WINDOWS:
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return None
+    Path(str(path) + ".pid").write_text(f"{os.getpid()}\n")
+    return f
+
+
+def holder(path: Path) -> int | None:
+    try:
+        return int(Path(str(path) + ".pid").read_text().strip())
+    except (OSError, ValueError):
+        return None
 
 
 def alive(pid: int) -> bool:

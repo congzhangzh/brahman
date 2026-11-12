@@ -32,6 +32,7 @@ from .telegram import Telegram
 from .web import CHAT, Web, WebChat, WebRelay
 
 log = logging.getLogger("buddy")
+_SERVE_LOCK: list = []  # the open lock file of `buddy serve` (portable.hold), kept for its life
 
 
 def feishu_domain(cfg: dict):
@@ -367,6 +368,9 @@ def main() -> int:
     t.add_argument("--lark-app-secret", default="", help="that app's App Secret")
     t.add_argument("--feishu-app-id", help="a Feishu (China, open.feishu.cn) self-built app's App ID")
     t.add_argument("--feishu-app-secret", default="", help="that app's App Secret")
+    for brand in ("lark", "feishu"):
+        t.add_argument(f"--{brand}-scan", action="store_true",
+                       help=f"make the {brand.capitalize()} app by scanning a QR code (optional; instead of its App ID)")
     t.add_argument("--port", type=int, default=8787, help="the web workbench's port")
     t.add_argument("--yes", action="store_true", help="ask nothing: flags and defaults only")
     t.add_argument("--force", action="store_true", help="start over; the old files are kept as backups")
@@ -380,15 +384,35 @@ def main() -> int:
     t.add_argument("--without", action="append", metavar="RULE", help="leave a rules file out, and keep it "
                    "out (e.g. brahman-git-roles); may be given more than once")
     t.add_argument("--no-pys", action="store_true", help="don't look for pys")
+    peer = sub.add_parser("peer", help="pass git bundles between two brahmans with one shared secret "
+                                       "(BRAHMAN_PEER_SECRET); a restricted environment only (peer.py)")
+    psub = peer.add_subparsers(dest="action", required=True)
+    t = psub.add_parser("serve", help="receive bundles into the inbox; nothing is applied or run")
+    t.add_argument("--bind", default="", help="where to listen (default peers.toml's, else 127.0.0.1; a LAN, VPN or tunnel address only)")
+    t.add_argument("--port", type=int, default=0, help="default peers.toml's, else 8790")
+    t = psub.add_parser("send", help="make a git bundle of a range and send it, signed")
+    t.add_argument("url", help="a peer's name from peers.toml, or its address, e.g. http://192.0.2.2:8790")
+    t.add_argument("repo", help="the repository to bundle")
+    t.add_argument("range", help='what to bundle, as git bundle create takes it, e.g. "main..my-fix" or "my-fix"')
+    t.add_argument("--note", default="", help="what it is and where to look (a share, a PR)")
+    t.add_argument("--name", default="", help="who sends it (default this machine's short name)")
+    psub.add_parser("inbox", help="what came, newest first")
+    t = psub.add_parser("log", help="the peer log: received, refused, sent, checks")
+    t.add_argument("--last", type=int, default=50)
+    psub.add_parser("doctor", help="check the secret, where serve listens, and every peer (a signed ping both ways)")
     t = sub.add_parser("allow", help="pair an id the bot told you (tg:..., ou_...): it may use the bot")
     t.add_argument("id")
     t.add_argument("--chat", default="", help="its chat, for Lark (oc_...); a Telegram DM's is its id")
     t.add_argument("--name", default="buddy", help="the service's name, for the restart hint")
+    sub.add_parser("tui", help="doctor, config, peers and the peer log in one terminal screen "
+                              "(the workbench's Setup tab is the same)")
     t = sub.add_parser("config", help="a menu to change the setup: language, chats, tokens, pairing, port")
     t.add_argument("--offline", action="store_true", help="after saving, check without calling the chat apps")
     t.add_argument("--name", default="buddy", help="the service to restart after saving")
-    t = sub.add_parser("doctor", help="what works, what is missing, and how to fix it")
+    t = sub.add_parser("doctor", help="what works, what is missing, and how to fix it (exit 1 on a ❌)")
     t.add_argument("--offline", action="store_true", help="don't call the chat apps")
+    t.add_argument("--json", action="store_true", help="the rows as JSON, for scripts and cron")
+    t.add_argument("--peers", action="store_true", help="also the peer checks (buddy peer doctor)")
     t.add_argument("--name", default="buddy", help="the service's name")
     t = sub.add_parser("service", help="keep `buddy serve` running: a systemd user unit (Linux)")
     t.add_argument("action", choices=["install"])
@@ -458,7 +482,7 @@ def main() -> int:
     t.add_argument("number", type=int)
     t.add_argument("--failed", action="store_true")
     t.add_argument("--note", default="")
-    t.add_argument("--free", action="store_true", help="the window's title says `free · <session>` "
+    t.add_argument("--free", action="store_true", help="the window's title says `<name> free` "
                                                       "when no story of it is left")
     t = tsub.add_parser("check", help="stop asked? replies not read yet? (exit 3: stop); needs no chat")
     t.add_argument("number", type=int)
@@ -503,6 +527,11 @@ def main() -> int:
     t = msub.add_parser("check", help="the owner's replies on the card, each once; needs no chat")
     t.add_argument("team")
     msub.add_parser("list", help="every team, one line each")
+    t = msub.add_parser("setup", help="write the team rule (names, window titles, generations) into "
+                                      "~/.claude/CLAUDE.md and ~/.codex/AGENTS.md as a managed block")
+    t.add_argument("--dry-run", action="store_true", help="print the plan and the block, change nothing")
+    t.add_argument("--uninstall", action="store_true", help="remove exactly the block")
+    t.add_argument("--agent", choices=("claude", "codex", "all"), default="all")
     long = sub.add_parser("long", help="a long story: one agent session mirrored to a thread in your chats")
     lsub = long.add_subparsers(dest="action", required=True)
     t = lsub.add_parser("hook", help="a hook event on stdin (scripts/buddy-long hook)")
@@ -527,6 +556,12 @@ def main() -> int:
     args = ap.parse_args()
     if args.cmd is None:  # `buddy` on its own: where things stand
         return _status(args.config)
+    if args.cmd == "peer":  # its own port and inbox: no channel, no buddy state
+        from . import peer
+        return peer.main(args)
+    if args.cmd == "tui":  # setting up, in one screen: no channel, no buddy state
+        from . import buddy_tui
+        return buddy_tui.run(install.config_path(args.config))
     if args.cmd in ("init", "allow", "config", "doctor", "service", "setup"):  # setting up: no channel, no state
         from . import workbench
         return {"init": install.init, "allow": install.allow, "config": configure.config,
@@ -540,6 +575,16 @@ def main() -> int:
     jobs = cfg.get("jobs", {})
     state = Path(os.environ.get("XDG_STATE_HOME", "~/.local/state")).expanduser() / "work_brahman"
     _private(state)
+    if args.cmd == "serve":  # one buddy per state: a second would fight the first for the chats
+        lock = state / "serve.lock"
+        held = portable.hold(lock)
+        if held is None:
+            pid = portable.holder(lock)
+            print(f"buddy serve is already running{f' (pid {pid})' if pid else ''}: a second one would fight it "
+                  f"for the same chats and state.\n  see it: systemctl --user status buddy   (or {lock}.pid)",
+                  file=sys.stderr)
+            return 3
+        _SERVE_LOCK.append(held)  # held until this process ends
     linked = Linked(cfg.get("me", {}).get("chats", []))
     home = linked.chats[0] if linked.chats else ""  # where a job or duty without chat_id posts
     duties = {name: DUTIES[name]({"chat_id": home} | d, state)
@@ -586,6 +631,10 @@ def main() -> int:
                        sty=os.environ.get("STY", ""), window=os.environ.get("WINDOW", ""))
         return 0
     team_opts = teams.settings(cfg)
+    if args.cmd == "team" and args.action == "setup":  # the instruction files only: no state, no chat
+        from . import team_setup
+        agents = team_setup.AGENTS if args.agent == "all" else (args.agent,)
+        return team_setup.run(agents, dry_run=args.dry_run, uninstall=args.uninstall)
     if args.cmd == "team" and args.action in ("show", "check", "list"):  # the team files only: no chat calls
         if args.action == "list":
             print(teams.board(state))
@@ -709,7 +758,7 @@ def main() -> int:
         if adopted:
             log.info("adopted %d runs from the last instance: %s", len(adopted), ", ".join(adopted))
         if port:  # the workbench, on 127.0.0.1 only
-            Web(int(port), state, bot, scheduler, cfg, home, chat, families).start()
+            Web(int(port), state, bot, scheduler, cfg, home, chat, families, Path(args.config)).start()
         if "bitable" in cfg and os.environ.get("FEISHU_APP_ID"):  # the Lark Base workbench
             from .bitable import Bitable
             Bitable(os.environ["FEISHU_APP_ID"], os.environ["FEISHU_APP_SECRET"],

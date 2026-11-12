@@ -11,6 +11,7 @@ on buddy.toml's `domain`) keeps the ids as they are, the second (LARK_APP_ID) wr
 lark:oc_... and lark:ou_..., so a chat id always says which app owns it.
 """
 
+import importlib.util
 import json
 import threading
 from typing import Callable
@@ -39,6 +40,21 @@ MAX_TEXT = 8000  # keep replies readable on a phone; the full answer stays in th
 MAX_CARD = 24_000  # UTF-8 bytes of Markdown; Lark rejects a card whose JSON is over 30 KB
 # The SDK logs the full connect URL, including its access_key and ticket, at INFO.
 LOG_LEVEL = lark.LogLevel.WARNING
+
+
+def ws_module():
+    """A copy of lark_oapi.ws.client for the calling thread, with an event loop of its own.
+
+    The SDK makes one loop when that module is imported (`loop = asyncio.get_event_loop()`,
+    lark-oapi 1.7.5, ws/client.py:34) and every Client.start() runs it. With Lark and Feishu
+    both set up, the second app's thread found it running: "This event loop is already
+    running", and the buddy didn't start (2026-11-12). A fresh copy of the module per listening
+    thread has its own global `loop` (made there: no loop is set in a new thread), and the
+    Client's cache takes the same one."""
+    spec = importlib.util.find_spec("lark_oapi.ws.client")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 class Feishu:
@@ -112,8 +128,8 @@ class Feishu:
         handler = (lark.EventDispatcherHandler.builder("", "")
                    .register_p2_im_message_receive_v1(receive)
                    .register_p2_card_action_trigger(press).build())
-        lark.ws.Client(self.app_id, self.app_secret, event_handler=handler,
-                       domain=self.domain, log_level=LOG_LEVEL).start()
+        ws_module().Client(self.app_id, self.app_secret, event_handler=handler,
+                           domain=self.domain, log_level=LOG_LEVEL).start()
 
     # Channel methods, on top of the message calls above.
 
@@ -161,12 +177,12 @@ class Feishu:
         return root
 
     def ask(self, chat: str, markdown: str, *, title: str, options: list[list[str]],
-            ask_id: str, failed: bool = False, note: str = "") -> str | None:
+            ask_id: str, failed: bool = False, note: str = "", stop: bool = True) -> str | None:
         # an option whose key ends in ":reply" is a text box on the card (its label the hint),
         # not a button: Send comes back as that option, with the text typed
         typed = next(((f"ask:{ask_id}:{key}", label) for key, label in options if key.endswith(":reply")), ("", ""))
         buttons = [(f"{label}", f"ask:{ask_id}:{key}", "primary" if k == 0 else "default")
-                   for k, (key, label) in enumerate(options) if not key.endswith(":reply")] + [_stop()]
+                   for k, (key, label) in enumerate(options) if not key.endswith(":reply")] + ([_stop()] if stop else [])
         return self.send_card(chat, card(markdown, title=("⚠️ " if failed else "❓ ") + title,
                                          color="red" if failed else "orange", note=note,
                                          buttons=buttons, reply=typed[0], placeholder=typed[1]))

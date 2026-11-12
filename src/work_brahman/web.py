@@ -17,6 +17,21 @@ the web keeps no state of its own:
     POST /api/short   {"n": 12, "what": "stop" | "reply" | "a1.0", "text": ...}: ■ Stop, 💬 Reply
                       or an option of question 1 on a short story, as under its card in a chat
 
+The Setup tab (settings.py; the same as `buddy tui`): the doctor, the config, the peers, the log.
+No secret is ever sent to the page; it sends a new one, or "-" to remove one.
+
+    GET  /api/setup          the config as shown (secrets masked), the peers, the peer log
+    POST /api/setup/doctor   {"full": bool}: the checks (full: calls the chat apps and the peers)
+    POST /api/setup/config   {"changes": {key: value}}: written with backups; used after a restart
+    POST /api/setup/peers    {"cfg": peers.toml as GET gave it}: written with a backup
+    POST /api/setup/check    {"name": ..., "url": ...}: a signed ping to one peer, answered signed
+    POST /api/setup/pair     {"sender": ..., "restart": bool}: pair someone who wrote to the bot
+                             (refused.json, never a typed id), its chat linked; then a restart
+    POST /api/setup/ignore   {"sender": ...}: forget who wrote (back only if it writes again)
+    POST /api/setup/ping     {"chat": ...}: "🏓 ping <code>" into that linked chat (pings.py); `pong`
+                             typed back there closes the loop; GET shows each chat's last ping
+                             and who wrote without being paired (with the `buddy allow` line)
+
 Families show in level 1 too: a family with runs() is one workflow, and its stories are its
 runs (families/short_story).
 
@@ -26,6 +41,7 @@ needs the X-Buddy header, which a cross-site request can't send without a CORS p
 that this server never answers.
 """
 
+import copy
 import json
 import logging
 import os
@@ -39,7 +55,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import long_stories as longs, portable, topics
+from . import long_stories as longs, pings, portable, settings, topics
 from .meter import meter
 from .channel import Incoming
 from .runs import SOPS, read as read_run
@@ -90,7 +106,7 @@ class _Posts:
                                "failed": failed, "note": note, "thread": thread}))
 
     def ask(self, chat: str, markdown: str, *, title: str, options: list[list[str]],
-            ask_id: str, failed: bool = False, note: str = "") -> str | None:
+            ask_id: str, failed: bool = False, note: str = "", stop: bool = True) -> str | None:
         return self._add({"title": title, "markdown": markdown, "options": options, "ask": ask_id,
                           "failed": failed, "note": note})
 
@@ -262,8 +278,9 @@ def page() -> bytes:
 
 class Web:
     def __init__(self, port: int, state: Path, bot, scheduler, cfg: dict, home: str,
-                 chat: WebChat | None = None, families: dict | None = None):
+                 chat: WebChat | None = None, families: dict | None = None, config: Path | None = None):
         self.port, self.state, self.bot, self.scheduler, self.home = port, state, bot, scheduler, home
+        self.config = config  # buddy.toml, for the Setup tab (None: where `buddy init` puts it)
         self.chat = chat
         self.families = [f for f in (families or {}).values() if hasattr(f, "runs")]
         self.workflows = [{"kind": kind, "name": name, "schedule": t.get("schedule", ""),
@@ -299,6 +316,8 @@ class Web:
                     key = parse_qs(urlparse(self.path).query).get("id", [""])[0]
                     run = web.detail(key)
                     return self._json(run) if run else self._send(404, b"no such run", "text/plain")
+                if path == "/api/setup":
+                    return self._json(web.setup())
                 if path == "/api/chat":
                     return self._json({"on": web.chat is not None,
                                        "messages": web.chat.history() if web.chat else [],
@@ -320,6 +339,9 @@ class Web:
                 except ValueError:
                     return self._send(400, b"bad json", "text/plain")
                 path = self.path.split("?")[0]
+                if path.startswith("/api/setup/"):
+                    got = web.setup_post(path[11:], body if isinstance(body, dict) else {})
+                    return self._json(got) if got is not None else self._send(404, b"not found", "text/plain")
                 if path == "/api/chat":
                     text = str(body.get("text", "")).strip()
                     if not web.chat or not text:
@@ -382,6 +404,61 @@ class Web:
         server = self.server = ThreadingHTTPServer(("127.0.0.1", self.port), Handler)
         threading.Thread(target=server.serve_forever, name="web", daemon=True).start()
         log.info("web workbench on http://127.0.0.1:%d", self.port)
+
+    def _config_path(self) -> Path:
+        from . import install
+        return self.config or install.config_path(None)
+
+    def setup(self) -> dict:
+        """The Setup tab: what `buddy tui` shows, secrets masked."""
+        from . import configure
+        path = self._config_path()
+        s = configure.load(path) if path.exists() else None
+        linked = list(self.bot.linked.chats) if self.bot else []
+        # paired: by the running buddy, or written in the config since (used after a restart)
+        allowed = set(self.bot.allowed if self.bot else ()) | set(s["allowed"] if s else ())
+        return {"path": str(path), "config": settings.view(s) if s else None, "restart": settings.RESTART,
+                "peers": settings.peers(), "log": settings.log(last=300),
+                "chats": [{"chat": c, "channel": next((ch.name for ch in self.bot.channels if ch.owns(c)), "")}
+                          for c in linked] if self.bot else [],
+                "pings": pings.pings(self.state), "refused": pings.refused(self.state, allowed)}
+
+    def setup_post(self, what: str, body: dict) -> dict | None:
+        from . import configure
+        path = self._config_path()
+        if what == "doctor":  # the checks of what this running buddy has (its environment)
+            return {"rows": settings.doctor(path, offline=not body.get("full"))}
+        if what == "config":
+            if not path.exists():
+                return {"ok": False, "notes": [f"not set up: {path} is missing; run `buddy init` first"]}
+            before = configure.load(path)
+            s = copy.deepcopy(before)
+            changes = body.get("changes") if isinstance(body.get("changes"), dict) else {}
+            for key, value in changes.items():
+                why = settings.change(s, str(key), value)
+                if why:
+                    return {"ok": False, "notes": [why]}
+            ok, notes = settings.write(path, s, before)
+            return {"ok": ok, "notes": notes, "config": settings.view(configure.load(path))}
+        if what == "peers":
+            ok, said = settings.save_peers(body.get("cfg") if isinstance(body.get("cfg"), dict) else {})
+            return {"ok": ok, "said": said, "peers": settings.peers()}
+        if what == "check":
+            return settings.check_peer(str(body.get("name", "")), str(body.get("url", "")))
+        if what == "pair":  # the quick pair: only someone who wrote to the bot; then, if asked, a restart
+            ok, notes = settings.pair(path, self.state, str(body.get("sender", "")))
+            if ok and body.get("restart"):
+                notes.append(settings.restart_soon())
+            return {"ok": ok, "notes": notes, "restarting": bool(ok and body.get("restart"))}
+        if what == "ignore":  # who wrote, not wanted: off the list (back only if it writes again)
+            sender = str(body.get("sender", ""))
+            return {"ok": pings.forget(self.state, sender), "notes": [f"{sender} ignored"]}
+        if what == "ping":
+            chat = str(body.get("chat", ""))
+            if not self.bot or chat not in self.bot.linked.chats:
+                return {"ok": False, "why": "not one of the linked chats (buddy.toml [me] chats)"}
+            return pings.send(self.state, self.bot.channels, chat)
+        return None
 
     def press(self, action: str, text: str | None = None) -> None:
         """A press on the page, handled as one in a chat (the person at this machine is trusted).

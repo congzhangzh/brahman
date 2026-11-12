@@ -109,8 +109,8 @@ class Telegram:
                                             f"tg:{q['from']['id']}", None, q["data"]))
                     continue
                 m = u.get("message")
-                if not m or "from" not in m:
-                    continue
+                if not m or "from" not in m or m["from"].get("is_bot"):
+                    continue  # the bot's own (a topic it opened, in threaded mode): not a person
                 text = m.get("text")
                 if text:  # "/new@my_bot" in a group means /new
                     text = re.sub(r"^(/\w+)@\w+", r"\1", text)
@@ -172,9 +172,9 @@ class Telegram:
         return bool(self._call("closeForumTopic", chat_id=int(chat[3:]), message_thread_id=int(handle)))
 
     def ask(self, chat: str, markdown: str, *, title: str, options: list[list[str]],
-            ask_id: str, failed: bool = False, note: str = "") -> str | None:
+            ask_id: str, failed: bool = False, note: str = "", stop: bool = True) -> str | None:
         head = f"<b>{'⚠️' if failed else '❓'} {html.escape(title, quote=False)}</b>\n\n"
-        rows = [(label, f"ask:{ask_id}:{key}") for key, label in options] + [_stop()]
+        rows = [(label, f"ask:{ask_id}:{key}") for key, label in options] + ([_stop()] if stop else [])
         return self._send(chat, _pages(head + to_html(markdown) + _note(note))[0],
                           markup=_buttons(rows))
 

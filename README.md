@@ -57,8 +57,24 @@ buddy allow tg:123456789
 systemctl --user restart buddy.service
 buddy doctor                # ✅ what works, ⚠️ what is off and how to turn it on
 buddy                       # every day: what needs fixing, the page, the stories running
+buddy tui                   # doctor, config, peers and the peer log in one screen
 buddy config                # later: change the language, chats, tokens, pairing, port
 ```
+
+**One screen for the setup.** `buddy tui` has four views, Tab between them: **Doctor** (the
+quick checks at once, `r` every check, each ❌ with its fix), **Config** (what `buddy config`
+changes; secrets shown as their last four characters only), **Peers** and **Log** (section
+"Two brahmans" below). Nothing is written until `w`, and then with a backup; a config change
+counts after a restart of the buddy, which the TUI says and never does itself. The workbench's
+**Setup** tab is the same, through the same code (`settings.py`), and never receives a secret:
+it sends a new one, or `-` to remove one. For scripts and cron, `buddy doctor` stays: exit 1 on
+any ❌, `--json` for the rows, `--peers` to add the peer checks.
+
+**One buddy at a time.** `buddy serve` holds a lock in its state folder
+(`~/.local/state/work_brahman/serve.lock`, its pid beside it): a second one, typed by hand while
+`buddy.service` runs, stops at once with exit code 3 instead of fighting the first for the
+chats. From a checkout, `scripts/buddy` runs `buddy` from any directory with that checkout's
+`.env` and `buddy.toml`, as the service does (`ln -s "$PWD/scripts/buddy" ~/.local/bin/`).
 
 `buddy --help` ends with these steps; `buddy <command> --help` explains each option, and
 `/help` in the chat says what you can type there.
@@ -101,6 +117,13 @@ Lark tenant where you can create an app, or a Telegram account, or both.
 
 ### 1. Create the Feishu app (once)
 
+**Or let a QR code make it** (optional): `buddy init --feishu-scan` (or `--lark-scan`, or type
+`scan` at the App ID question) shows a QR code; scan it in Feishu or Lark and confirm, and the app
+comes back with its App ID and Secret, the scopes below asked for, and you paired. A Lark tenant
+is found by itself. `uv pip install segno` draws the QR code in the terminal; without it you get
+the link. Check it afterwards with `buddy doctor`: whether every scope is granted at once and the
+events come on the long connection is the platform's to say. The steps below are the manual way.
+
 1. Feishu Open Platform → developer console → create a **self-built app** (企业自建应用).
 2. Add the **Bot** capability.
 3. Permissions: `im:message.p2p_msg:readonly`, `im:message:send_as_bot`, and
@@ -108,6 +131,11 @@ Lark tenant where you can create an app, or a Telegram account, or both.
 4. Events & callbacks → event config → **receive events through long connection**, add
    `im.message.receive_v1`. The console only saves this while a client is connected, so
    run step 3 below first, then save.
+   Then **callback config** (回调配置) → long connection too, add **卡片回传交互**
+   (`card.action.trigger`): without it the buttons on the buddy's cards (asks, ■ Stop) show an
+   error and nothing reaches the buddy. No API shows this setting, so `buddy doctor` can't read
+   it: send a ping from the workbench's Setup tab → Ping and press **🏓 Pong** on the card; the
+   doctor then shows "card buttons work".
 5. Create a version and publish it; make sure you are in the app's availability scope.
 6. Copy the App ID and App Secret.
 
@@ -284,6 +312,32 @@ buddy-team show app-release-kit               # exact ctx, now; check: the owner
 
 The stages and rules are in `src/work_brahman/families/team/FAMILY.md`; the idea in
 `specs/team.md`.
+
+## Two brahmans passing bundles (`buddy peer`, restricted environments only)
+
+> ⚠️ **One shared secret and plain HTTP.** Anyone with the secret can send as any peer, and
+> anyone on the path can read what is sent. Use it only on a LAN you own, a VPN (WireGuard,
+> Tailscale) or an SSH tunnel, never on the open internet. It says so each time it runs.
+
+Both sides set the same `BRAHMAN_PEER_SECRET` (32 characters or more). The receiver runs
+`buddy peer serve` (127.0.0.1:8790 unless `--bind` names a LAN, VPN or tunnel address); the
+sender runs `buddy peer send http://<peer>:8790 <repo> "main..my-fix" --note "what, where to
+look"`. A signed bundle (HMAC-SHA256 over time, sender and the body's hash; 5 minutes' clock
+skew; no replay) is only stored, under `~/.local/state/work_brahman/peer-inbox/`; nothing is
+applied or run. The receiving session looks with `buddy peer inbox`, then `git bundle verify`
+and `git fetch <bundle> my-fix:from-peer`, and runs its own tests, as with any proposal. Shared
+context (a file share, GitHub) is named in the note. The full pairing (keys per peer, trust
+scopes, a gate) is still a design: `specs/multi-brahman.md`.
+
+The peers live in `~/.config/work_brahman/peers.toml` (this side's name, where serve listens,
+each peer's address and a note; never the secret), changed in `buddy tui`'s **Peers** view or the
+workbench's **Setup** tab (nothing written until you write it, with a backup). Both run the same
+**doctor** as `buddy peer doctor` (and `buddy doctor --peers`): the secret, where serve listens,
+and a signed ping to every peer, answered signed, so it proves the same secret on both sides and
+shows how far apart the clocks are. For the workbench to check peers, put `BRAHMAN_PEER_SECRET`
+in the buddy's `.env`. `buddy peer send <peer name> …` takes a name from the file. `buddy peer
+log` (and the Log views) shows what came, what was refused and why, what was sent, and every
+check.
 
 ## Language and tests
 

@@ -67,11 +67,11 @@ which last weeks: a short story lasts minutes to hours.
   while waiting. A Codex session gets the line through `codex queue` instead, and only while a
   Codex terminal holds it (its daemon has the thread loaded and a terminal runs in its folder):
   with none, Codex would run the turn unattended. Sessions behind the gate are not woken.
-- **The window's title names its stories** (pys), short (the owner's rule, about 24
-  characters: `rel·kit #253 #249`): `start` and `attach` put the story numbers where the title's
-  `#…` stood (else after its first word), newest first, older ones left out when it would grow
-  too long; `done` takes a number out again, and `done --free` makes it `free·<session>` once
-  none is left. Only numbers: the card has the titles. It is written with `pys title --owner
+- **The window's title names its stories** (pys), short, `<name> [<job>] <state>` (the owner's
+  rule, 2026-11-11, about 24 characters: `rel-rdp-g1 #253 #249 busy`): `start` and `attach` put
+  the story numbers after the name, newest first, then the session's work words, then `busy`;
+  the work words and older numbers are left out when it would grow too long; `done` takes a
+  number out again, and `done --free` makes it `<name> free` once none is left. Only numbers: the card has the titles. It is written with `pys title --owner
   <that claude>`, so pys drops it when the session ends (OSC 2 on a pys without `title`); the
   session's own part is read from its agent title. A title the owner set by hand (C-a ,) still wins.
 - **A reply is an instruction from the owner**, as if typed into the session: act on it,

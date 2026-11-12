@@ -48,8 +48,9 @@ class Channel(Protocol):
         thread. Returns its handle, which comes back as Incoming.thread."""
 
     def ask(self, chat: str, markdown: str, *, title: str, options: list[list[str]],
-            ask_id: str, failed: bool = False, note: str = "") -> str | None:
-        """A new message with one button per option, plus ■ Stop. Returns its handle.
+            ask_id: str, failed: bool = False, note: str = "", stop: bool = True) -> str | None:
+        """A new message with one button per option, plus ■ Stop (stop=False: none, as the
+        Setup tab's ping card, which must not carry a button that stops all work). Returns its handle.
         A press comes back through listen() as Incoming(action="ask:<ask_id>:<key>")."""
 
     def settle(self, chat: str, handle: str, markdown: str, *, title: str, line: str,
