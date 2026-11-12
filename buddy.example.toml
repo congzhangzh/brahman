@@ -122,3 +122,9 @@ digest = "09:00"                    # optional: the whole list once a day, after
 # `buddy serve` post the family's message (`buddy family <name>`) to chat_id or to [me].
 [families.monthly-report]
 schedule = "0 9 1 * *"              # the 1st of every month, 09:00: the month that ended
+
+# What Feishu and Lark get on their own: their API calls count against a monthly quota.
+# off (the default): nothing; they answer you · ends: a story's card at its start and end · all
+[notify]
+feishu = "off"
+lark = "off"

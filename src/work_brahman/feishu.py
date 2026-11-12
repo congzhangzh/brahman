@@ -91,6 +91,7 @@ class Feishu:
 
     name = "lark"
     prefix = ""  # "lark:" for the second app: its chat and sender ids carry it
+    counter = None  # called once per message call (notify.count): buddy serve sets it
 
     def __init__(self, app_id: str, app_secret: str, domain: str = "feishu", prefix: str = ""):
         self.app_id, self.app_secret = app_id, app_secret
@@ -114,16 +115,25 @@ class Feishu:
     def send_card(self, chat_id: str, card: dict) -> str | None:
         return self._send(chat_id, "interactive", json.dumps(card, ensure_ascii=False))
 
+    def _counted(self) -> None:
+        if self.counter:
+            try:
+                self.counter()
+            except Exception:  # a count never stops a message
+                pass
+
     def update_card(self, message_id: str, card: dict) -> bool:
         """Replace a card the bot sent, in place (Lark allows this for 14 days)."""
         body = PatchMessageRequestBody.builder().content(json.dumps(card, ensure_ascii=False)).build()
         req = PatchMessageRequest.builder().message_id(message_id).request_body(body).build()
+        self._counted()
         return _check(self.api.im.v1.message.patch(req)) is not None
 
     def _reply(self, message_id: str, msg_type: str, content: str, in_thread: bool = False) -> str | None:
         body = (ReplyMessageRequestBody.builder().msg_type(msg_type).content(content)
                 .reply_in_thread(in_thread).build())
         req = ReplyMessageRequest.builder().message_id(message_id).request_body(body).build()
+        self._counted()
         got = _check(self.api.im.v1.message.reply(req))
         code = _last.code
         if got is None and in_thread and code not in QUOTA_CODES:
@@ -139,6 +149,7 @@ class Feishu:
         body = (CreateMessageRequestBody.builder().receive_id(chat_id.removeprefix(self.prefix)).msg_type(msg_type)
                 .content(content).build())
         req = CreateMessageRequest.builder().receive_id_type("chat_id").request_body(body).build()
+        self._counted()
         return _check(self.api.im.v1.message.create(req))
 
     def owns(self, chat: str) -> bool:

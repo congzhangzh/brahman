@@ -14,6 +14,23 @@
 <style>
 * { box-sizing: border-box; }
 [hidden] { display:none !important; }
+/* level 2's Lanes: who did what, where, in parallel (lanes.py) */
+.l2tabs { display:flex; gap:4px; margin:0 0 8px; } .l2tabs button { border:1px solid var(--line); background:var(--card); border-radius:999px; padding:1px 10px; font-size:12px; cursor:pointer; color:var(--mute); }
+.l2tabs button.on { color:var(--ink); background:var(--sel); border-color:var(--gold); }
+.lanes { font-size:12.5px; } .lanes .axis, .lanes .lane { display:grid; grid-template-columns:minmax(150px, 22%) 1fr; align-items:center; }
+.lanes .lane { border-top:1px solid var(--line); min-height:30px; } .lanes .machine { font-weight:600; padding-top:6px; color:var(--ink); }
+.lanes .who { color:var(--mute); padding:4px 8px 4px 14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lanes .track { position:relative; height:24px; } .lanes .ticks { position:relative; height:16px; color:var(--mute); font-size:11px; }
+.lanes .ticks span { position:absolute; transform:translateX(-50%); white-space:nowrap; }
+.lanes .bar { position:absolute; top:3px; height:18px; border-radius:4px; background:var(--ok); color:#fff; font-size:11px; line-height:18px; padding:0 4px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; box-sizing:border-box; min-width:6px; }
+.lanes .bar.failed { background:var(--bad); } .lanes .bar.doing { background:var(--gold); } .lanes .bar.skipped { background:var(--mute); }
+.lanes .bar.inferred { background-image:repeating-linear-gradient(135deg, rgba(255,255,255,.35) 0 4px, transparent 4px 8px); opacity:.85; }
+.lanes .note { color:var(--mute); margin-top:6px; }
+.lanes .who { display:flex; align-items:center; gap:4px; } .lanes .who .name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+.lanes .fold { width:16px; flex:none; border:0; background:none; color:var(--mute); cursor:pointer; padding:0; font-size:11px; }
+.lanes .attach { flex:none; border:1px solid var(--line); background:var(--card); border-radius:999px; padding:0 7px; font-size:11px; color:var(--ink); cursor:pointer; }
+.lanes .attach:disabled { color:var(--mute); cursor:default; opacity:.6; }
+.lanes .lane.sub .who { padding-left:36px; } .lanes .lane.sub { min-height:26px; } .lanes .here { color:var(--mute); font-weight:400; font-size:11px; }
 /* the Setup tab (settings.py; the same as `buddy tui`): doctor, config, peers, the peer log */
 #setupview { max-width:1100px; margin:0 auto; width:100%; box-sizing:border-box; padding:10px 20px 24px; }
 #setupview .sub { display:flex; gap:6px; flex-wrap:wrap; margin:4px 0 10px; }
@@ -187,14 +204,20 @@ pre.log.bad { border-color:var(--bad); }
     <h3 class="dim" style="margin:14px 0 4px" data-t="setup.pair_helper">Pair: who wrote to the bot</h3><div class="dim" data-t="setup.pair_how">write anything to the bot in the new app (Feishu, Lark, Telegram); it shows up here; Pair writes the id and its chat, then restart the buddy</div><div id="sv-crefused" style="margin-top:6px"></div></div>
   <div class="pane" id="sv-peers" hidden><p class="warn" data-t="setup.peer_warn">⚠️ One shared secret, plain HTTP: a LAN you own, a VPN or an SSH tunnel only, never the open internet.</p>
     <div class="row"><label><span data-t="setup.side">This side</span> <input id="sv-name" style="width:11em"></label><label><span data-t="setup.bind">serve on</span> <input id="sv-bind" style="width:9em"></label><label><span data-t="setup.port">port</span> <input id="sv-port" style="width:5em"></label><span class="dim" id="sv-secret"></span></div>
-    <table><thead><tr><th data-t="setup.peer">Peer</th><th data-t="setup.address">Address</th><th data-t="setup.note">Note</th><th data-t="setup.check">Check</th><th></th></tr></thead><tbody id="sv-prows"></tbody></table>
-    <div class="row"><button class="act" data-spadd="1" data-t="setup.add">Add a peer</button><button class="act go" data-swrite="peers" data-t="setup.write_peers">Write peers.toml</button></div><div class="msg" id="sv-pmsg"></div></div>
+    <div class="row"><label style="flex:1"><span data-t="setup.desc">What this machine is</span> <input id="sv-desc" style="width:100%;max-width:46em" maxlength="300"></label><span class="dim" data-t="setup.desc_sub">seen by your peers (sent in the ping): no secrets</span></div>
+    <div class="row"><label><span data-t="setup.allow">Who may connect</span> <select id="sv-allow"><option value="local" data-t="setup.allow_local">local: this machine and SSH tunnels</option><option value="private" data-t="setup.allow_private">private: also LAN and VPN</option><option value="public" data-t="setup.allow_public">public: anyone (plain HTTP)</option></select></label><span id="sv-allow-say"></span></div>
+    <div class="row"><label style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="sv-instr" style="width:auto;min-width:0;margin:0"> <span data-t="setup.instr">Peers in the global instructions</span></label><span class="dim" id="sv-instr-say"></span></div>
+    <table><thead><tr><th data-t="setup.peer">Peer</th><th data-t="setup.address">Address</th><th data-t="setup.note">Note</th><th data-t="setup.says">It says</th><th data-t="setup.check">Check</th><th></th></tr></thead><tbody id="sv-prows"></tbody></table>
+    <div class="row"><button class="act" data-spadd="1" data-t="setup.add">Add a peer</button></div>
+    <h3 class="dim" style="margin:14px 0 4px" data-t="setup.resources">Resources: a shared name, your own way there</h3><div class="dim" data-t="setup.res_how">the peers learn only the name; the address is how THIS machine reaches it and is never sent</div>
+    <table><thead><tr><th data-t="setup.res">Resource</th><th data-t="setup.kind">Kind</th><th data-t="setup.res_url">How this machine reaches it</th><th data-t="setup.note">Note</th><th data-t="setup.here">From here</th><th data-t="setup.also_at">Also at</th><th></th></tr></thead><tbody id="sv-rrows"></tbody></table>
+    <div class="row"><button class="act" data-sradd="1" data-t="setup.add_res">Add a resource</button><button class="act go" data-swrite="peers" data-t="setup.write_peers">Write peers.toml</button></div><div class="msg" id="sv-pmsg"></div></div>
   <div class="pane" id="sv-log" hidden><pre id="sv-logtext"></pre></div>
 </div>
 <main id="bench">
   <section class="level"><h2 data-t="h.asks">Waiting for you<span data-t="h.asks_sub">the same cards as in Lark and Telegram; the first answer anywhere wins</span></h2><div id="asks"></div></section>
   <section class="level"><h2 data-t="h.l1">Level 1 · Workflows and their runs<span data-t="h.l1_sub">the last 3 days · click a run</span></h2><div id="workflows"></div></section>
-  <section class="level"><h2 data-t="h.l2">Level 2 · How the system works<span id="l2h" data-t="h.l2_sub">lit by the selected run · click a part</span></h2><div class="diagram" id="diagram"></div></section>
+  <section class="level"><h2 data-t="h.l2">Level 2 · How the system works<span id="l2h" data-t="h.l2_sub">lit by the selected run · click a part</span></h2><div class="l2tabs"><button data-l2="arch" data-t="l2.arch">Architecture</button><button data-l2="lanes" data-t="l2.lanes">Lanes</button></div><div class="diagram" id="diagram"></div><div class="lanes" id="lanes" hidden></div></section>
   <section class="level"><h2 data-t="h.l3">Level 3 · Observation<span id="l3h"></span></h2><div class="observe" id="observe"></div></section>
 </main>
 <script>
@@ -286,6 +309,71 @@ async function load() {
 // A family (short and long stories, teams) shows every one: its row scrolls instead.
 function shown(rs, sel, kind) {
   return kind === "family" ? rs : rs.filter((r, k) => k < 8 || !quiet(r) || r === sel).slice(0, 40);
+}
+// Level 2's Lanes tab: the selected story as swimlanes (GET /api/lanes), one row per machine/session.
+S.l2 = (() => { try { return localStorage.getItem("l2") || "arch"; } catch (_) { return "arch"; } })();
+S.lanes = {}; S.lanesFold = new Set(); S.lanesSaid = "";
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-lane-fold],[data-lane-attach]");
+  if (!b) return;
+  if (b.dataset.laneFold) {
+    const k = b.dataset.laneFold;
+    S.lanesFold.has(k) ? S.lanesFold.delete(k) : S.lanesFold.add(k);
+    return render();
+  }
+  b.disabled = true;
+  fetch("/api/lanes/attach", { method: "POST", headers: { "Content-Type": "application/json", "X-Buddy": "1" },
+    body: JSON.stringify({ id: S.lanesId, machine: b.dataset.machine, session: b.dataset.session }) })
+    .then(async r => { S.lanesSaid = r.ok ? tr("lanes.attached", { w: (await r.json()).window }) : await r.text(); })
+    .catch(() => { S.lanesSaid = tr("lanes.attach_failed"); })
+    .finally(() => { delete S.lanes[S.lanesId]; render(); });
+});
+function drawLanes(sel) {
+  document.querySelectorAll(".l2tabs button").forEach(b => b.classList.toggle("on", b.dataset.l2 === S.l2));
+  const box = document.getElementById("lanes"), on = S.l2 === "lanes";
+  document.getElementById("diagram").hidden = on; box.hidden = !on;
+  if (!on) return;
+  if (!sel.id || !sel.id.startsWith("short-story:")) { box.innerHTML = `<div class="note">${esc(tr("lanes.only_stories"))}</div>`; return; }
+  if (S.lanesId !== sel.id) { S.lanesId = sel.id; S.lanesSaid = ""; }
+  const got = S.lanes[sel.id];
+  if (!got || Date.now() - got.at > 10000) {
+    if (!S.lanesFetching) {
+      S.lanesFetching = true;
+      fetch(`/api/lanes?id=${encodeURIComponent(sel.id)}`, { cache: "no-store" }).then(x => x.ok ? x.json() : null)
+        .then(v => { S.lanes[sel.id] = { v, at: Date.now() }; }).catch(() => {}).finally(() => { S.lanesFetching = false; render(); });
+    }
+    if (!got) { box.innerHTML = `<div class="note">…</div>`; return; }
+  }
+  const v = got.v;
+  if (!v || !v.lanes.length) { box.innerHTML = `<div class="note">${esc(tr("lanes.none"))}</div>`; return; }
+  const span = Math.max(60, v.t1 - v.t0), pct = t => ((t - v.t0) / span * 100).toFixed(2);
+  const clock = t => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const ticks = [0, .25, .5, .75, 1].map(f => `<span style="left:${f * 100}%;transform:translateX(${f === 0 ? "0" : f === 1 ? "-100%" : "-50%"})">${clock(v.t0 + f * span)}</span>`).join("");  // the ends inside the box
+  const track = bars => bars.map(b => {
+    const w = Math.max(.6, (b.end - b.start) / span * 100);
+    const how = b.inferred ? tr("lanes.inferred") : b.open ? tr("lanes.running") : "";
+    return `<div class="bar ${esc(b.status)} ${b.inferred ? "inferred" : ""}" style="left:${pct(b.start)}%;width:${w.toFixed(2)}%" title="${esc(`${b.n ? b.n + ". " : ""}${b.step} · ${clock(b.start)}–${clock(b.end)} · ${statusName(b.status)}${how ? " · " + how : ""}`)}">${esc((b.n ? b.n + " " : "") + b.step)}</div>`;
+  }).join("");
+  // Three levels: the machine, the session (its row is the main agent's), its subagents one level lower.
+  const sessions = [];
+  for (const l of v.lanes) {
+    let se = sessions.find(x => x.machine === l.machine && x.session === l.session);
+    if (!se) sessions.push(se = { machine: l.machine, session: l.session, main: null, subs: [], window: l.window, live: l.live, here: l.here });
+    if (l.agent) se.subs.push(l); else se.main = l;
+  }
+  let html = `<div class="axis"><div></div><div class="ticks">${ticks}</div></div>`, machine = "";
+  for (const se of sessions) {
+    if (se.machine !== machine) { machine = se.machine; html += `<div class="lane"><div class="machine">${esc(machine)}${se.here ? ` <span class="here">${esc(tr("lanes.here"))}</span>` : ""}</div><div></div></div>`; }
+    const key = se.machine + "/" + se.session, folded = S.lanesFold.has(key);
+    const fold = se.subs.length ? `<button class="fold" data-lane-fold="${esc(key)}" title="${esc(tr(folded ? "lanes.unfold" : "lanes.fold", { n: se.subs.length }))}">${folded ? "▸" : "▾"}</button>` : `<span class="fold"></span>`;
+    const why = !se.window ? "" : !se.here ? tr("lanes.attach_there", { m: se.machine }) : !se.live ? tr("lanes.attach_gone", { w: se.window }) : tr("lanes.attach_tip", { w: se.window });
+    const attach = se.window ? `<button class="attach" data-lane-attach="${esc(key)}" data-machine="${esc(se.machine)}" data-session="${esc(se.session)}" ${se.here && se.live ? "" : "disabled"} title="${esc(why)}">⤴ ${esc(tr("lanes.attach"))}</button>` : "";
+    html += `<div class="lane"><div class="who" title="${esc(key)}">${fold}<span class="name">${esc(se.session)}</span>${attach}</div><div class="track">${track(se.main ? se.main.bars : [])}</div></div>`;
+    if (!folded) for (const a of se.subs)
+      html += `<div class="lane sub"><div class="who" title="${esc(key + "/sub:" + a.agent)}">↳ ${esc(a.agent)}</div><div class="track">${track(a.bars)}</div></div>`;
+  }
+  const said = S.lanesSaid ? `<div class="note">${esc(S.lanesSaid)}</div>` : "";
+  box.innerHTML = html + said + `<div class="note">${esc(tr("lanes.legend"))}</div>`;
 }
 // A story's or a team's whole record, fetched when its light tile is picked (S.detail, by id).
 // A finished story is kept; a running one or a team is fetched again after 15 s.
@@ -395,6 +483,7 @@ function render() {
     if (!whole) { document.getElementById("diagram").innerHTML = `<div class="mute">${tr("loading")}</div>`; document.getElementById("observe").innerHTML = ""; return; }
     return whole.team ? team(whole) : story(whole, focused);
   }
+  drawLanes(sel);  // level 2's Lanes tab, for a story or any run (it says when it has none)
   if (sel.story) return story(sel, focused);
 
   // Level 2: the architecture, lit by the selected run: its real steps, in order.
@@ -720,6 +809,7 @@ document.addEventListener("click", e => {
   const b = e.target.closest("button, g[data-part]");  // a button, or a step in the run's sketch
   if (!b) return;
   if (b.dataset.tab) return tab(b.dataset.tab);
+  if (b.dataset.l2) { S.l2 = b.dataset.l2; try { localStorage.setItem("l2", S.l2); } catch (_) {} return render(); }
   if (b.dataset.lang) {  // kept in this browser; a ?lang= in the address gives way to it
     try { localStorage.setItem("lang", b.dataset.lang); } catch (_) {}
     const url = new URL(location.href); url.searchParams.delete("lang"); history.replaceState(null, "", url);
@@ -833,7 +923,9 @@ function drawConfig() {
   if (!SV.cfg) { rows.innerHTML = `<tr><td colspan="3" class="bad">${esc(tr("setup.not_set_up"))}</td></tr>`; return; }
   rows.innerHTML = SV.cfg.map(f => {
     const name = esc(tr("setup.f." + f.key)), ph = f.kind === "secret" ? tr("setup.ph_secret") : f.kind === "list" ? tr("setup.ph_list") : "";
-    const input = f.kind === "app"
+    const input = f.kind === "notify"
+      ? `<select data-ck="${f.key}">${["off", "ends", "all"].map(m => `<option value="${m}"${m === f.value ? " selected" : ""}>${esc(m === "off" ? tr("setup.notify_off") : m === "ends" ? tr("setup.notify_ends") : tr("setup.notify_all"))}</option>`).join("")}</select>`
+      : f.kind === "app"
       ? `<input data-ck="${f.key}" data-ckpart="id" placeholder="${esc(tr("setup.ph_appid"))}"> <input data-ck="${f.key}" data-ckpart="secret" type="password" autocomplete="off" placeholder="${esc(tr("setup.ph_secret"))}">`
       : `<input data-ck="${f.key}" ${f.kind === "secret" ? 'type="password" autocomplete="off"' : ""} placeholder="${esc(ph)}" value="${f.kind === "secret" ? "" : esc(Array.isArray(f.value) ? f.value.join(", ") : f.value)}">`;
     return `<tr><td>${name}</td><td>${f.set ? "" : '<span class="warn">⚠️</span> '}${esc(f.shown)}</td><td>${input}</td></tr>`;
@@ -853,20 +945,51 @@ function configChanges() {
 function drawPeers() {
   const p = SV.peers; if (!p) return;
   document.getElementById("sv-name").value = p.cfg.name; document.getElementById("sv-bind").value = p.cfg.bind; document.getElementById("sv-port").value = p.cfg.port;
-  document.getElementById("sv-secret").innerHTML = p.secret ? `<span class="ok">✅</span> ${esc(tr("setup.secret_set"))}` : `<span class="warn">⚠️</span> ${esc(tr("setup.secret_unset"))}`;
+  document.getElementById("sv-bind").placeholder = tr("setup.bind_follows", { b: p.listen || "127.0.0.1" });
+  document.getElementById("sv-desc").value = p.cfg.description || "";
+  document.getElementById("sv-allow").value = p.cfg.allow || "local"; allowSay();
+  document.getElementById("sv-instr").checked = !!p.cfg.instructions;
+  document.getElementById("sv-instr-say").textContent = (p.block || []).map(b => `${b.has ? "✅" : "–"} ${b.file}`).join(" · ");
+  document.getElementById("sv-name").placeholder = p.default_name || "";
+  document.getElementById("sv-name").title = tr("setup.machine", { fp: p.fingerprint || "?" });
+  document.getElementById("sv-secret").innerHTML = `<span class="dim">${esc(tr("setup.machine", { fp: p.fingerprint || "?" }))}</span> · ` + (p.secret ? `<span class="ok">✅</span> ${esc(tr("setup.secret_set"))}` : `<span class="warn">⚠️</span> ${esc(tr("setup.secret_unset"))}`);
   const names = Object.keys(p.cfg.points).sort();
   document.getElementById("sv-prows").innerHTML = names.map(k => {
     const v = p.cfg.points[k], r = SV.checks[k];
     const c = r ? (r.ok ? `<span class="ok">✅ ${r.skew} s · ${r.ms} ms</span>` : `<span class="bad">❌ ${esc(r.why)}</span>`) : '<span class="dim">–</span>';
-    return `<tr data-pk="${esc(k)}"><td><input class="k" value="${esc(k)}"></td><td><input class="u" style="min-width:17em" value="${esc(v.url)}"></td><td><input class="n" value="${esc(v.note)}"></td><td>${c}</td><td><button class="act" data-spchk="1">${esc(tr("setup.check"))}</button> <button class="act" data-spdel="1">${esc(tr("setup.delete"))}</button></td></tr>`;
-  }).join("") || `<tr><td colspan="5" class="dim">${esc(tr("setup.no_peers"))}</td></tr>`;
+    const says = (p.seen || {})[k] || {}, desc = (r && r.desc) || says.desc || "";
+    return `<tr data-pk="${esc(k)}"><td><input class="k" value="${esc(k)}">${v.direction === "in" ? ` <span class="dim">${esc(tr("setup.send_only"))}</span>` : ""}</td><td><input class="u" style="min-width:17em" value="${esc(v.url)}"></td><td><input class="n" value="${esc(v.note)}"></td><td class="dim" style="max-width:22em">${esc(desc || "–")}</td><td>${c}</td><td><button class="act" data-spchk="1">${esc(tr("setup.check"))}</button> <button class="act" data-spdel="1">${esc(tr("setup.delete"))}</button></td></tr>`;
+  }).join("") || `<tr><td colspan="6" class="dim">${esc(tr("setup.no_peers"))}</td></tr>`;
+  const res = p.cfg.resources || {};
+  document.getElementById("sv-rrows").innerHTML = Object.keys(res).sort().map(k => {
+    const v = res[k], r = SV.checks["res:" + k];
+    const have = Object.keys(p.seen || {}).filter(x => p.cfg.points[x] && (p.seen[x].res || []).includes(k));
+    const c = r ? (r.ok === true ? `<span class="ok">✅ ${esc(r.how)}</span>` : r.ok === false ? `<span class="bad">❌ ${esc(r.how)}</span>` : `<span class="dim">${esc(r.how)}</span>`) : '<span class="dim">–</span>';
+    const kinds = (p.kinds || ["git", "http", "ssh", "tcp", "other"]).map(x => `<option${x === v.kind ? " selected" : ""}>${x}</option>`).join("");
+    return `<tr data-rk="${esc(k)}"><td><input class="k" value="${esc(k)}"></td><td><select class="kd">${kinds}</select></td><td><input class="u" style="min-width:17em" value="${esc(v.url)}"></td><td><input class="n" value="${esc(v.note)}"></td><td>${c}</td><td class="dim">${esc(have.join(", ") || "–")}</td><td><button class="act" data-srchk="1">${esc(tr("setup.check"))}</button> <button class="act" data-srdel="1">${esc(tr("setup.delete"))}</button></td></tr>`;
+  }).join("") || `<tr><td colspan="7" class="dim">${esc(tr("setup.no_res"))}</td></tr>`;
   SV.peersDirty = false;
 }
 function readPeers() {
-  const points = {};
-  document.querySelectorAll("#sv-prows tr[data-pk]").forEach(tr_ => { const k = tr_.querySelector(".k").value.trim(); if (k) points[k] = { url: tr_.querySelector(".u").value.trim(), note: tr_.querySelector(".n").value.trim() }; });
-  return { name: document.getElementById("sv-name").value.trim(), bind: document.getElementById("sv-bind").value.trim(), port: +document.getElementById("sv-port").value, points };
+  const points = {}, resources = {}, was = (SV.peers && SV.peers.cfg.points) || {};
+  document.querySelectorAll("#sv-prows tr[data-pk]").forEach(tr_ => { const k = tr_.querySelector(".k").value.trim(); if (k) points[k] = { url: tr_.querySelector(".u").value.trim(), note: tr_.querySelector(".n").value.trim(), ...(was[tr_.dataset.pk] && was[tr_.dataset.pk].direction ? { direction: was[tr_.dataset.pk].direction } : {}) }; });
+  document.querySelectorAll("#sv-rrows tr[data-rk]").forEach(tr_ => { const k = tr_.querySelector(".k").value.trim(); if (k) resources[k] = { kind: tr_.querySelector(".kd").value, url: tr_.querySelector(".u").value.trim(), note: tr_.querySelector(".n").value.trim() }; });
+  return { name: document.getElementById("sv-name").value.trim(), bind: document.getElementById("sv-bind").value.trim(), port: +document.getElementById("sv-port").value,
+           description: document.getElementById("sv-desc").value.trim(), allow: document.getElementById("sv-allow").value,
+           instructions: document.getElementById("sv-instr").checked, points, resources };
 }
+function allowSay() {
+  const a = document.getElementById("sv-allow").value, el = document.getElementById("sv-allow-say");
+  el.className = a === "public" ? "bad" : a === "private" ? "warn" : "dim";
+  el.textContent = a === "public" ? tr("setup.allow_say_public") : a === "private" ? tr("setup.allow_say_private") : tr("setup.allow_say_local");
+}
+document.addEventListener("change", e => {
+  if (e.target.id === "sv-allow") {  // the bind follows allow again when it was a plain loopback or any-address
+    const b = document.getElementById("sv-bind"); if (["127.0.0.1", "::1", "localhost", "0.0.0.0", "::"].includes(b.value.trim())) b.value = "";
+    allowSay(); SV.peersDirty = true;
+  }
+  if (e.target.id === "sv-instr" || (e.target.closest && e.target.closest("#sv-rrows"))) SV.peersDirty = true;
+});
 document.addEventListener("input", e => { if (e.target.closest("#sv-crows")) SV.cfgDirty = true; if (e.target.closest("#sv-peers")) SV.peersDirty = true; });
 document.addEventListener("click", async e => {
   const b = e.target.closest("#setupview button"); if (!b) return;
@@ -927,6 +1050,19 @@ document.addEventListener("click", async e => {
     const r = await svPost("/api/setup/peers", { cfg: readPeers() });
     if (r.ok) { SV.peers = r.peers; drawPeers(); }
     return svSay("sv-pmsg", r.said, !r.ok);
+  }
+  if (b.dataset.sradd) { SV.peers.cfg = readPeers(); let n = "git-main", i = 1; while (SV.peers.cfg.resources[n]) n = "res" + (++i); SV.peers.cfg.resources[n] = { kind: "git", url: "", note: "" }; drawPeers(); SV.peersDirty = true; return; }
+  const rrow = b.closest("tr[data-rk]");
+  if (rrow) {
+    const k = rrow.dataset.rk;
+    if (b.dataset.srdel) { SV.peers.cfg = readPeers(); delete SV.peers.cfg.resources[k]; drawPeers(); SV.peersDirty = true; return svSay("sv-pmsg", tr("setup.deleted", { name: k })); }
+    if (b.dataset.srchk) {
+      const kept = readPeers(); svSay("sv-pmsg", tr("setup.reaching", { name: k }));
+      const r = await svPost("/api/setup/rescheck", { name: k, kind: rrow.querySelector(".kd").value, url: rrow.querySelector(".u").value.trim() });
+      SV.checks["res:" + k] = r; SV.peers.cfg = kept; drawPeers(); SV.peersDirty = true;
+      return svSay("sv-pmsg", `${k}: ${r.how}`, r.ok === false);
+    }
+    return;
   }
   if (b.dataset.spadd) { SV.peers.cfg = readPeers(); let n = "peer", i = 1; while (SV.peers.cfg.points[n]) n = "peer" + (++i); SV.peers.cfg.points[n] = { url: "http://", note: "" }; drawPeers(); SV.peersDirty = true; return; }
   const row = b.closest("tr[data-pk]"); if (!row) return;

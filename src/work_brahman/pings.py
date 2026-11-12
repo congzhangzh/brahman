@@ -121,7 +121,8 @@ def send(state: Path, channels, chat: str) -> dict:
     if ch is None:
         rec.update(ok=False, why="no channel for this chat: is its app set up, and the buddy restarted?")
     else:
-        from . import feishu
+        from . import feishu, notify
+        ch = notify.direct(ch)  # sent on purpose: past [notify]
         feishu._last.code = None
         text = f"🏓 ping {code}: answer **pong** here, or press the button (it tests the card callback)."
         try:

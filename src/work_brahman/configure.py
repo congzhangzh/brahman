@@ -50,7 +50,10 @@ def load(path: Path) -> dict:
             "feishu": list(first if on_feishu else ("", "")),
             "allowed": [x for x in env.get("BUDDY_ALLOWED_IDS", "").split(",") if x.strip()],
             "chats": list(cfg.get("me", {}).get("chats", [])),
-            "port": cfg.get("web", {}).get("port", 8787)}
+            "port": cfg.get("web", {}).get("port", 8787),
+            # what Feishu and Lark get on their own (notify.py): off by default, the quota is small
+            "notify_feishu": str(cfg.get("notify", {}).get("feishu", "off")),
+            "notify_lark": str(cfg.get("notify", {}).get("lark", "off"))}
 
 
 def _env(path: Path) -> dict:
@@ -133,11 +136,14 @@ def save(path: Path, s: dict, before: dict) -> list[str]:
     changes = [(None, "workspace", _q(s["workspace"])), (None, "domain", _q("feishu" if on_feishu else "lark")),
                ("buddy", "language", _q(s["language"])), ("web", "port", str(int(s["port"]))),
                ("me", "chats", "[" + ", ".join(_q(c) for c in s["chats"]) + "]")]
+    changes += [("notify", app, _q(s[f"notify_{app}"])) for app in ("feishu", "lark") if f"notify_{app}" in s]
     old = tomllib.loads(toml)
     for section, key, literal in changes:
         now = (old.get(section, {}) if section else old).get(key)
         if now is not None and tomllib.loads(f"x = {literal}")["x"] == now:
             continue  # unchanged: the line is not touched
+        if now is None and section == "notify" and literal == '"off"':
+            continue  # the default: no [notify] written for it
         new = _toml_set(toml, section, key, literal)
         if new is None:
             notes.append(f"left {key} as it is: it is written over several lines in {path}; edit it by hand")
@@ -147,6 +153,8 @@ def save(path: Path, s: dict, before: dict) -> list[str]:
     for section, key, literal in changes:
         mine = tomllib.loads(f"x = {literal}")["x"]
         value = (got.get(section, {}) if section else got).get(key)
+        if section == "notify" and value is None and mine == "off":
+            continue  # the default, left out on purpose
         if value != mine and not any(key in n for n in notes):
             raise ValueError(f"{key} would read {value!r}, not {mine!r}: nothing written")
     env = _env_set(env_path.read_text() if env_path.exists() else "", {

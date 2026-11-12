@@ -8,9 +8,12 @@ between four views:
           web); answer pong there and the row turns ✅ both ways. Who wrote without being
           paired, with the `buddy allow` line.
   Config  what `buddy config` changes: language, workspace, Telegram, Lark, Feishu, who is
-          paired, the linked chats, the web port. ↑↓ choose · Enter change · w write
-  Peers   the peer build's peers.toml (buddy peer): a add · e edit · d delete · s this side ·
-          c check one (a signed ping, answered signed) · w write
+          paired, the linked chats, the web port. ↑↓ choose · Enter change · w write ·
+          S scan a Feishu/Lark app (buddy scan: written, paired and linked in one step)
+  Peers   the peer build's peers.toml (buddy peer): a add a peer · r add a resource · e edit ·
+          d delete · s this side (name, description, bind, port) · l who may connect (local,
+          private, public) · i the instructions block on or off · c check one (a peer: a signed
+          ping, answered signed; a resource: reached from here) · w write
   Log     the peer log: what came, what was refused and why, what was sent, each check
 
 Who wrote to the bot and isn't paired shows on every view; P pairs them (written at once,
@@ -32,13 +35,13 @@ import unicodedata
 from pathlib import Path
 
 from . import configure, settings
-from . import peer as P
+from . import peer as P, peer_block
 
 VIEWS = ("Doctor", "Ping", "Config", "Peers", "Log")
 KEYS = {"Doctor": "r run every check (calls the chat apps) · P pair who wrote · Tab next view · q quit",
         "Ping": "↑↓ choose · Enter send a ping (answer pong in that chat) · r refresh · Tab · q quit",
-        "Config": "↑↓ choose · Enter change · p pair who wrote · w write · Tab · q quit",
-        "Peers": "↑↓ choose · a add · e edit · d delete · s this side · c check · w write · Tab · q quit",
+        "Config": "↑↓ choose · Enter change · p pair who wrote · S scan a Feishu/Lark app · w write · Tab · q quit",
+        "Peers": "↑↓ · a peer · r resource · e edit · d delete · s this side · l allow · i instructions · c check · w write · q",
         "Log": "↑↓ PgUp PgDn scroll · Tab · q quit"}
 MARK = {True: "✅", False: "❌", None: "⚠ "}  # two columns each; ⚠ without U+FE0F, whose width terminals disagree on
 
@@ -216,6 +219,11 @@ class Model:
         self.cnotes = notes
         return " · ".join(notes[:1] if ok else notes)
 
+    def reload_config(self) -> None:
+        """Read buddy.toml and .env again (after `buddy scan` wrote them)."""
+        self.before = configure.load(self.path) if self.path.exists() else None
+        self.s = copy.deepcopy(self.before)
+
     def write_config(self) -> str:
         ok, notes = settings.write(self.path, self.s, self.before)
         self.cnotes = notes
@@ -229,6 +237,51 @@ class Model:
     def names(self) -> list[str]:
         return sorted(self.pcfg["points"])
 
+    @property
+    def items(self) -> list[tuple[str, str]]:
+        """What ↑↓ moves over in Peers: the peers, then the resources."""
+        return [("peer", k) for k in self.names] + [("res", k) for k in sorted(self.pcfg.get("resources") or {})]
+
+    @property
+    def cur(self) -> tuple[str, str]:
+        return self.items[self.psel] if self.items else ("", "")
+
+    def put_res(self, name: str, kind: str, url: str, note: str, old: str = "") -> str:
+        """Add or change a resource: how THIS machine reaches it. "" or what is wrong."""
+        new = copy.deepcopy(self.pcfg)
+        res = new.setdefault("resources", {})
+        if old and old != name:
+            res.pop(old, None)
+        if name in res and name != old:
+            return f"{name} is there already"
+        res[name] = {"kind": kind.strip(), "url": url.strip(), "note": note.strip()}
+        why = P.validate(new)
+        if why:
+            return why
+        self.pcfg = new
+        self.psel = self.items.index(("res", name))
+        return ""
+
+    def delete_res(self, name: str) -> None:
+        self.pcfg.get("resources", {}).pop(name, None)
+        self.psel = max(0, min(self.psel, len(self.items) - 1))
+
+    def cycle_allow(self) -> str:
+        nxt = P.ALLOW[(P.ALLOW.index(self.pcfg.get("allow", "local")) + 1) % len(P.ALLOW)]
+        self.pcfg = P.set_allow(self.pcfg, nxt)
+        return f"allow = {nxt}" + ("  ⚠️  anyone on the internet, plain HTTP" if nxt == "public" else "") + ": w writes it"
+
+    def toggle_instructions(self) -> str:
+        self.pcfg = {**self.pcfg, "instructions": not self.pcfg.get("instructions")}
+        return ("the peers block goes into CLAUDE.md (and AGENTS.md) when written" if self.pcfg["instructions"]
+                else "the peers block comes out when written") + ": w writes it"
+
+    def check_res(self, name: str) -> str:
+        r = self.pcfg["resources"][name]
+        got = settings.check_resource(name, r["kind"], r["url"], self.env)
+        self.checks["res:" + name] = got
+        return f"{name}: {MARK[got['ok']]} {got['how']}"
+
     def put(self, name: str, url: str, note: str, old: str = "") -> str:
         """Add or change a peer (old: its name before an edit). "" or what is wrong."""
         new = copy.deepcopy(self.pcfg)
@@ -236,21 +289,24 @@ class Model:
             new["points"].pop(old, None)
         if name in new["points"] and name != old:
             return f"{name} is there already"
-        new["points"][name] = {"url": url.strip(), "note": note.strip()}
+        kept = {"direction": "in"} if new["points"].get(old or name, {}).get("direction") == "in" else {}
+        new["points"][name] = {"url": url.strip(), "note": note.strip()} | kept
         why = P.validate(new)
         if why:
             return why
         self.pcfg = new
-        self.psel = self.names.index(name)
+        self.psel = self.items.index(("peer", name))
         return ""
 
     def delete(self, name: str) -> None:
         self.pcfg["points"].pop(name, None)
-        self.psel = max(0, min(self.psel, len(self.names) - 1))
+        self.psel = max(0, min(self.psel, len(self.items) - 1))
 
-    def side(self, name: str, bind: str, port: str) -> str:
+    def side(self, name: str, bind: str, port: str, description: str | None = None) -> str:
         new = copy.deepcopy(self.pcfg)
-        new.update(name=name.strip(), bind=bind.strip() or "127.0.0.1")
+        new.update(name=name.strip(), bind=bind.strip())
+        if description is not None:
+            new["description"] = P.clean_desc(description)
         try:
             new["port"] = int(port)
         except ValueError:
@@ -326,15 +382,39 @@ def body(m: Model, height: int = 20) -> list[str]:
             lines.append("  nobody has written unpaired")
         return lines
     if view == "Peers":
-        c = m.pcfg
-        lines = [f"this side: {c['name'] or '(no name)'} · serve on {c['bind']}:{c['port']}"
-                 + ("" if c["bind"] in ("127.0.0.1", "::1", "localhost") else "  ⚠️  reachable from the network"), ""]
+        c, seen = m.pcfg, P.seen(m.env)
+        allow = c.get("allow", "local")
+        lines = [f"this side: {c['name'] or '(no name)'} (machine {P.fingerprint()}) · serve on {P.listen(c)}:{c['port']}"
+                 + ("" if c.get("bind") else " (follows allow)"),
+                 f"  description (seen by your peers): {c.get('description') or '— s sets it'}",
+                 f"  allow = {allow}: " + {"local": "this machine and SSH tunnels only",
+                                           "private": "⚠️  also LAN and VPN addresses",
+                                           "public": "⚠️  anyone on the internet, plain HTTP"}[allow] + "  (l changes)",
+                 f"  instructions block: {'on' if c.get('instructions') else 'off'}  (i turns it {'off' if c.get('instructions') else 'on'})"
+                 + "".join(f" · {'✅' if b['has'] else '–'} {b['file']}" for b in peer_block.state(m.env)), ""]
+        items = m.items
         if not m.names:
             lines.append("no peers yet: a adds one (a name, its address http://host:8790, a note)")
-        for i, k in enumerate(m.names):
+        for i, (kind, k) in enumerate(items):
+            if kind != "peer":
+                continue
             v, r = c["points"][k], m.checks.get(k)
             mark = "  " if r is None else ("✅" if r["ok"] else "❌")
-            lines.append(f"{'›' if i == m.psel else ' '} {mark} {k:<14} {v['url']:<28} {v['note']}")
+            lines.append(f"{'›' if i == m.psel else ' '} {mark} {k:<14} {v['url']:<28} {v['note']}"
+                         + ("  (send-only)" if v.get("direction") == "in" else ""))
+            if seen.get(k, {}).get("desc"):
+                lines.append(f"       says: {seen[k]['desc']}")
+        lines += ["", "resources (a shared name; the url is how THIS machine reaches it, never sent):"]
+        if not c.get("resources"):
+            lines.append("  none: r adds one (a name, a kind: git http ssh tcp other, its url from here, a note)")
+        for i, (kind, k) in enumerate(items):
+            if kind != "res":
+                continue
+            v, r = c["resources"][k], m.checks.get("res:" + k)
+            have = [p for p in sorted(seen) if p in c["points"] and k in seen[p].get("res", [])]
+            mark = "  " if r is None else MARK[r["ok"]]
+            lines.append(f"{'›' if i == m.psel else ' '} {mark} {k:<14} {v['kind']:<5} {v['url']:<28} {v['note']}"
+                         + (f"  · also at {', '.join(have)}" if have else ""))
         if m.peers_dirty:
             lines += ["", "changes not written yet: w writes them"]
         return lines
@@ -403,10 +483,32 @@ def run(path: Path) -> int:  # pragma: no cover - the terminal part
                 v = ask(scr, f"{f['label']}, comma separated", ", ".join(f["value"]))
             elif kind == "choice":
                 v = ask(scr, f"{f['label']}: " + " or ".join(settings.LANGUAGES), f["value"])
+            elif kind == "notify":
+                v = ask(scr, f"{f['label']}: off (nothing; answers only) · ends (a story's start and end) · all", f["value"])
             else:
                 v = ask(scr, f["label"], str(f["value"]))
             if v is not None:
                 m.status = m.set(key, v)
+        elif k == ord("S"):
+            if m.config_dirty:
+                m.status = "write (w) or undo your changes first: the scan writes the config itself"
+                return
+            brand = ask(scr, "scan which app: feishu or lark", "feishu")
+            if brand not in ("feishu", "lark"):
+                m.status = "" if brand is None else "feishu or lark"
+                return
+            curses.def_prog_mode()  # the QR code and the questions in the plain terminal
+            curses.endwin()
+            from . import scan
+            try:
+                code = scan.run(m.path, brand, ask=lambda q: input(q + " "))
+            except KeyboardInterrupt:
+                code = 2
+            input("\nEnter: back to buddy tui ")
+            curses.reset_prog_mode()
+            scr.refresh()
+            m.reload_config()
+            m.status = f"{brand}: " + ("written, paired and linked" if code == 0 else "nothing written")
         elif k == ord("p"):
             who = m.refused()
             n = ask(scr, f"pair which one, 1-{len(who)}", "1") if who else None
@@ -415,11 +517,22 @@ def run(path: Path) -> int:  # pragma: no cover - the terminal part
             m.status = m.write_config()
 
     def peers_key(scr, m, k, h, w):
-        cur = m.names[m.psel] if m.names else ""
+        kind, cur = m.cur
+        if kind == "res" and k in (ord("e"), ord("d"), ord("c")):
+            res_key(scr, m, k, h, w, cur)
+            return
+        if kind != "peer":
+            cur = ""
         if k == curses.KEY_UP:
             m.psel = max(0, m.psel - 1)
         elif k == curses.KEY_DOWN:
-            m.psel = min(len(m.names) - 1, m.psel + 1) if m.names else 0
+            m.psel = min(len(m.items) - 1, m.psel + 1) if m.items else 0
+        elif k == ord("r"):
+            res_key(scr, m, k, h, w, "")
+        elif k == ord("l"):
+            m.status = m.cycle_allow()
+        elif k == ord("i"):
+            m.status = m.toggle_instructions()
         elif k in (ord("a"), ord("e")) and (k == ord("a") or cur):
             old = cur if k == ord("e") else ""
             v = m.pcfg["points"].get(old, {"url": "http://", "note": ""})
@@ -435,15 +548,34 @@ def run(path: Path) -> int:  # pragma: no cover - the terminal part
         elif k == ord("s"):
             c = m.pcfg
             name = ask(scr, "this side's name", c["name"])
-            bind = name and ask(scr, "serve listens on", c["bind"])
-            port = bind and ask(scr, "port", str(c["port"]))
-            if name and bind and port:
-                m.status = m.side(name, bind, port) or "this side changed: w writes it"
+            desc = name and ask(scr, f"what this machine is (seen by your peers, no secrets, ≤{P.MAX_DESC})",
+                                c.get("description", ""))
+            bind = None if not name or desc is None else ask(scr, "bind (empty: follows allow)", c.get("bind", ""))
+            port = None if bind is None else ask(scr, "port", str(c["port"]))
+            if name and desc is not None and bind is not None and port:
+                m.status = m.side(name, bind, port, desc) or "this side changed: w writes it"
         elif k == ord("c") and cur:
             busy(scr, m, h, w, f"checking {cur} …")
             m.status = m.check(cur)
         elif k == ord("w"):
             m.status = m.write_peers()
+
+    def res_key(scr, m, k, h, w, cur):
+        if k in (ord("r"), ord("e")):
+            v = m.pcfg.get("resources", {}).get(cur, {"kind": "git", "url": "", "note": ""})
+            name = ask(scr, "resource name (shared with the peers)", cur)
+            kind = name and ask(scr, "kind: " + " ".join(P.KINDS), v["kind"])
+            url = kind and ask(scr, "how THIS machine reaches it (never sent)", v["url"])
+            note = url and ask(scr, "a note", v["note"])
+            if name and kind and url and note is not None:
+                m.status = m.put_res(name, kind, url, note, cur) or f"{name}: w writes it"
+        elif k == ord("d"):
+            if (ask(scr, f"delete resource {cur}? y/N") or "n").lower() == "y":
+                m.delete_res(cur)
+                m.status = f"{cur} deleted: w writes it"
+        elif k == ord("c"):
+            busy(scr, m, h, w, f"reaching {cur} from here …")
+            m.status = m.check_res(cur)
 
     def main(scr):
         curses.curs_set(0)

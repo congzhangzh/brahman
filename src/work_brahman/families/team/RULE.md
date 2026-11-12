@@ -4,10 +4,12 @@ Work is done by long-lived member sessions, one per area, assigned by the **rele
 (a role, one per kit). Subagents are short tasks inside one session; members are sessions.
 
 **Names:** `<role>-<context>-g<N>`. The role is one of `po` product owner, `rel` release
-manager, `rev` review, `comp` a component's owner. The context is usually the project (an area
+manager, `rev` review, `comp` a component's owner, `dbg` tricky debugging (the owner, 2026-11-12: a
+bug that crosses components; it finds the root cause with evidence, fixes only on its own local
+branch and hands the fix to the area's owner, never commits to another member's branch). The context is usually the project (an area
 only when a project has several members: FreeRDP's `shadow`), short but clear across all of the owner's projects (`rdp`, not `kit`: there are many kits; `shadow`, not
 `server`); clear beats short. E.g. `po-rdp-g2`, `rel-rdp-g1`, `rel-avm-g1`, `rev-freerdp-g2`,
-`comp-shadow-g3`, `comp-xrdp-g2`. No heavy role: heavy work belongs to the member whose area it
+`comp-shadow-g3`, `comp-xrdp-g2`, `dbg-rdp-g1`. No heavy role: heavy work belongs to the member whose area it
 is (or its subagent). A live member keeps its old name to the end of its generation.
 
 **Window titles:** every session names its pys window, so the owner sees from the window list what

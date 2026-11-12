@@ -25,7 +25,9 @@ LANGUAGES = ("zh-CN", "en")
 FIELDS = [  # key, label, kind
     ("language", "language", "choice"), ("workspace", "workspace", "text"),
     ("telegram", "Telegram", "secret"), ("lark", "Lark", "app"), ("feishu", "Feishu", "app"),
-    ("allowed", "paired people", "list"), ("chats", "linked chats", "list"), ("port", "web port", "int")]
+    ("allowed", "paired people", "list"), ("chats", "linked chats", "list"), ("port", "web port", "int"),
+    ("notify_feishu", "Feishu on its own", "notify"), ("notify_lark", "Lark on its own", "notify")]
+NOTIFY = ("off", "ends", "all")  # notify.MODES: what Feishu/Lark get without being asked
 RESTART = "the buddy reads this when it starts: restart it to use it (systemctl --user restart buddy)"
 
 
@@ -37,7 +39,7 @@ def view(s: dict) -> list[dict]:
     """The settings as shown: no secret in it."""
     out = []
     for key, label, kind in FIELDS:
-        v = s[key]
+        v = s.get(key, "off") if kind == "notify" else s[key]
         if kind == "secret":
             shown = f"token {mask(v)}" if v else "not set"
         elif kind == "app":
@@ -49,7 +51,7 @@ def view(s: dict) -> list[dict]:
         else:
             shown = str(v)
         out.append({"key": key, "label": label, "kind": kind, "shown": shown,
-                    "value": v if kind in ("choice", "text", "int", "list") else (v[0] if kind == "app" else ""),
+                    "value": v if kind in ("choice", "text", "int", "list", "notify") else (v[0] if kind == "app" else ""),
                     "set": bool(v[0] if kind == "app" else v)})
     return out
 
@@ -65,6 +67,10 @@ def change(s: dict, key: str, value) -> str:
     if kind == "choice":
         if value not in LANGUAGES:
             return "the language is " + " or ".join(LANGUAGES)
+        s[key] = value
+    elif kind == "notify":
+        if value not in NOTIFY:
+            return f"{key}: " + ", ".join(NOTIFY)
         s[key] = value
     elif kind == "text":
         if not str(value).strip():
@@ -133,26 +139,58 @@ def doctor(path: Path, *, offline: bool = False, peers: bool = True, pinger=None
 
 
 def peers(env=None) -> dict:
+    """peers.toml as shown (no secret is in it), whether the secret is set, what each peer last
+    said of itself (seen), where serve binds, and where the instructions block is."""
     env = os.environ if env is None else env
-    """peers.toml as shown (no secret is in it), and whether the secret is set."""
+    from . import peer_block
     try:
         P.secret(env)
         has = True
     except ValueError:
         has = False
-    return {"cfg": P.load(env), "secret": has, "path": str(P.config_path(env))}
+    cfg = P.load(env)
+    return {"cfg": cfg, "secret": has, "path": str(P.config_path(env)), "fingerprint": P.fingerprint(),
+            "default_name": P.default_name(), "seen": P.seen(env), "listen": P.listen(cfg),
+            "block": peer_block.state(env), "allows": list(P.ALLOW), "kinds": list(P.KINDS), "max_desc": P.MAX_DESC}
+
+
+def clean_peers(cfg: dict, env=None) -> dict:
+    """What the TUI or the page sends, made the shape peer.save writes; a peer's direction is kept."""
+    env = os.environ if env is None else env
+    old = P.load(env)["points"]
+    pts = {}
+    for k, v in (cfg.get("points") or {}).items():
+        if not isinstance(v, dict):
+            continue
+        k = str(k)
+        d = v.get("direction", old.get(k, {}).get("direction", ""))  # the page and the TUI don't edit it
+        pts[k] = {"url": str(v.get("url", "")), "note": str(v.get("note", ""))} | ({"direction": "in"} if d == "in" else {})
+    res = {str(k): {"kind": str(v.get("kind") or "other"), "url": str(v.get("url", "")).strip(),
+                    "note": str(v.get("note", ""))}
+           for k, v in (cfg.get("resources") or {}).items() if isinstance(v, dict)}
+    return {"name": str(cfg.get("name", "")), "bind": str(cfg.get("bind") or ""), "port": cfg.get("port") or 8790,
+            "allow": str(cfg.get("allow") or "local"), "description": P.clean_desc(str(cfg.get("description") or "")),
+            "instructions": bool(cfg.get("instructions")), "points": pts, "resources": res}
 
 
 def save_peers(cfg: dict, env=None) -> tuple[bool, str]:
     env = os.environ if env is None else env
-    cfg = {"name": str(cfg.get("name", "")), "bind": str(cfg.get("bind") or "127.0.0.1"),
-           "port": cfg.get("port") or 8790,
-           "points": {str(k): {"url": str(v.get("url", "")), "note": str(v.get("note", ""))}
-                      for k, v in (cfg.get("points") or {}).items() if isinstance(v, dict)}}
     try:
-        return True, f"written: {P.save(cfg, env)}"
-    except (ValueError, TypeError) as e:
+        return True, f"written: {P.save(clean_peers(cfg, env), env)}"
+    except (ValueError, TypeError, OSError) as e:
         return False, str(e)
+
+
+def check_resource(name: str, kind: str = "", url: str = "", env=None) -> dict:
+    """Can this machine reach the resource (as typed, else as written)? {ok, how}."""
+    env = os.environ if env is None else env
+    r = P.load(env)["resources"].get(name, {})
+    r = {"kind": kind or r.get("kind", "other"), "url": url or r.get("url", "")}
+    if not r["url"]:
+        return {"ok": False, "how": f"no url for {name or 'that resource'}"}
+    ok, how = P.check_resource(r)
+    P.record("resource check", env, resource=name, ok=ok, how=how)
+    return {"ok": ok, "how": how}
 
 
 def check_peer(name: str, url: str = "", env=None, pinger=None) -> dict:
@@ -168,6 +206,8 @@ def check_peer(name: str, url: str = "", env=None, pinger=None) -> dict:
         return {"ok": False, "why": f"no address for {name or 'that peer'}"}
     r = (pinger or P.ping)(url, cfg["name"], key)
     P.record("check", env, peer=name, ok=r["ok"], why=r.get("why", ""), skew=r.get("skew"), ms=r.get("ms"))
+    if r["ok"] and name in cfg["points"]:
+        P.remember(name, r, env)
     return r
 
 

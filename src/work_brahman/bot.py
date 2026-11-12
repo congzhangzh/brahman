@@ -70,6 +70,7 @@ class Bot:
         self.guard = threading.Lock()
         self.chat_locks: dict[str, threading.Lock] = {}
         self.seen: OrderedDict[str, None] = OrderedDict()
+        self.hinted: dict[tuple[int, str], float] = {}  # (story, chat) -> when the thread hint was given
         self.tried: set[tuple[str, str]] = set()  # (topic, chat) a thread was tried for
         self.long_prompts: dict[tuple[str, str], tuple[str, str, str]] = {}  # (chat, prompt) -> (engine, folder, mode)
         self.long_engines = {"claude-code": engine, "codex": Codex()}  # serve sets [long]'s (engine.long_engines)
@@ -120,6 +121,32 @@ class Bot:
             return
         self.pool.submit(self._handle, ch, msg)
 
+    HINT_RECENT = 2 * 3600  # a long story that spoke in this chat within this long may be what was meant
+    HINT_EVERY = 3600  # one hint per story and chat per this long, not one per message
+
+    def _thread_hint(self, msg: Incoming) -> str | None:
+        """Typed in the main chat while a live long story talks in a thread of it (2026-11-12, on
+        Feishu: "I typed directly instead of replying; when I reply, the agent works"): one line
+        says where it went and how to reach the story. None when no story fits, or said lately."""
+        if not self.state:
+            return None
+        from datetime import datetime
+        now = time.time()
+        for s in sorted(longs.all_stories(self.state), key=lambda s: s["id"], reverse=True):
+            if s["status"] != "live" or msg.chat not in s.get("threads", {}):
+                continue
+            last = s["events"][-1]["at"] if s.get("events") else s.get("started", "")
+            try:
+                ago = now - datetime.fromisoformat(last).timestamp()
+            except ValueError:
+                continue
+            key = (s["id"], msg.chat)
+            if ago > self.HINT_RECENT or now - self.hinted.get(key, 0) < self.HINT_EVERY:
+                continue
+            self.hinted[key] = now
+            return t("long.thread_hint", story=longs.label(s))
+        return None
+
     def _handle(self, ch: Channel, msg: Incoming) -> None:
         chat, text = self.linked.key(msg.chat), msg.text.strip()
         try:
@@ -153,6 +180,8 @@ class Bot:
                 said = longs.say(self.state, self.channels, story["id"], text, where=ch.name,
                                  who=msg.sender, engine=longs.pick(self.long_engines, "claude-code", story.get("mode")))
                 return ch.reply(msg, said) if said else None
+            if not msg.thread and not msg.reply_to and not text.startswith("/") and (hint := self._thread_hint(msg)):
+                ch.reply(msg, hint)  # then the main conversation answers it as usual
             command = text in ("", "/help", "/start", "/resume", "/new") or word in self.commands
             loose = msg.thread and self.state and not topics.find(self.state, msg.chat, msg.thread)
             if loose and (command or getattr(ch, "threads_are_main", False)):

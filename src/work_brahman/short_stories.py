@@ -512,9 +512,11 @@ def _sync_parent(state: Path, channels: list[Channel], child: dict) -> None:
 
 def mark(state: Path, channels: list[Channel], number: int, name: str, *, status: str = "done",
          note: str = "", took: str | None = None, round: int | None = None, by: dict | None = None,
-         inputs: dict | None = None, outputs: dict | None = None) -> dict | None:
+         inputs: dict | None = None, outputs: dict | None = None, win: dict | None = None) -> dict | None:
     """A mark happened. took: the option a fork went down; round: a loop's round (from 1).
-    by: who marks it (executor()); inputs, outputs: what the step used and made (key: value)."""
+    by: who marks it (executor()); inputs, outputs: what the step used and made (key: value);
+    win: the pys window the marking session runs in (window, pid, started), for the Lanes'
+    attach (lanes.py)."""
     def change(s):
         m = _mark(s, name, status, note, took, round)
         _ids(s)
@@ -531,7 +533,8 @@ def mark(state: Path, channels: list[Channel], number: int, name: str, *, status
         _event(s, _noted(f"{ICON[status]} {m['name']}" + (f" → {took_}" if took_ else "")
                          + _round(m.get("loop"), m["loop"].get("last") if m.get("loop") else None)
                          + made + moved, note),
-               step=m.get("id"), status=status, by=(by or {}).get("by"), **{"in": inputs or {}, "out": outputs or {}})
+               step=m.get("id"), status=status, by=(by or {}).get("by"), **{"in": inputs or {}, "out": outputs or {}},
+               **({"win": win} if win else {}))
     return _change(state, channels, number, change)
 
 

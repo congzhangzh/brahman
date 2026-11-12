@@ -25,11 +25,14 @@ No secret is ever sent to the page; it sends a new one, or "-" to remove one.
     POST /api/setup/config   {"changes": {key: value}}: written with backups; used after a restart
     POST /api/setup/peers    {"cfg": peers.toml as GET gave it}: written with a backup
     POST /api/setup/check    {"name": ..., "url": ...}: a signed ping to one peer, answered signed
+    POST /api/setup/rescheck {"name": ..., "kind": ..., "url": ...}: can this machine reach that resource
     POST /api/setup/pair     {"sender": ..., "restart": bool}: pair someone who wrote to the bot
                              (refused.json, never a typed id), its chat linked; then a restart
     POST /api/setup/link     {"chat": ..., "restart": bool}: link a chat a paired person wrote from
     POST /api/setup/ignore_chat {"chat": ...}: forget such a chat
     POST /api/setup/ignore   {"sender": ...}: forget who wrote (back only if it writes again)
+    GET  /api/lanes?id=short-story:12   the story's swimlanes: who did what, where, in parallel (lanes.py)
+    POST /api/lanes/attach {id, machine, session}   that session's pys window, brought up (pys select)
     POST /api/setup/ping     {"chat": ...}: "🏓 ping <code>" into that linked chat (pings.py); `pong`
                              typed back there closes the loop; GET shows each chat's last ping
                              and who wrote without being paired (with the `buddy allow` line)
@@ -57,7 +60,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import long_stories as longs, pings, portable, settings, topics
+from . import lanes, long_stories as longs, pings, portable, settings, topics
 from .meter import meter
 from .channel import Incoming
 from .runs import SOPS, read as read_run
@@ -320,6 +323,11 @@ class Web:
                     return self._json(run) if run else self._send(404, b"no such run", "text/plain")
                 if path == "/api/setup":
                     return self._json(web.setup())
+                if path == "/api/lanes":  # who did what, where, in parallel (lanes.py): a story's swimlanes
+                    key = parse_qs(urlparse(self.path).query).get("id", [""])[0]
+                    kind, _, n = key.partition(":")
+                    got = lanes.of_story(web.state, int(n)) if kind == "short-story" and n.isdigit() else None
+                    return self._json(got) if got else self._send(404, b"lanes are for short stories", "text/plain")
                 if path == "/api/chat":
                     return self._json({"on": web.chat is not None,
                                        "messages": web.chat.history() if web.chat else [],
@@ -370,6 +378,10 @@ class Web:
                         return self._send(400, b"n, what (stop|reply|a<q>.<i>), and text for a reply",
                                           "text/plain")
                     action = f"short:{n}:{what}"
+                elif path == "/api/lanes/attach":  # a session lane's pys window, brought up (lanes.py)
+                    code, out = web.lane_attach(str(body.get("id", "")), str(body.get("machine", "")),
+                                                str(body.get("session", "")))
+                    return self._json(out) if code == 200 else self._send(code, out.encode(), "text/plain")
                 elif path == "/api/long":  # attach to its pys window, or resume it in a new one
                     code, out = web.long(str(body.get("n", "")), body.get("what"))
                     return self._json(out) if code == 200 else self._send(code, out.encode(), "text/plain")
@@ -448,6 +460,8 @@ class Web:
             return {"ok": ok, "said": said, "peers": settings.peers()}
         if what == "check":
             return settings.check_peer(str(body.get("name", "")), str(body.get("url", "")))
+        if what == "rescheck":  # a resource, reached from this machine (as typed, else as written)
+            return settings.check_resource(str(body.get("name", "")), str(body.get("kind", "")), str(body.get("url", "")))
         if what == "pair":  # the quick pair: only someone who wrote to the bot; then, if asked, a restart
             ok, notes = settings.pair(path, self.state, str(body.get("sender", "")))
             if ok and body.get("restart"):
@@ -485,6 +499,31 @@ class Web:
             m = meter(self.state) | {"all": meter(self.state, None)}
             self._meter = (time.time(), m)
         return m
+
+    def lane_attach(self, sid: str, machine: str, session: str) -> tuple[int, dict | str]:
+        """A session lane into the terminal: `pys select` its window, only on this machine and only
+        while the process that marked from it still runs there (a window number is reused)."""
+        kind, _, n = sid.partition(":")
+        v = lanes.of_story(self.state, int(n)) if kind == "short-story" and n.isdigit() else None
+        row = next((r for r in (v or {}).get("lanes", []) if r["machine"] == machine and r["session"] == session
+                    and r["window"]), None)
+        if row is None:
+            return 404, "no pys window is known for that session"
+        if not row["here"]:
+            return 409, f"that session runs on {machine}: attach from its own workbench, or `pys attach` there"
+        if not row["live"]:
+            return 409, f"window {row['window']} no longer holds that session"
+        pys = pys_path()
+        if not pys:
+            return 409, "pys is not installed (uv tool install py-screen)"
+        try:
+            r = subprocess.run([pys, "select", row["window"]], capture_output=True, text=True, timeout=10)
+        except subprocess.TimeoutExpired:
+            return 504, "pys did not answer within 10 s"
+        except OSError as e:
+            return 502, f"pys could not run: {e}"
+        return (200, {"ok": True, "window": row["window"]}) if r.returncode == 0 else \
+            (502, r.stderr.strip() or "pys select failed")
 
     def long(self, n: str, what) -> tuple[int, dict | str]:
         """A long story into a terminal, through pys (2026-11-10, the owner: "attach or resume by

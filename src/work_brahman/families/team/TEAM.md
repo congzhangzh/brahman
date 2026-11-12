@@ -21,6 +21,7 @@ other, have professional parts, a stable relationship, and dynamic by release ma
   | `rel` | release manager, one per kit | `rel-rdp-g1`, `rel-avm-g1`, `rel-samvada-g1` |
   | `rev` | review: upstream PRs, the MR loop | `rev-freerdp-g2` |
   | `comp` | a component's owner | `comp-shadow-g3` (FreeRDP's shadow server, encoders, sesman, the hosts), `comp-freerdp-web-g9`, `comp-xrdp-g2`, `comp-avm-g1` |
+  | `dbg` | tricky debugging across components: the root cause with evidence (A/B, bisect, logs), the fix on its own local branch, handed to the area's owner (never a commit to another member's branch) | `dbg-rdp-g1` |
 
   Short context words, so `<name> [<job>] <state>` (e.g. `comp-shadow-g3 #331 keys busy`) fits a pys title (~24 characters; when a clear name is longer, the work part shrinks) (the
   team block, "Window titles"). All the area's work goes to its member, whatever the topic.

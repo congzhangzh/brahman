@@ -116,7 +116,7 @@ def _short(args, state: Path, channels: list, chats: list[str]) -> int:
         return _news(state, args.number)
     t = (shorts.mark(state, channels, args.number, args.name, status=args.status, note=args.note,
                      took=args.took, round=args.round, by=shorts.executor(),
-                     inputs=_pairs(args.inputs), outputs=_pairs(args.outputs))
+                     inputs=_pairs(args.inputs), outputs=_pairs(args.outputs), win=_pys_window())
          if a == "mark" else
          shorts.plan(state, channels, args.number, args.marks) if a == "plan" else
          shorts.note(state, channels, args.number, args.text) if a == "note" else
@@ -180,6 +180,15 @@ def _news(state: Path, number: int, seen: set | None = None) -> int:
     return 0
 
 
+def _quiet(ch, cfg: dict, state: Path, prefix: str):
+    """A Feishu/Lark channel as [notify] says (notify.py): its message calls counted, and what it
+    would send on its own held back unless notify = ends or all."""
+    from . import notify
+    app = notify.app_of(prefix, cfg.get("domain", "feishu"))
+    ch.counter = lambda: notify.count(state, app)
+    return notify.wrap(ch, cfg, prefix, cfg.get("domain", "feishu"))
+
+
 def _window() -> dict | None:
     """Where the agent session this command runs under can be woken, or None. Claude Code: its
     pys or screen window, none for a headless turn or behind the gate; `started` tells that
@@ -193,6 +202,14 @@ def _window() -> dict | None:
         return None
     return {**term, "session": os.environ.get("PYS_SESSION", "") if term["mux"] == "pys" else "",
             "pid": pid, "started": p["started"], "tag": shorts.executor()["tag"]}
+
+
+def _pys_window() -> dict | None:
+    """The pys window this mark comes from, for the Lanes' attach: {window, pid, started}, or None."""
+    w = _window()
+    if not w or w.get("mux") != "pys" or not w.get("window"):
+        return None
+    return {"window": str(w["window"]), "pid": w["pid"], "started": w["started"]}
 
 
 def _terminal() -> dict:
@@ -397,9 +414,52 @@ def main() -> int:
     t.add_argument("--note", default="", help="what it is and where to look (a share, a PR)")
     t.add_argument("--name", default="", help="who sends it (default this machine's short name)")
     psub.add_parser("inbox", help="what came, newest first")
+    t = psub.add_parser("event", help="send one story event to a peer, signed (specs/multi-brahman.md); kept here too")
+    t.add_argument("url", help="a peer's name from peers.toml, or its address")
+    t.add_argument("--story", required=True, help="<machine>#<number>, e.g. a#12")
+    t.add_argument("--step", required=True)
+    t.add_argument("--what", required=True, choices=["plan", "start", "mark", "note", "done", "fail", "answer"])
+    t.add_argument("--text", default="")
+    t.add_argument("--by", default="", help="where it runs: <machine>/<session>")
+    t.add_argument("--bundle", default="", help="a bundle sent before, by its inbox name")
+    t.add_argument("--name", default="", help="who sends it (default peers.toml's name)")
+    t = psub.add_parser("story", help="one story on every machine: start, mark, show, list, sync "
+                                      "(specs/multi-brahman.md)")
+    ssub = t.add_subparsers(dest="story_action", required=True)
+    s = ssub.add_parser("start", help="a story here; its card in your chats; the plan to every peer")
+    s.add_argument("title")
+    s.add_argument("--step", action="append", required=True, help="<name> (this machine's) or <name>@<machine>; in order")
+    s = ssub.add_parser("mark", help="this machine's step moved; sent to every peer, the card moves")
+    s.add_argument("story", help="<machine>#<number>, e.g. linux-host#12")
+    s.add_argument("step")
+    s.add_argument("--status", default="done", choices=["doing", "done", "failed", "skipped"])
+    s.add_argument("--note", default="")
+    s.add_argument("--by", default="", help="<machine>/<session> (default this machine and session)")
+    s = ssub.add_parser("show", help="the whole story, as this machine has it")
+    s.add_argument("story")
+    ssub.add_parser("list", help="the stories this machine has")
+    s = ssub.add_parser("sync", help="catch up with every peer, both ways (after being away)")
+    s.add_argument("peers", nargs="*", help="only these peers")
+    t = psub.add_parser("events", help="the story events kept here, in the order they came")
+    t.add_argument("--story", default="")
     t = psub.add_parser("log", help="the peer log: received, refused, sent, checks")
     t.add_argument("--last", type=int, default=50)
     psub.add_parser("doctor", help="check the secret, where serve listens, and every peer (a signed ping both ways)")
+    t = psub.add_parser("setup", help="the peers as a block in the global instructions (CLAUDE.md, AGENTS.md): off by default")
+    g = t.add_mutually_exclusive_group(required=True)
+    g.add_argument("--instructions", action="store_true", help="turn it on: peers.toml (never the secret) as instructions")
+    g.add_argument("--off", action="store_true", help="turn it off: the block is taken out")
+    t.add_argument("--dry-run", action="store_true", help="print the block, change nothing")
+    t = sub.add_parser("scan", help="add a Feishu or Lark app by scanning a QR code: written, paired and "
+                                    "linked in one step, on a buddy already set up")
+    t.add_argument("brand", choices=["feishu", "lark"])
+    g = t.add_mutually_exclusive_group()
+    g.add_argument("--new", action="store_const", const="new", dest="use", help="a new app (the QR code)")
+    g.add_argument("--current", action="store_const", const="current", dest="use",
+                   help="the app this buddy uses now: check its scopes, a QR code to turn on what is missing")
+    g.add_argument("--app", metavar="APP_ID", help="another app you have (its Secret is asked, hidden)")
+    t.add_argument("--yes", action="store_true", help="replace an app that is set already without asking")
+    t.add_argument("--restart", action="store_true", help="restart the buddy afterwards without asking")
     t = sub.add_parser("allow", help="pair an id the bot told you (tg:..., ou_...): it may use the bot")
     t.add_argument("id")
     t.add_argument("--chat", default="", help="its chat, for Lark (oc_...); a Telegram DM's is its id")
@@ -561,6 +621,10 @@ def main() -> int:
     if args.cmd == "peer":  # its own port and inbox: no channel, no buddy state
         from . import peer
         return peer.main(args)
+    if args.cmd == "scan":  # setting up: a Feishu/Lark app by QR code, paired and linked (scan.py)
+        from . import scan
+        return scan.run(install.config_path(args.config), args.brand, yes=args.yes, restart=True if args.restart else None,
+                        use="app" if args.app else args.use, app_id=args.app or "")
     if args.cmd == "tui":  # setting up, in one screen: no channel, no buddy state
         from . import buddy_tui
         return buddy_tui.run(install.config_path(args.config))
@@ -686,16 +750,16 @@ def main() -> int:
     channels = []
     if os.environ.get("FEISHU_APP_ID"):
         from .feishu import Feishu
-        channels.append(Feishu(os.environ["FEISHU_APP_ID"], os.environ["FEISHU_APP_SECRET"],
-                               cfg.get("domain", "feishu")))
+        channels.append(_quiet(Feishu(os.environ["FEISHU_APP_ID"], os.environ["FEISHU_APP_SECRET"],
+                                      cfg.get("domain", "feishu")), cfg, state, ""))
     if os.environ.get("LARK_APP_ID"):  # a Lark app beside a Feishu one: its ids are lark:...
         if os.environ.get("FEISHU_APP_ID") and cfg.get("domain", "feishu") == "lark":
             print("LARK_APP_ID is a second Lark app: FEISHU_APP_ID is already on domain = \"lark\" "
                   "(set domain = \"feishu\" if that one is Feishu)", file=sys.stderr)
             return 2
         from .feishu import Feishu
-        channels.append(Feishu(os.environ["LARK_APP_ID"], os.environ.get("LARK_APP_SECRET", ""),
-                               "lark", prefix="lark:"))
+        channels.append(_quiet(Feishu(os.environ["LARK_APP_ID"], os.environ.get("LARK_APP_SECRET", ""),
+                                      "lark", prefix="lark:"), cfg, state, "lark:"))
     if os.environ.get("TELEGRAM_BOT_TOKEN"):
         channels.append(Telegram(os.environ["TELEGRAM_BOT_TOKEN"], state))
     if not channels and args.cmd == "short" and os.environ.get("BUDDY_GATE"):

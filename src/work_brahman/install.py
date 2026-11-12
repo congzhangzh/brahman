@@ -381,6 +381,11 @@ def _app_rows(row, label: str, app_id: str, secret: str, domain: str, cfg: dict)
         return
     scopes = got["scopes"]
     row(True, f"{label} app {app_id}: {sum(scopes.values())} scopes granted")
+    missing = [sc for sc, _, need in SCOPES if need is True and not scopes.get(sc)]
+    if missing:  # one QR code turns them all on (feishu_scan.enable_url, as the official lark-cli does)
+        from .feishu_scan import enable_url
+        row(None, f"{label}: turn on what is missing in one go: buddy scan {domain} --current shows a QR code",
+            enable_url(domain, app_id, missing))
     for scope, part, needed in SCOPES:
         if needed == "bitable" and "bitable" not in cfg:
             continue
@@ -522,7 +527,9 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
                 row(None, f"{app}: card buttons not tested yet (卡片回传交互, card.action.trigger: asks, ■ Stop)",
                     "Setup tab → Ping → Send ping to this app's chat, then press 🏓 Pong on the card; if it shows "
                     "an error, switch it on: developer console → 事件与回调 (Events & Callbacks) → 回调配置 "
-                    "(Callbacks) → long connection → add 卡片回传交互 (card.action.trigger); publish a version")
+                    "(Callbacks) → long connection → add 卡片回传交互 (card.action.trigger); publish a version"
+                    f" (or buddy scan {'lark' if app.startswith('Lark') else 'feishu'} --current: a QR code that opens "
+                    "the console on that app with it to turn on)")
         if any(mine(a, person) for a in allowed) and not any(mine(c, chat) for c in linked):
             mine_id = next(a for a in allowed if mine(a, person))
             seen = [u for u in pings.unlinked(state, linked) if mine(u["chat"], chat)]
@@ -537,6 +544,20 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
                       "topics and long stories answer in the main chat instead",
                 "for threads, make the app by hand (README, section 1: a self-built app with the Bot "
                 "capability); a QR scan makes a PersonalAgent app, which may not take threads")
+    from . import notify  # what Feishu and Lark get on their own, and the calls spent this month
+    used = notify.calls(state)
+    for app, on in (("feishu", bool(os.environ.get("FEISHU_APP_ID")) and domain == "feishu"),
+                    ("lark", bool(os.environ.get("LARK_APP_ID")) or (bool(os.environ.get("FEISHU_APP_ID")) and domain == "lark"))):
+        if not on:
+            continue
+        m = notify.mode(cfg, app)
+        said = {"off": "nothing on its own: it answers you; story cards and posts go to the other chats",
+                "ends": "a story's card at its start and end only; posts and questions",
+                "all": "every card change, post and mirror"}[m]
+        row(True if m != "all" else None,
+            f"{app.capitalize()}: notify = {m}, {said} · {used.get(app, 0)} message calls this month (this buddy)",
+            "" if m != "all" else "each card change is a call against the monthly quota: notify = ends saves most "
+            "(buddy tui → Config, or the Setup tab)")
     for r in wrote[:5]:  # wrote, refused, not paired since
         row(None, f"wrote but not paired: {r['sender']} on {r['channel']} ({r['times']}×, last {r['last']})",
             f"if that is you: {r['allow']}, then restart the buddy")

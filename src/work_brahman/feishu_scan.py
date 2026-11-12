@@ -32,6 +32,38 @@ def addons(scopes: list[str]) -> dict:
             "callbacks": {"items": list(CALLBACKS)}}
 
 
+OPEN = {"feishu": "https://open.feishu.cn", "lark": "https://open.larksuite.com"}
+
+
+def encode_addons(addons: dict) -> str:
+    """JSON -> gzip -> base64url without padding: the launcher page's form (as lark_oapi's
+    registration and the official lark-cli encode it)."""
+    import base64
+    import gzip
+    import json
+    raw = json.dumps(addons, ensure_ascii=False, separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(gzip.compress(raw, mtime=0)).decode().rstrip("=")
+
+
+def enable_url(domain: str, app_id: str, scopes: list[str] = (), events: list[str] = (),
+               callbacks: list[str] = ()) -> str:
+    """The scan-to-enable link for an app that exists already (the owner, 2026-11-12: "choose a
+    ready-to-use bot and check its permissions, as the Feishu CLI supports"): the developer
+    console opens on that app with only these scopes, events and callbacks to turn on. The
+    contract is the official lark-cli's (cmd/event/console_url.go): {open}/page/launcher?
+    clientID=<app>&addons=<encoded>, clientID in camelCase, tenant and user always arrays."""
+    import urllib.parse
+    addons = {}
+    if scopes:
+        addons["scopes"] = {"tenant": list(scopes), "user": []}
+    if events:
+        addons["events"] = {"items": {"tenant": list(events), "user": []}}
+    if callbacks:
+        addons["callbacks"] = {"items": list(callbacks)}
+    q = {"clientID": app_id} | ({"addons": encode_addons(addons)} if addons else {})
+    return f"{OPEN[domain]}/page/launcher?{urllib.parse.urlencode(q)}"
+
+
 def qr_text(url: str) -> str:
     """The link as a QR code for a terminal, or "" without segno."""
     try:

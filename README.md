@@ -126,6 +126,15 @@ comes back with its App ID and Secret, the scopes below asked for, and you paire
 is found by itself. `uv pip install segno` draws the QR code in the terminal; without it you get
 the link. Check it afterwards with `buddy doctor`: whether every scope is granted at once and the
 events come on the long connection is the platform's to say. The steps below are the manual way.
+On a buddy that is set up already, **`buddy scan feishu`** (or `lark`) does the same in one step:
+the QR code, the app written into `.env` (with a backup), you paired and your chat linked (the new
+app writes to you first), doctor's rows for it, then the restart (asked, or `--restart`).
+Replacing an app that is there is asked first (`--yes` skips that). In `buddy tui`: Config → `S`.
+It asks first, as the official `lark-cli config init` does: a new app, the one the buddy uses now
+(`--current`), or another you have (`--app ID`, its Secret asked hidden). For an app that exists
+it checks the scopes and shows a QR code of the scan-to-enable link: the developer console opens
+on that app with only what the buddy needs (missing scopes, the message event, the card
+callback) to turn on; Enter checks again. `buddy doctor` points to it when a scope is missing.
 
 1. Feishu Open Platform → developer console → create a **self-built app** (企业自建应用).
 2. Add the **Bot** capability.
@@ -153,6 +162,21 @@ cp .env.example .env && chmod 600 .env     # App ID / Secret, bot token: here, n
 cp buddy.example.toml buddy.toml           # workspace, allowed tools, jobs
 scripts/link-skills.sh                     # make skills/ visible to Claude Code
 ```
+
+**Feishu and Lark count every message call against a monthly quota** (code 99991403 once it
+is spent): a short story's card is one call to show and one per change, in each chat. So
+`[notify]` in buddy.toml says what each app gets on its own, and the default is nothing:
+
+```toml
+[notify]
+feishu = "off"   # off (default): it answers you, nothing else · ends: a story's start and end · all
+lark = "ends"
+```
+
+Telegram and the web have no quota and get everything. A chat you wrote or pressed in within ten
+minutes still gets the posts and questions that follow from it. `buddy doctor` shows each
+app's setting and the message calls this buddy made this month; `buddy tui` → Config and the
+Setup tab change it.
 
 ### 3. Run and pair
 
@@ -341,6 +365,15 @@ shows how far apart the clocks are. For the workbench to check peers, put `BRAHM
 in the buddy's `.env`. `buddy peer send <peer name> …` takes a name from the file. `buddy peer
 log` (and the Log views) shows what came, what was refused and why, what was sent, and every
 check.
+
+**One story on every machine** (`specs/multi-brahman.md`): `buddy peer story start "the job" --step a1
+--step b1@mac --step a2` starts a story here (its card in your chats) and sends the plan to every peer;
+every machine keeps the whole story. Each step has one owner machine, and only it marks the step:
+`buddy peer story mark <machine>#<n> b1 --status done --note "…"` on the Mac moves the card here. `buddy
+peer story show <id>` and `list` show it as this machine has it; `buddy peer story sync` catches up both
+ways after a machine was away. A peer that can reach you but you can't reach is send-only
+(`direction = "in"` in peers.toml): it pushes and pulls, and doctor shows when it was last heard from.
+Events only mark, note and plan steps; nothing a peer sends is run.
 
 ## Language and tests
 
