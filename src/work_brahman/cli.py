@@ -414,8 +414,10 @@ def main() -> int:
     t.add_argument("--json", action="store_true", help="the rows as JSON, for scripts and cron")
     t.add_argument("--peers", action="store_true", help="also the peer checks (buddy peer doctor)")
     t.add_argument("--name", default="buddy", help="the service's name")
-    t = sub.add_parser("service", help="keep `buddy serve` running: a systemd user unit (Linux)")
-    t.add_argument("action", choices=["install"])
+    t = sub.add_parser("service", help="keep `buddy serve` running (systemd on Linux, launchd on macOS, the "
+                                       "Startup folder on Windows): install, status, restart, uninstall")
+    t.add_argument("action", choices=["install", "status", "restart", "uninstall"],
+                   help="status exits 0 when it runs, 3 when not; uninstall keeps the file as a backup")
     t.add_argument("--name", default="buddy", help="the unit's name (default buddy.service)")
     t.add_argument("--enable", action="store_true", help="also enable and start it")
     t.add_argument("--dry-run", action="store_true", help="print the unit, write nothing")

@@ -607,7 +607,79 @@ def _macos_service(args, config: Path) -> int:
     return 0
 
 
+def _holder() -> tuple[int | None, bool]:
+    """Who holds `buddy serve`'s lock (portable.hold): its pid, and whether it runs."""
+    from . import portable
+    state = Path(os.environ.get("XDG_STATE_HOME", "~/.local/state")).expanduser() / "work_brahman"
+    pid = portable.holder(state / "serve.lock")
+    return pid, bool(pid and portable.alive(pid))
+
+
+def service_ctl(action: str, name: str = "buddy", run=subprocess.run) -> int:
+    """`buddy service status | restart | uninstall` (the owner, 2026-11-12: "maybe you could add
+    uninstall, status and restart?"), on each system the way `install` set it up: a systemd
+    user unit, a launchd agent, a Startup-folder .cmd. Status exits 0 when it runs, 3 when not
+    (as systemctl). Uninstall stops it and keeps the file as a backup beside where it was."""
+    f = service_file(name)
+    pid, up = _holder()
+    holder = f"buddy serve: pid {pid}, {'running' if up else 'not running'}" if pid else "buddy serve: no lock held"
+    if not f.exists() and action != "status":
+        print(f"no service {f}: buddy service install first", file=sys.stderr)
+        return 2
+    out = lambda *a: run(list(a), capture_output=True, text=True, check=False)  # noqa: E731
+    if WINDOWS:
+        def stop():
+            if up:
+                out("taskkill", "/PID", str(pid), "/T", "/F")
+        if action == "status":
+            print(f"{'✅' if up else '❌'} {holder}\nservice: {f if f.exists() else 'not installed'}")
+            return 0 if up else 3
+        if action == "restart":
+            stop()
+            subprocess.Popen(["cmd", "/c", str(f)], creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+            print(f"restarted: {f}, in a minimised window")
+            return 0
+        stop()
+    elif MACOS:
+        target = f"gui/{os.getuid()}/{label(name)}"
+        if action == "status":
+            r = out("launchctl", "print", target)
+            state = next((x.split("=", 1)[1].strip() for x in r.stdout.splitlines() if x.strip().startswith("state =")), "")
+            running = r.returncode == 0 and state == "running"
+            print(f"{'✅' if running else '❌'} {target}: {state or 'not loaded'}\n{holder}\n"
+                  f"log: {Path('~/Library/Logs').expanduser() / (name + '.log')}")
+            return 0 if running else 3
+        if action == "restart":
+            r = out("launchctl", "kickstart", "-k", target)
+            print(f"restarted: {target}" if r.returncode == 0 else f"not restarted: {r.stderr.strip() or r.returncode}")
+            return 0 if r.returncode == 0 else 1
+        out("launchctl", "bootout", target)
+    else:
+        unit = f.name
+        if action == "status":
+            r = out("systemctl", "--user", "show", unit, "-p", "ActiveState", "-p", "MainPID", "-p",
+                    "ActiveEnterTimestamp", "-p", "NRestarts")
+            p = dict(x.split("=", 1) for x in r.stdout.splitlines() if "=" in x)
+            running = p.get("ActiveState") == "active"
+            print(f"{'✅' if running else '❌'} {unit}: {p.get('ActiveState', 'unknown')}"
+                  + (f" since {p['ActiveEnterTimestamp']}, pid {p.get('MainPID')}, {p.get('NRestarts', '0')} restarts"
+                     if running else "") + f"\n{holder}\nlog: journalctl --user -u {unit} -e")
+            return 0 if running else 3
+        if action == "restart":
+            r = out("systemctl", "--user", "restart", unit)
+            print(f"restarted: {unit}" if r.returncode == 0 else f"not restarted: {r.stderr.strip() or r.returncode}")
+            return 0 if r.returncode == 0 else 1
+        out("systemctl", "--user", "disable", "--now", unit)
+    kept = _keep(f)  # uninstall: stopped above; the file moves aside as a backup
+    if not WINDOWS and not MACOS:
+        out("systemctl", "--user", "daemon-reload")
+    print(f"uninstalled: {f} (kept {kept}); the buddy no longer starts by itself. Its config and state stay.")
+    return 0
+
+
 def service(args) -> int:
+    if args.action != "install":
+        return service_ctl(args.action, args.name)
     config = config_path(args.config).resolve()
     if not config.exists():
         print(f"not set up: {config} is missing; run `buddy init` first", file=sys.stderr)

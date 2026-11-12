@@ -59,6 +59,9 @@ buddy doctor                # ✅ what works, ⚠️ what is off and how to turn
 buddy                       # every day: what needs fixing, the page, the stories running
 buddy tui                   # doctor, config, peers and the peer log in one screen
 buddy config                # later: change the language, chats, tokens, pairing, port
+buddy service status        # running? since when, its pid, where the log is (exit 3: not running)
+buddy service restart       # after an upgrade or a config change
+buddy service uninstall     # stop it starting by itself (the unit/plist is kept as a backup)
 ```
 
 **One screen for the setup.** `buddy tui` has four views, Tab between them: **Doctor** (the
