@@ -3,6 +3,11 @@
 The buddy shows this in the workbench's **What's new** tab, and posts the top section to your chats
 once, at the first start of a new version (following `[notify]`).
 
+## 20261113.2
+
+- **The QR code is drawn** in the terminal by `buddy init` and `buddy scan`: `segno` is a dependency
+  now (pure Python, nothing else pulled in), so no extra install is needed.
+
 ## 20261113.1
 
 - **What's new**: this tab, and a post of the newest section to your chats at the first start of a

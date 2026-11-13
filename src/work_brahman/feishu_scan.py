@@ -12,8 +12,8 @@ the message event, the card callback) at creation; whether the platform grants t
 only requests them, and whether events come set to the long connection, a real run tells:
 `buddy doctor` checks the scopes afterwards.
 
-The QR code is drawn in the terminal when `segno` is installed (pure Python, optional:
-`uv pip install segno`); without it the link is printed, to open or to turn into a QR code.
+The QR code is drawn in the terminal by `segno` (a dependency since 2026-11-13, the owner: "no QR
+code drawn, segno needs to be a dependency"); the link is printed under it too, to open instead.
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ def enable_url(domain: str, app_id: str, scopes: list[str] = (), events: list[st
 
 
 def qr_text(url: str) -> str:
-    """The link as a QR code for a terminal, or "" without segno."""
+    """The link as a QR code for a terminal, or "" when segno can't draw it (an env without it)."""
     try:
         import segno
     except ImportError:
@@ -94,7 +94,7 @@ def scan(brand: str, scopes: list[str], out: Callable[[str], None] = print,
         out((drawn + "\n" if drawn else "") + f"Scan it with {brand.capitalize()} (or open the link and "
             f"confirm), within {minutes} minutes:\n  {info['url']}")
         if not drawn:
-            out("  (no QR code drawn: `uv pip install segno` draws one here; or open the link on this machine)")
+            out("  (no QR code drawn: this environment lacks segno; open the link on this machine)")
 
     def on_status(info: dict) -> None:
         if info.get("status") == "domain_switched":

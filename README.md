@@ -123,8 +123,8 @@ Lark tenant where you can create an app, or a Telegram account, or both.
 **Or let a QR code make it** (optional): `buddy init --feishu-scan` (or `--lark-scan`, or type
 `scan` at the App ID question) shows a QR code; scan it in Feishu or Lark and confirm, and the app
 comes back with its App ID and Secret, the scopes below asked for, and you paired. A Lark tenant
-is found by itself. `uv pip install segno` draws the QR code in the terminal; without it you get
-the link. Check it afterwards with `buddy doctor`: whether every scope is granted at once and the
+is found by itself. The QR code is drawn in the terminal, with the link under it to open
+instead. Check it afterwards with `buddy doctor`: whether every scope is granted at once and the
 events come on the long connection is the platform's to say. The steps below are the manual way.
 On a buddy that is set up already, **`buddy scan feishu`** (or `lark`) does the same in one step:
 the QR code, the app written into `.env` (with a backup), you paired and your chat linked (the new
