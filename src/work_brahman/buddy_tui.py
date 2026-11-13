@@ -40,7 +40,7 @@ from . import peer as P, peer_block
 VIEWS = ("Doctor", "Ping", "Config", "Peers", "Log")
 KEYS = {"Doctor": "r run every check (calls the chat apps) · P pair who wrote · Tab next view · q quit",
         "Ping": "↑↓ choose · Enter send a ping (answer pong in that chat) · r refresh · Tab · q quit",
-        "Config": "↑↓ choose · Enter change · p pair who wrote · S scan a Feishu/Lark app · w write · Tab · q quit",
+        "Config": "↑↓ choose · Enter change · p pair who wrote · S scan a Feishu/Lark app · I Telegram/Lark (zh-CN) · w write · Tab · q quit",
         "Peers": "↑↓ · a peer · r resource · e edit · d delete · s this side · l allow · i instructions · c check · w write · q",
         "Log": "↑↓ PgUp PgDn scroll · Tab · q quit"}
 MARK = {True: "✅", False: "❌", None: "⚠ "}  # two columns each; ⚠ without U+FE0F, whose width terminals disagree on
@@ -145,7 +145,7 @@ class Model:
     # Config
     @property
     def fields(self) -> list[dict]:
-        return settings.view(self.s) if self.s else []
+        return settings.view(self.s, getattr(self, "show_all", False)) if self.s else []
 
     def set(self, key: str, value) -> str:
         why = settings.change(self.s, key, value)
@@ -509,6 +509,9 @@ def run(path: Path) -> int:  # pragma: no cover - the terminal part
             scr.refresh()
             m.reload_config()
             m.status = f"{brand}: " + ("written, paired and linked" if code == 0 else "nothing written")
+        elif k == ord("I"):  # zh-CN: Telegram and Lark are hidden until asked (settings.hidden)
+            m.show_all = not getattr(m, "show_all", False)
+            m.status = "Telegram and Lark shown" if m.show_all else "Telegram and Lark hidden (zh-CN, not set)"
         elif k == ord("p"):
             who = m.refused()
             n = ask(scr, f"pair which one, 1-{len(who)}", "1") if who else None

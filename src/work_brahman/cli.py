@@ -464,6 +464,8 @@ def main() -> int:
     t.add_argument("id")
     t.add_argument("--chat", default="", help="its chat, for Lark (oc_...); a Telegram DM's is its id")
     t.add_argument("--name", default="buddy", help="the service's name, for the restart hint")
+    t = sub.add_parser("push", help="web push: test sends one notification to every subscribed browser")
+    t.add_argument("action", choices=["test"])
     sub.add_parser("tui", help="doctor, config, peers and the peer log in one terminal screen "
                               "(the workbench's Setup tab is the same)")
     t = sub.add_parser("config", help="a menu to change the setup: language, chats, tokens, pairing, port")
@@ -625,6 +627,16 @@ def main() -> int:
         from . import scan
         return scan.run(install.config_path(args.config), args.brand, yes=args.yes, restart=True if args.restart else None,
                         use="app" if args.app else args.use, app_id=args.app or "")
+    if args.cmd == "push":  # one test notification to every subscribed browser (sent on purpose)
+        from . import webpush
+        st = Path(os.environ.get("XDG_STATE_HOME", "~/.local/state")).expanduser() / "work_brahman"
+        if not webpush.subs(st):
+            print("no browser subscribed: [notify] webpush = \"ends\", restart the buddy, then 🔔 in the workbench",
+                  file=sys.stderr)
+            return 2
+        r = webpush.send(st, "brahman · push test", "If you see this, web push works.", "http://127.0.0.1:8787/")
+        print(f"sent to {r['sent']} browser(s); failed {r['failed']}; dropped {r['dropped']} (gone)")
+        return 0 if r["failed"] == 0 and r["sent"] else 1
     if args.cmd == "tui":  # setting up, in one screen: no channel, no buddy state
         from . import buddy_tui
         return buddy_tui.run(install.config_path(args.config))
@@ -651,7 +663,12 @@ def main() -> int:
                   file=sys.stderr)
             return 3
         _SERVE_LOCK.append(held)  # held until this process ends
-    linked = Linked(cfg.get("me", {}).get("chats", []))
+    # web push (webpush.py): a pseudo-chat beside the owner's chats, always: [notify] webpush is
+    # followed live (notify.watch), off by default, so turning it on needs no restart
+    from . import notify, webpush
+    notify.watch(Path(args.config))
+    push_on = True
+    linked = Linked(list(cfg.get("me", {}).get("chats", [])) + [webpush.CHAT])
     home = linked.chats[0] if linked.chats else ""  # where a job or duty without chat_id posts
     duties = {name: DUTIES[name]({"chat_id": home} | d, state)
               for name, d in cfg.get("duties", {}).items() if name in DUTIES}
@@ -760,8 +777,12 @@ def main() -> int:
         from .feishu import Feishu
         channels.append(_quiet(Feishu(os.environ["LARK_APP_ID"], os.environ.get("LARK_APP_SECRET", ""),
                                       "lark", prefix="lark:"), cfg, state, "lark:"))
-    if os.environ.get("TELEGRAM_BOT_TOKEN"):
-        channels.append(Telegram(os.environ["TELEGRAM_BOT_TOKEN"], state))
+    if os.environ.get("TELEGRAM_BOT_TOKEN"):  # [notify] telegram, off by default like every app (notify.py)
+        channels.append(notify.Quiet(Telegram(os.environ["TELEGRAM_BOT_TOKEN"], state), notify.mode(cfg, "telegram"), "telegram"))
+    if push_on and channels:  # web push to the owner's subscribed browsers ([notify] webpush live, off by
+        # default); only beside a real chat channel: a process with no chat token (a session behind the
+        # gate) must stay with none, so its cards are left undrawn for buddy serve, which pushes too
+        channels.append(webpush.channel(cfg, state))
     if not channels and args.cmd == "short" and os.environ.get("BUDDY_GATE"):
         # Behind the gate (a session in its sandbox): no chat tokens here, on purpose. The story
         # file is written all the same, and `buddy serve` draws its card (shorts.redraw).
@@ -799,7 +820,7 @@ def main() -> int:
         chat = None
         if port and linked.chats:  # the web joins my chats: same session, mirrored both ways
             chat = WebChat(state)
-            channels.append(chat)
+            channels.append(notify.Quiet(chat, notify.mode(cfg, "web"), "web"))  # [notify] web; the page keeps chat itself
             linked.chats.append(CHAT)
             allowed.add(CHAT)  # the person at this machine; the server only listens on 127.0.0.1
         # Every child under one umbrella (procs.py, specs/umbrella.md): a restart kills none
@@ -834,7 +855,7 @@ def main() -> int:
 
     if cfg.get("web", {}).get("port") and linked.chats:
         # The web chat lives in `buddy serve`; this process posts to it through the outbox.
-        channels.append(WebRelay(state))
+        channels.append(notify.Quiet(WebRelay(state), notify.mode(cfg, "web"), "web"))  # [notify] web
         linked.chats.append(CHAT)
 
     if args.cmd == "bitable":

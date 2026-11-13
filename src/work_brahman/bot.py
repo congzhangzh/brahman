@@ -168,7 +168,10 @@ class Bot:
                 return self._safe(lambda c, m: self.long_new(c, m, *pending, text), ch, msg)
             story = longs.find(self.state, msg.chat, msg.thread) if msg.thread and self.state else None
             word, _, arg = text.partition(" ")
-            if story and word in ("/status", "/handover", "/takeback"):  # who holds it (long_live.py)
+            # /shiftto = /shift (into the owner's pys), /shiftfrom = /takeback (back to the buddy): the owner's
+            # names, 2026-11-12; the old ones still work
+            word = {"/shiftto": "/shift", "/shiftfrom": "/takeback"}.get(word, word) if story else word
+            if story and word in ("/status", "/handover", "/takeback", "/takeover", "/shift"):  # long_live.py
                 return self._safe(lambda c, m: self.long_holder(c, m, story, word), ch, msg)
             if story and (text in ("/help", "/start") or word in self.commands):
                 # the buddy's own command in a long story's thread: answered there by its code,
@@ -355,9 +358,16 @@ class Bot:
                 self.long_prompts[(msg.chat, handle)] = (engine, folder, mode)
 
     def long_holder(self, ch: Channel, msg: Incoming, story: dict, word: str) -> None:
-        """/status, /handover, /takeback in a long story's thread: who holds the session."""
+        """/status, /handover, /takeback, /takeover, /shift in a long story's thread: who holds the
+        session, and moving it to a terminal (a new pys window, or the one that holds it)."""
         n = story["id"]
-        if word == "/status":
+        if word in ("/takeover", "/shift"):
+            now = longs.load(self.state, n) or story
+            code, said, _ = long_live.to_terminal(now, "resume" if word == "/takeover" else "attach")
+            if word == "/shift" and code == 409 and not longs.held(now):
+                # the owner, 2026-11-12 ("a"): /shift with no pys window holding it takes it over into one
+                _, said, _ = long_live.to_terminal(now, "resume")
+        elif word == "/status":
             said = long_live.status(self.state, n)
         elif word == "/handover":
             said = long_live.handover(self.state, self.channels, n)
@@ -463,7 +473,7 @@ class Bot:
             text = t("bot.adopted", prompt=tag.get("text", "")) + "\n\n" + (r.text or "")
             for c in self.linked.of(tag["chat"]):
                 owner = next((x for x in self.channels if x.owns(c)), None)
-                if owner:
+                if owner and getattr(owner, "mirrors", True):  # a chat's answer: not for web push
                     owner.post(c, text, title="buddy")
         elif kind == "job" and self.scheduler:
             self.scheduler.adopted(meta, p)
@@ -492,7 +502,8 @@ class Bot:
             return
         others = self.linked.others(msg.chat)
         if others:
-            post_all(self.channels, others, answer, title=t("bot.mirror", where=app(ch.name, False)),
+            post_all([c for c in self.channels if getattr(c, "mirrors", True)], others, answer,
+                     title=t("bot.mirror", where=app(ch.name, False)),
                      subtitle=asked, **kw)
 
     def _topic(self, ch: Channel, msg: Incoming, text: str) -> dict | None:

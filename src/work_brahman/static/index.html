@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- pinned to a Home Screen (iOS web push needs it there): the manifest, the icon, standalone -->
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="brahman">
+<meta name="theme-color" content="#1f1b16">
 <title>brahman workbench</title>
 <!-- The live workbench, served by `buddy serve` on 127.0.0.1 (src/work_brahman/web.py).
      It reads /api/data every few seconds; a button posts to /api/answer, /api/stop,
@@ -156,6 +163,7 @@ pre.log.bad { border-color:var(--bad); }
 .sk-fit { font-size:12px; fill:var(--gold); }
 /* tabs and the chat */
 .tabs, .langs { display:flex; gap:4px; }
+.bell { border:1px solid var(--line); background:var(--card); border-radius:999px; padding:1px 8px; cursor:pointer; font-size:13px; }
 .tabs button, .langs button { border:1px solid var(--line); background:var(--card); border-radius:999px; padding:3px 14px; font-size:13px; }
 .tabs button.on, .langs button.on { background:var(--sel); border-color:var(--gold); box-shadow:0 0 0 3px var(--glow); }
 .langs button { padding:3px 10px; font-size:12px; }
@@ -184,7 +192,7 @@ pre.log.bad { border-color:var(--bad); }
 </style>
 </head>
 <body>
-<header><h1>brahman</h1><div class="tabs"><button data-tab="bench" class="on" data-t="tab.bench">Workbench</button><button data-tab="chat" data-t="tab.chat">Chat</button><button data-tab="setup" data-t="tab.setup">Setup</button></div><span class="live" id="live" data-t="connecting"><i></i>connecting…</span><div class="corner"><video id="film" muted autoplay loop playsinline data-t-title="film_title" title="The film: click to watch it large"></video><div class="motto"><span class="mode"><button data-motto="what" data-t="motto.what">What</button><button data-motto="why" data-t="motto.why">Why</button></span><span class="humble" id="m-top"></span><span class="main" id="m-main"></span><span class="rot" id="rot"></span><span class="meter" id="meter"><span class="bar"><i></i></span><span></span></span></div></div><div class="langs" data-t-title="lang_title" title="the page's language"><button data-lang="en">EN</button><button data-lang="zh-CN">中文</button></div><button class="stop" data-stop="1" title="stop everything that is running or waiting, and pause the schedule" data-t="stop" data-t-title="stop_title">■ STOP</button></header>
+<header><h1>brahman</h1><div class="tabs"><button data-tab="bench" class="on" data-t="tab.bench">Workbench</button><button data-tab="chat" data-t="tab.chat">Chat</button><button data-tab="setup" data-t="tab.setup">Setup</button></div><span class="live" id="live" data-t="connecting"><i></i>connecting…</span><div class="corner"><video id="film" muted autoplay loop playsinline data-t-title="film_title" title="The film: click to watch it large"></video><div class="motto"><span class="mode"><button data-motto="what" data-t="motto.what">What</button><button data-motto="why" data-t="motto.why">Why</button></span><span class="humble" id="m-top"></span><span class="main" id="m-main"></span><span class="rot" id="rot"></span><span class="meter" id="meter"><span class="bar"><i></i></span><span></span></span></div></div><button class="bell" id="bell" data-t-title="bell_title" title="system notifications from this tab">🔕</button><div class="langs" data-t-title="lang_title" title="the page's language"><button data-lang="en">EN</button><button data-lang="zh-CN">中文</button></div><button class="stop" data-stop="1" title="stop everything that is running or waiting, and pause the schedule" data-t="stop" data-t-title="stop_title">■ STOP</button></header>
 <div class="filmbox" id="filmbox" hidden><button class="x" id="filmx" data-t-title="film_close" title="close (Esc)">✕</button><video id="filmbig" controls playsinline></video></div>
 <div class="halt" id="halt" hidden></div>
 <div id="chatview" hidden>
@@ -198,8 +206,12 @@ pre.log.bad { border-color:var(--bad); }
   <div class="pane" id="sv-doctor"><div class="row"><button class="act" data-sdoc="quick" data-t="setup.quick">Quick checks</button><button class="act go" data-sdoc="full" data-t="setup.full">Every check</button><span class="dim" data-t="setup.full_sub">every check calls the chat apps and the peers; buddy doctor --json is the same for scripts</span></div><div id="sv-drows"></div></div>
   <div class="pane" id="sv-ping" hidden><div class="dim" data-t="setup.ping_sub">the buddy posts 🏓 ping into a chat through its own app; answer pong there and the row turns ✅ both ways</div>
     <table><thead><tr><th data-t="setup.chat">Chat</th><th data-t="setup.app">App</th><th data-t="setup.sent">Sent</th><th data-t="setup.pong">Pong</th><th data-t="setup.button">Button</th><th></th></tr></thead><tbody id="sv-gpings"></tbody></table>
+    <h3 class="dim" style="margin:14px 0 4px" data-t="setup.bell_h">Browser notifications</h3>
+    <div class="row"><span id="sv-bell-state" class="dim"></span></div><div id="sv-bell-list"></div>
+    <div class="row"><button class="act" data-sbell="tab" data-t="setup.bell_tab">Test this tab</button><button class="act go" data-sbell="push" data-t="setup.bell_push">Send a test push</button><span class="dim" data-t="setup.bell_sub">this tab: a notification here now (checks the permission and the system's settings) · a test push: to every subscribed browser, even with no tab open</span></div>
+    <div class="msg" id="sv-bmsg"></div>
     <h3 class="dim" style="margin:14px 0 4px" data-t="setup.refused">Wrote, but not paired</h3><div id="sv-refused"></div><div class="msg" id="sv-gmsg"></div></div>
-  <div class="pane" id="sv-config" hidden><div class="dim" id="sv-path"></div><table><thead><tr><th data-t="setup.setting">Setting</th><th data-t="setup.now">Now</th><th data-t="setup.new">New value</th></tr></thead><tbody id="sv-crows"></tbody></table>
+  <div class="pane" id="sv-config" hidden><div class="dim" id="sv-path"></div><button class="act" id="sv-intl" hidden data-t="setup.intl_show">Show Telegram and Lark</button><table><thead><tr><th data-t="setup.setting">Setting</th><th data-t="setup.now">Now</th><th data-t="setup.new">New value</th></tr></thead><tbody id="sv-crows"></tbody></table>
     <div class="row"><button class="act go" data-swrite="config" data-t="setup.write_config">Write buddy.toml and .env</button><span class="dim" data-t="setup.config_sub">secrets never come to this page: type a new one, or - to remove it; empty keeps it</span></div><div class="msg" id="sv-cmsg"></div>
     <h3 class="dim" style="margin:14px 0 4px" data-t="setup.pair_helper">Pair: who wrote to the bot</h3><div class="dim" data-t="setup.pair_how">write anything to the bot in the new app (Feishu, Lark, Telegram); it shows up here; Pair writes the id and its chat, then restart the buddy</div><div id="sv-crefused" style="margin-top:6px"></div></div>
   <div class="pane" id="sv-peers" hidden><p class="warn" data-t="setup.peer_warn">⚠️ One shared secret, plain HTTP: a LAN you own, a VPN or an SSH tunnel only, never the open internet.</p>
@@ -291,10 +303,121 @@ async function post(path, body) {
   await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-Buddy": "1" }, body: JSON.stringify(body || {}) });
   setTimeout(load, 600);
 }
+// Notifications (the owner, 2026-11-12: "browser notification"; "real web push"; "disable web push by
+// default"). 🔔 does one of two things:
+// - web push on in the buddy ([notify] webpush = ends|all): this browser subscribes (Service Worker
+//   /sw.js, the buddy's VAPID key); the buddy pushes through the browser maker's push service,
+//   end-to-end encrypted, and a notification comes even with no tab open (webpush.py);
+// - web push off (the default): notifications from this tab only, while it is open and behind;
+//   the page compares what /api/data says with what it saw; nothing leaves the machine.
+S.bell = (() => { try { return localStorage.getItem("bell") === "on"; } catch (_) { return false; } })();
+S.seen = null; S.push = { mode: "off", key: "", on: false };
+const pushable = () => "serviceWorker" in navigator && "PushManager" in window;
+function keyBytes(b64) {
+  const s = atob(b64.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((b64.length + 3) % 4));
+  return Uint8Array.from(s, c => c.charCodeAt(0));
+}
+async function pushState() {  // what the buddy says, and whether this browser is subscribed
+  try { S.push = { ...S.push, ...(await (await fetch("/api/push", { cache: "no-store" })).json()) }; } catch (_) {}
+  if (S.push.mode !== "off" && pushable()) {
+    const reg = await navigator.serviceWorker.getRegistration("/");
+    if (reg && !S.swChecked) { S.swChecked = true; reg.update().catch(() => {}); }  // a changed sw.js reaches this browser now
+    const sub = reg && await reg.pushManager.getSubscription();
+    S.push.on = !!sub;
+    if (sub && !S.resynced) {  // the buddy must know this browser: send it again once per load (an upsert;
+      S.resynced = true;       // 2026-11-12: a browser said 🔔 on while the buddy no longer had it)
+      fetch("/api/push/subscribe", { method: "POST", headers: { "Content-Type": "application/json", "X-Buddy": "1" },
+        body: JSON.stringify({ subscription: sub.toJSON() }) }).then(() => pushState()).catch(() => {});
+    }
+  } else S.push.on = false;
+  bellDraw();
+}
+// One way to show a notification from the page: through the Service Worker when there is one (the
+// path pushes take, which works where a page's own `new Notification` was swallowed: Chrome on a Mac,
+// the tab in front, 2026-11-12), else `new Notification`. Resolves to "" when shown, else why not.
+async function notifyHere(title, opts) {
+  try {
+    const reg = "serviceWorker" in navigator ? await navigator.serviceWorker.getRegistration("/") : null;
+    if (reg && reg.active) { await reg.showNotification(title, opts); return ""; }
+    return await new Promise(res => {
+      const n = new Notification(title, opts);
+      n.onshow = () => res("");
+      n.onerror = () => res("the browser refused to show it");
+      n.onclick = () => { window.focus(); n.close(); };
+      setTimeout(() => res(""), 1500);  // some browsers never fire onshow
+    });
+  } catch (e) { return String(e && e.message || e); }
+}
+// Where this system hides a browser's notifications (2026-11-12: on a Mac, Chrome was off in System
+// Settings → Notifications, and then only went to Notification Center: "Show on Desktop" off, style None).
+function osHint() {
+  const ua = navigator.userAgent;
+  const browser = /Edg\//.test(ua) ? "Microsoft Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Google Chrome" : /Safari\//.test(ua) ? "Safari" : "";
+  const b = browser || tr("setup.hint_this_browser");
+  if (/iPhone|iPad/.test(ua)) return tr("setup.hint_ios");
+  if (/Macintosh/.test(ua)) return tr("setup.hint_mac", { b });
+  if (/Windows/.test(ua)) return tr("setup.hint_windows", { b });
+  return tr("setup.hint_linux", { b });
+}
+function bellDraw() {
+  const b = document.getElementById("bell"), can = "Notification" in window;
+  const tab = can && S.bell && Notification.permission === "granted";
+  b.textContent = S.push.on || tab ? "🔔" : "🔕";
+  b.title = !can ? tr("bell_none") : Notification.permission === "denied" ? tr("bell_denied")
+    : S.push.on ? tr("bell_push_on") : tab ? tr("bell_on") : S.push.mode !== "off" ? tr("bell_push_off") : tr("bell_off");
+}
+document.addEventListener("click", async e => {
+  if (!e.target.closest("#bell")) return;
+  if (!("Notification" in window)) return bellDraw();
+  if (Notification.permission === "default") await Notification.requestPermission();
+  if (Notification.permission !== "granted") return bellDraw();
+  if (S.push.mode !== "off" && pushable()) {  // real web push: subscribe or unsubscribe this browser
+    const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      await fetch("/api/push/unsubscribe", { method: "POST", headers: { "Content-Type": "application/json", "X-Buddy": "1" }, body: JSON.stringify({ endpoint: sub.endpoint }) });
+      await sub.unsubscribe();
+    } else {
+      const made = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(S.push.key) });
+      await fetch("/api/push/subscribe", { method: "POST", headers: { "Content-Type": "application/json", "X-Buddy": "1" }, body: JSON.stringify({ subscription: made.toJSON() }) });
+    }
+    return pushState();
+  }
+  S.bell = !S.bell;
+  try { localStorage.setItem("bell", S.bell ? "on" : "off"); } catch (_) {}
+  bellDraw();
+  if (S.bell) notifyHere("brahman", { body: tr("bell_test"), tag: "bell-test" });
+});
+function tell(D) {
+  const now = {};
+  for (const r of D.runs || []) {
+    if (!r.story) continue;
+    now[r.id] = { status: r.status, q: (r.story.questions || []).filter(q => !q.answer).map(q => q.id), title: r.story.title };
+  }
+  for (const a of D.asks || []) if (!a.answer) now["ask:" + a.id] = { ask: a };
+  const was = S.seen;
+  S.seen = now;
+  if (!was || S.push.on || !S.bell || !("Notification" in window) || Notification.permission !== "granted") return;  // pushed: the buddy sends it
+  if (!document.hidden && document.hasFocus()) return;  // in front: the page shows it already
+  const show = (title, body, id) =>  // alerts again for the same story (renotify); the Service Worker's path when there is one
+    notifyHere(title, { body: body.slice(0, 180), tag: id, renotify: true, data: { link: id.startsWith("short-story:") ? "/" + "#story=" + id.split(":")[1] : "/" } });
+  for (const [id, x] of Object.entries(now)) {
+    const before = was[id];
+    if (x.ask && !before) show("❓ " + x.ask.title, x.ask.markdown.replace(/[*_`#>\[\]]/g, ""), id);
+    if (x.ask) continue;
+    const n = id.split(":")[1];
+    if (before && before.status === "running" && x.status !== "running")
+      show(`${x.status === "done" ? "✅" : "❌"} #${n} ${x.title}`, statusName(x.status), id);
+    for (const q of x.q) if (!before || !before.q.includes(q)) show(`❓ #${n} ${x.title}`, tr("bell_question", { q }), id);
+  }
+}
 async function load() {
   try {
     const r = await fetch("/api/data", { cache: "no-store" });
     S.data = await r.json();
+    tell(S.data);
+    bellDraw();
     document.getElementById("live").className = "live";
     document.getElementById("live").innerHTML = `<i></i>${tr("live", { n: S.data.runs.length, at: new Date().toLocaleTimeString() })}`;
     render();
@@ -867,6 +990,7 @@ function toHash(id) {
 }
 window.addEventListener("hashchange", () => { fromHash(); render(); });
 fromHash();
+pushState();
 load();
 setInterval(load, 5000);
 // The Setup tab: settings.py through /api/setup (the same as `buddy tui`); no secret ever comes here.
@@ -875,7 +999,10 @@ const svPost = (path, body) => fetch(path, { method: "POST", headers: { "Content
 const svMark = ok => ok === true ? '<span class="ok">✅</span>' : ok === false ? '<span class="bad">❌</span>' : '<span class="warn">⚠️</span>';
 const svSay = (id, t, bad) => { const m = document.getElementById(id); m.textContent = t; m.className = "msg " + (bad ? "bad" : "ok"); };
 async function setupLoad(first) {
-  const s = await fetch("/api/setup").then(r => r.json());
+  bellState();
+  const s = await fetch("/api/setup" + (SV.all ? "?all=1" : "")).then(r => r.json());
+  const intl = document.getElementById("sv-intl");
+  if (intl) intl.hidden = !s.intl_hidden;
   SV.path = s.path;
   if (first || !SV.cfgDirty) { SV.cfg = s.config; drawConfig(); }
   if (first || !SV.peersDirty) { SV.peers = s.peers; drawPeers(); }
@@ -892,6 +1019,39 @@ async function setupDoctor(full) {
     + `<div class="drow ${bad ? "bad" : "ok"}">${esc(bad ? tr("setup.bad", { n: bad }) : tr("setup.no_bad"))}</div>`;
   setupLoad(false);
 }
+// Browser notifications in the Ping view (the owner, 2026-11-12: "the config page needs more test
+// functions, like a test push to the browser"): the state, a local test, a real test push.
+async function bellState() {
+  await pushState();
+  const can = "Notification" in window, perm = can ? Notification.permission : "none";
+  document.getElementById("sv-bell-state").textContent = tr("setup.bell_state", {
+    mode: S.push.mode, n: S.push.browsers || 0, perm,
+    me: S.push.on ? tr("setup.bell_me_yes") : !window.isSecureContext ? tr("setup.bell_me_insecure", { host: location.host })
+      : !pushable() ? tr("setup.bell_me_nopush") : tr("setup.bell_me_no") });
+  const list = document.getElementById("sv-bell-list");
+  if (list) list.innerHTML = (S.push.list || []).map(b => `<div class="dim">· ${esc(b.browser)} — ${esc(b.host)} — ${esc((b.added || "").slice(0, 16).replace("T", " "))}</div>`).join("");
+}
+document.addEventListener("click", e => {  // zh-CN: Telegram and Lark are hidden until asked (settings.hidden)
+  if (e.target.closest("#sv-intl")) { SV.all = true; setupLoad(true); }
+});
+document.addEventListener("click", async e => {
+  const b = e.target.closest("[data-sbell]"); if (!b) return;
+  const say = (text, bad) => svSay("sv-bmsg", text, bad);
+  if (b.dataset.sbell === "tab") {
+    if (!("Notification" in window)) return say(tr("bell_none"), true);
+    if (Notification.permission === "default") await Notification.requestPermission();
+    if (Notification.permission !== "granted") return say(tr("bell_denied"), true);
+    const why = await notifyHere("brahman · this tab", { body: tr("setup.bell_tab_body"), tag: "tab-test", renotify: true });
+    return why ? say(why, true) : say(tr("setup.bell_tab_sent") + " " + osHint());
+  }
+  b.disabled = true;
+  try {
+    const r = await fetch("/api/push/test", { method: "POST", headers: { "Content-Type": "application/json", "X-Buddy": "1" }, body: "{}" });
+    if (!r.ok) return say(await r.text(), true);
+    const j = await r.json();
+    say(tr("setup.bell_push_sent", j), j.failed > 0 || !j.sent);
+  } finally { b.disabled = false; bellState(); }
+});
 function drawPings() {
   const rows = (SV.chats || []).map(({ chat, channel }) => {
     const p = (SV.pings || {})[chat];
@@ -935,7 +1095,8 @@ function drawConfig() {
 function configChanges() {
   const out = {};
   for (const f of SV.cfg || []) {
-    const ins = [...document.querySelectorAll(`#sv-crows input[data-ck="${f.key}"]`)];
+    const ins = [...document.querySelectorAll(`#sv-crows [data-ck="${f.key}"]`)];  // inputs and the notify dropdowns
+    if (!ins.length) continue;
     if (f.kind === "app") { const [id, sec] = ins.map(i => i.value.trim()); if (id || sec) out[f.key] = [id, sec]; continue; }
     const v = ins[0].value.trim(), was = Array.isArray(f.value) ? f.value.join(", ") : String(f.value ?? "");
     if (f.kind === "secret" ? v : v !== was) out[f.key] = f.kind === "list" ? v.split(",").map(x => x.trim()).filter(Boolean) : v;

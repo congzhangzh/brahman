@@ -32,6 +32,12 @@ from . import install
 FIELDS = ["language", "workspace", "telegram", "lark", "feishu", "paired", "port"]
 
 
+# What [notify] means when it says nothing: such a value is not written into buddy.toml.
+DEFAULTS = {("notify", "feishu"): '"off"', ("notify", "lark"): '"off"',
+            ("notify", "webpush"): '"off"', ("notify", "telegram"): '"off"', ("notify", "web"): '"off"',
+            ("web", "hosts"): "[]"}
+
+
 def _show(secret: str) -> str:
     return f"…{secret[-4:]}" if len(secret) > 6 else "set"
 
@@ -53,7 +59,13 @@ def load(path: Path) -> dict:
             "port": cfg.get("web", {}).get("port", 8787),
             # what Feishu and Lark get on their own (notify.py): off by default, the quota is small
             "notify_feishu": str(cfg.get("notify", {}).get("feishu", "off")),
-            "notify_lark": str(cfg.get("notify", {}).get("lark", "off"))}
+            "notify_lark": str(cfg.get("notify", {}).get("lark", "off")),
+            "notify_webpush": str(cfg.get("notify", {}).get("webpush", "off")),  # web push (webpush.py)
+            "notify_telegram": str(cfg.get("notify", {}).get("telegram", "off")),  # every app, off by default
+            "notify_web": str(cfg.get("notify", {}).get("web", "off")),
+            # who may use the workbench (webauth.py): a token in .env, extra hosts in [web]
+            "web_token": env.get("BUDDY_WEB_TOKEN", ""),
+            "web_hosts": [str(h) for h in cfg.get("web", {}).get("hosts", [])]}
 
 
 def _env(path: Path) -> dict:
@@ -136,14 +148,17 @@ def save(path: Path, s: dict, before: dict) -> list[str]:
     changes = [(None, "workspace", _q(s["workspace"])), (None, "domain", _q("feishu" if on_feishu else "lark")),
                ("buddy", "language", _q(s["language"])), ("web", "port", str(int(s["port"]))),
                ("me", "chats", "[" + ", ".join(_q(c) for c in s["chats"]) + "]")]
-    changes += [("notify", app, _q(s[f"notify_{app}"])) for app in ("feishu", "lark") if f"notify_{app}" in s]
+    if "web_hosts" in s:
+        changes.append(("web", "hosts", "[" + ", ".join(_q(h) for h in s["web_hosts"]) + "]"))
+    changes += [("notify", app, _q(s[f"notify_{app}"])) for app in ("feishu", "lark", "telegram", "web", "webpush")
+                if f"notify_{app}" in s]
     old = tomllib.loads(toml)
     for section, key, literal in changes:
         now = (old.get(section, {}) if section else old).get(key)
         if now is not None and tomllib.loads(f"x = {literal}")["x"] == now:
             continue  # unchanged: the line is not touched
-        if now is None and section == "notify" and literal == '"off"':
-            continue  # the default: no [notify] written for it
+        if now is None and DEFAULTS.get((section, key)) == literal:
+            continue  # a default: not written for it
         new = _toml_set(toml, section, key, literal)
         if new is None:
             notes.append(f"left {key} as it is: it is written over several lines in {path}; edit it by hand")
@@ -153,13 +168,14 @@ def save(path: Path, s: dict, before: dict) -> list[str]:
     for section, key, literal in changes:
         mine = tomllib.loads(f"x = {literal}")["x"]
         value = (got.get(section, {}) if section else got).get(key)
-        if section == "notify" and value is None and mine == "off":
-            continue  # the default, left out on purpose
+        if value is None and DEFAULTS.get((section, key)) == literal:
+            continue  # a default, left out on purpose
         if value != mine and not any(key in n for n in notes):
             raise ValueError(f"{key} would read {value!r}, not {mine!r}: nothing written")
     env = _env_set(env_path.read_text() if env_path.exists() else "", {
         "TELEGRAM_BOT_TOKEN": s["telegram"], "FEISHU_APP_ID": first[0], "FEISHU_APP_SECRET": first[1],
-        "LARK_APP_ID": second[0], "LARK_APP_SECRET": second[1], "BUDDY_ALLOWED_IDS": ",".join(s["allowed"])})
+        "LARK_APP_ID": second[0], "LARK_APP_SECRET": second[1], "BUDDY_ALLOWED_IDS": ",".join(s["allowed"]),
+        **({"BUDDY_WEB_TOKEN": s["web_token"]} if "web_token" in s else {})})
     if toml != path.read_text():
         notes.append(f"kept {install._keep(path)}")
         path.write_text(toml)

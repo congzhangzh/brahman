@@ -1,6 +1,6 @@
 [project]
 name = "brahman-buddy"
-version = "20261112.6"
+version = "20261112.7"
 license = "MIT"
 license-files = ["LICENSE"]
 description = "A personal work buddy: Telegram, Lark and Feishu chats driving Claude Code, with scheduled jobs, short and long stories, and portable skills"
@@ -10,6 +10,7 @@ authors = [
 requires-python = ">=3.14"
 dependencies = [
     "lark-oapi>=1.7.5",
+    "pycryptodome>=3.20",  # web push (webpush.py): P-256, ECDH, HKDF, AES-GCM; lark-oapi brings it already
 ]
 
 [project.scripts]

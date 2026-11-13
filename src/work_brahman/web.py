@@ -31,6 +31,11 @@ No secret is ever sent to the page; it sends a new one, or "-" to remove one.
     POST /api/setup/link     {"chat": ..., "restart": bool}: link a chat a paired person wrote from
     POST /api/setup/ignore_chat {"chat": ...}: forget such a chat
     POST /api/setup/ignore   {"sender": ...}: forget who wrote (back only if it writes again)
+    GET  /sw.js           the Service Worker for web push (static/sw.js)
+    GET  /manifest.webmanifest, /icon-{180,192,512}.png   the web app manifest and icons (a Home Screen)
+    GET  /api/push        web push: {mode, key (VAPID, when on), browsers}
+    POST /api/push/subscribe {"subscription": PushSubscription.toJSON()} · /api/push/unsubscribe {"endpoint"}
+    POST /api/push/test   one test push to every subscribed browser: {sent, failed, dropped}
     GET  /api/lanes?id=short-story:12   the story's swimlanes: who did what, where, in parallel (lanes.py)
     POST /api/lanes/attach {id, machine, session}   that session's pys window, brought up (pys select)
     POST /api/setup/ping     {"chat": ...}: "🏓 ping <code>" into that linked chat (pings.py); `pong`
@@ -267,8 +272,8 @@ class WebChat(_Posts):
 
 def pys_path() -> str:
     """Where pys is, or "" when this machine has none (the page then shows no attach/resume)."""
-    p = shutil.which("pys") or os.path.expanduser("~/.local/bin/pys")
-    return p if os.path.isfile(p) else ""
+    from .long_live import pys_path as found
+    return found()
 
 
 def page() -> bytes:
@@ -286,6 +291,7 @@ class Web:
                  chat: WebChat | None = None, families: dict | None = None, config: Path | None = None):
         self.port, self.state, self.bot, self.scheduler, self.home = port, state, bot, scheduler, home
         self.config = config  # buddy.toml, for the Setup tab (None: where `buddy init` puts it)
+        self.cfg = cfg  # as the buddy started with it ([notify] webpush, read at start like every setting)
         self.chat = chat
         self.families = [f for f in (families or {}).values() if hasattr(f, "runs")]
         self.workflows = [{"kind": kind, "name": name, "schedule": t.get("schedule", ""),
@@ -304,6 +310,8 @@ class Web:
                 if not self._local():
                     return
                 path = self.path.split("?")[0]
+                if not self._authed(path):  # BUDDY_WEB_TOKEN (webauth.py)
+                    return
                 if path == "/":
                     return self._send(200, page(), "text/html")
                 if path.startswith("/media/"):  # the corner's film and its poster
@@ -313,6 +321,19 @@ class Web:
                     if not re.fullmatch(r"[\w.-]+", name) or not kind or not f.is_file():
                         return self._send(404, b"not found", "text/plain")
                     return self._send(200, f.read_bytes(), kind)
+                if path == "/manifest.webmanifest" or re.fullmatch(r"/icon-(180|192|512)\.png", path):
+                    # pinned to a Home Screen: the web app manifest and its icons (static/)
+                    kind = "application/manifest+json" if path.endswith(".webmanifest") else "image/png"
+                    return self._send(200, (HERE / "static" / path[1:]).read_bytes(), kind)
+                if path == "/sw.js":  # the Service Worker for web push (static/sw.js), scope /
+                    return self._send(200, (HERE / "static" / "sw.js").read_bytes(), "text/javascript")
+                if path == "/api/push":  # web push: on or off, this buddy's VAPID key, how many browsers
+                    from . import webpush
+                    from . import notify
+                    m = webpush.mode(notify.config() or web.cfg)  # followed live
+                    rows = webpush.subs(web.state)
+                    return self._json({"mode": m, "key": webpush.public_key(web.state) if m != "off" else "",
+                                       "browsers": len(rows), "list": [webpush.describe(r) for r in rows]})
                 if path == "/tokens.css":
                     return self._send(200, TOKENS.read_bytes() if TOKENS.exists() else b"", "text/css")
                 if path == "/api/data":
@@ -322,7 +343,7 @@ class Web:
                     run = web.detail(key)
                     return self._json(run) if run else self._send(404, b"no such run", "text/plain")
                 if path == "/api/setup":
-                    return self._json(web.setup())
+                    return self._json(web.setup(show_all=parse_qs(urlparse(self.path).query).get("all", [""])[0] == "1"))
                 if path == "/api/lanes":  # who did what, where, in parallel (lanes.py): a story's swimlanes
                     key = parse_qs(urlparse(self.path).query).get("id", [""])[0]
                     kind, _, n = key.partition(":")
@@ -340,6 +361,10 @@ class Web:
 
             def do_POST(self):
                 if not self._local():
+                    return
+                if self.path.split("?")[0] == "/login":  # the token typed into the login page (webauth.py)
+                    return self._login()
+                if not self._authed(self.path.split("?")[0]):
                     return
                 if self.headers.get("X-Buddy") != "1":
                     return self._send(403, b"missing X-Buddy header", "text/plain")
@@ -378,6 +403,22 @@ class Web:
                         return self._send(400, b"n, what (stop|reply|a<q>.<i>), and text for a reply",
                                           "text/plain")
                     action = f"short:{n}:{what}"
+                elif path == "/api/push/test":  # one test push to every subscribed browser (the Setup tab)
+                    from . import webpush
+                    if not webpush.subs(web.state):
+                        return self._send(409, "no browser is subscribed: turn web push on (Config), reload, then 🔔"
+                                          .encode(), "text/plain")
+                    return self._json(webpush.send(web.state, "brahman · push test",
+                                                   "If you see this, web push works.", "/"))
+                elif path in ("/api/push/subscribe", "/api/push/unsubscribe"):  # web push (webpush.py)
+                    from . import webpush
+                    if path.endswith("/unsubscribe"):
+                        return self._json({"ok": webpush.unsubscribe(web.state, str(body.get("endpoint", "")))})
+                    from . import notify
+                    if webpush.mode(notify.config() or web.cfg) == "off":
+                        return self._send(409, b"web push is off: [notify] webpush = \"ends\" or \"all\"", "text/plain")
+                    why = webpush.subscribe(web.state, body.get("subscription"), self.headers.get("User-Agent", ""))
+                    return self._json({"ok": True}) if not why else self._send(400, why.encode(), "text/plain")
                 elif path == "/api/lanes/attach":  # a session lane's pys window, brought up (lanes.py)
                     code, out = web.lane_attach(str(body.get("id", "")), str(body.get("machine", "")),
                                                 str(body.get("session", "")))
@@ -393,14 +434,50 @@ class Web:
                 self._json({"ok": True, "action": action})
 
             def _local(self) -> bool:
-                host = (self.headers.get("Host") or "").rsplit(":", 1)[0]
-                if host not in ("127.0.0.1", "localhost", "[::1]"):
-                    self._send(421, b"use http://127.0.0.1", "text/plain")
+                from . import webauth  # loopback, or an allowlisted host while a token is set
+                if not webauth.host_ok(self.headers.get("Host") or "", webauth.hosts(web.cfg), webauth.token()):
+                    self._send(421, b"use http://127.0.0.1 (or an address in [web] hosts, with BUDDY_WEB_TOKEN set)",
+                               "text/plain")
                     return False
                 if not _owner(self.client_address[1], self.server.server_port):
                     self._send(403, b"only the user the buddy runs as", "text/plain")
                     return False
                 return True
+
+            def _authed(self, path: str) -> bool:
+                """BUDDY_WEB_TOKEN: the cookie or a Bearer token; ?token=… once sets the cookie."""
+                from . import webauth
+                tok = webauth.token()
+                if not tok or path in webauth.PUBLIC or webauth.authed(self.headers, tok):
+                    return True
+                given = parse_qs(urlparse(self.path).query).get("token", [""])[0]
+                if self.command == "GET" and given and webauth.check(tok, given):
+                    self.send_response(303)
+                    self.send_header("Set-Cookie", webauth.set_cookie(tok))
+                    self.send_header("Location", webauth.strip_token(self.path))
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return False
+                if self.command == "GET" and not path.startswith("/api/"):
+                    self._send(401, webauth.login_page(webauth.strip_token(self.path), bad=bool(given)), "text/html")
+                else:
+                    self._send(401, b"the web token is needed (BUDDY_WEB_TOKEN)", "text/plain")
+                return False
+
+            def _login(self) -> None:
+                from . import webauth
+                tok = webauth.token()
+                n = min(int(self.headers.get("Content-Length") or 0), 4096)
+                form = parse_qs(self.rfile.read(n).decode(errors="replace"))
+                nxt = form.get("next", ["/"])[0]
+                nxt = nxt if nxt.startswith("/") and not nxt.startswith("//") else "/"
+                if not tok or not webauth.check(tok, form.get("token", [""])[0]):
+                    return self._send(401, webauth.login_page(nxt, bad=True), "text/html")
+                self.send_response(303)
+                self.send_header("Set-Cookie", webauth.set_cookie(tok))
+                self.send_header("Location", nxt)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
 
             def _json(self, obj):
                 self._send(200, json.dumps(obj, ensure_ascii=False).encode(), "application/json")
@@ -423,15 +500,16 @@ class Web:
         from . import install
         return self.config or install.config_path(None)
 
-    def setup(self) -> dict:
-        """The Setup tab: what `buddy tui` shows, secrets masked."""
+    def setup(self, show_all: bool = False) -> dict:
+        """The Setup tab: what `buddy tui` shows, secrets masked; show_all: Telegram and Lark too (zh-CN)."""
         from . import configure
         path = self._config_path()
         s = configure.load(path) if path.exists() else None
         linked = list(self.bot.linked.chats) if self.bot else []
         # paired: by the running buddy, or written in the config since (used after a restart)
         allowed = set(self.bot.allowed if self.bot else ()) | set(s["allowed"] if s else ())
-        return {"path": str(path), "config": settings.view(s) if s else None, "restart": settings.RESTART,
+        return {"path": str(path), "config": settings.view(s, show_all) if s else None, "restart": settings.RESTART,
+                "intl_hidden": bool(s and settings.hidden(s, show_all)),
                 "peers": settings.peers(), "log": settings.log(last=300),
                 "chats": [{"chat": c, "channel": next((ch.name for ch in self.bot.channels if ch.owns(c)), "")}
                           for c in linked] if self.bot else [],
@@ -526,43 +604,14 @@ class Web:
             (502, r.stderr.strip() or "pys select failed")
 
     def long(self, n: str, what) -> tuple[int, dict | str]:
-        """A long story into a terminal, through pys (2026-11-10, the owner: "attach or resume by
-        pys"): attach shows the pys window that holds it; resume opens a pys window in its folder
-        and runs `buddy-long take N` there (the buddy hands it over, then `claude --resume`).
-        Codex: take is Claude's only, so the page shows the command instead."""
+        """A long story into a terminal, through pys (long_live.to_terminal: the page's Resume and
+        Attach, and the chats' /takeover and /shift). Codex: take is Claude's only."""
         s = longs.load(self.state, int(n)) if n.isdigit() else None
         if s is None or what not in ("attach", "resume"):
             return 400, "n (a long story's number) and what (attach|resume)"
-        pys = pys_path()
-        if not pys:  # buddy setup only looks for pys: a user without it gets a word, not a dropped call
-            return 409, "pys is not installed (uv tool install py-screen)"
-        try:
-            return self._long(s, what, pys)
-        except subprocess.TimeoutExpired:
-            return 504, "pys did not answer within 10 s"
-        except OSError as e:
-            return 502, f"pys could not run: {e}"
-
-    def _long(self, s: dict, what: str, pys: str) -> tuple[int, dict | str]:
-        if what == "attach":
-            if not (longs.held(s) and s.get("mux") == "pys" and s.get("window") != ""):
-                return 409, "no pys window holds it: resume it"
-            r = subprocess.run([pys, "select", str(s["window"])], capture_output=True, text=True, timeout=10)
-            return (200, {"ok": True, "window": s["window"]}) if r.returncode == 0 else (502, r.stderr.strip() or "pys select failed")
-        if longs.held(s):
-            return 409, "a terminal holds it: attach"
-        if s.get("engine", "claude-code") != "claude-code":
-            return 409, "a Codex story is resumed by hand"
-        if not os.path.isdir(s["cwd"]):
-            return 409, f"its folder is gone: {s['cwd']}"
-        r = subprocess.run([pys, "new", "--select", "--", "bash"], cwd=s["cwd"], capture_output=True, text=True, timeout=10)
-        try:
-            wid = json.loads(r.stdout)["wid"]
-        except (ValueError, KeyError, TypeError):
-            return 502, (r.stderr or r.stdout).strip() or "pys new failed"
-        subprocess.run([pys, "send", "--enter", str(wid), f"buddy-long take {s['id']}"], capture_output=True, timeout=10)
-        log.info("long story #%s: resumed in pys window %s", s["id"], wid)
-        return 200, {"ok": True, "window": wid}
+        from . import long_live
+        code, said, window = long_live.to_terminal(s, what, pys_path())
+        return (200, {"ok": True, "window": window}) if code == 200 else (code, said)
 
     def detail(self, key: str) -> dict | None:
         """A family's run whole, by its id ("short-story:12", "team:kit")."""

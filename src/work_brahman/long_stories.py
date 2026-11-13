@@ -489,7 +489,8 @@ def new(state: Path, channels: list[Channel], chats: list[str], text: str, *, cw
     gate.check_new(state, text, cwd, short, sandbox=how, who=f"{who}@{where}" if who else where)
     story = _create(state, channels, chats, title=text[:40], session_id="", cwd=cwd, engine=kind, mode=mode)
     _post(channels, story, t("long.made_live" if live else "long.made", where=app(where), cwd=cwd)
-          + ("\n\n" + t("long.mode.open") if mode == "open" else ""), title=t("long.title.new"))
+          + ("\n\n" + t("long.mode.open") if mode == "open" else "") + "\n\n" + t("long.moves", n=story["id"]),
+          title=t("long.title.new"))
     env, prompt = {}, text
     if short:
         child = shorts.start(state, channels, chats, text[:60], [], who=f"📟 #{story['id']}", parent=short)

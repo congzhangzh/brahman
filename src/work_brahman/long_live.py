@@ -379,6 +379,60 @@ def _waiting(state: Path, number: int) -> str:
     return "\n\n".join(got)
 
 
+# --- into a terminal through pys: the workbench's Resume and Attach, and /takeover, /shift ------
+
+def pys_path() -> str:
+    """Where pys is, or "" when this machine has none."""
+    p = shutil.which("pys") or os.path.expanduser("~/.local/bin/pys")
+    return p if os.path.isfile(p) else ""
+
+
+def to_terminal(story: dict, what: str, pys: str | None = None) -> tuple[int, str, object]:
+    """A long story into a terminal (the owner, 2026-11-10: "attach or resume by pys"; 2026-11-12:
+    "/takeover … /shift to the active pys window, if one exists"). (status, what to say, window):
+    - "resume" (/takeover, the page's Resume): a new pys window in its folder runs
+      `buddy-long take N`, which hands over when the buddy holds it, waits for its turn to end
+      and resumes the session there;
+    - "attach" (/shift, the page's Attach): the pys window a terminal holds it in comes to the
+      front (pys select), checked first: the same process still runs there.
+    200 done; 409 not possible now (said why); 502/504 pys failed."""
+    n = story["id"]
+    pys = pys if pys is not None else pys_path()
+    # the pys server: the one that holds it when the story knows it (a test server has windows with
+    # the same numbers), else the default one, the owner's own (the buddy runs as the owner)
+    env = {**os.environ, "PYS_SESSION": story["session"]} if story.get("session") else None
+    if not pys:  # buddy setup only looks for pys: a user without it gets the command, not a dropped call
+        return 409, t("long.term.no_pys", n=n), ""
+    try:
+        if what == "attach":
+            if not (L.held(story) and story.get("mux") == "pys" and story.get("window") != ""):
+                return 409, t("long.term.not_held", n=n), ""
+            r = subprocess.run([pys, "select", str(story["window"])], capture_output=True, text=True, timeout=10,
+                               **({"env": env} if env else {}))
+            if r.returncode != 0:
+                return 502, t("long.term.failed", why=r.stderr.strip() or "pys select"), ""
+            return 200, t("long.term.shown", n=n, w=story["window"]), story["window"]
+        if L.held(story):
+            return 409, t("long.term.held", n=n), ""
+        if story.get("engine", "claude-code") != "claude-code":
+            return 409, t("long.term.codex", id=story.get("session_id") or "?"), ""
+        if not os.path.isdir(story["cwd"]):
+            return 409, t("long.term.gone", cwd=story["cwd"]), ""
+        r = subprocess.run([pys, "new", "--select", "--", "bash"], cwd=story["cwd"], capture_output=True,
+                           text=True, timeout=10)
+        try:
+            wid = json.loads(r.stdout)["wid"]
+        except (ValueError, KeyError, TypeError):
+            return 502, t("long.term.failed", why=(r.stderr or r.stdout).strip() or "pys new"), ""
+        subprocess.run([pys, "send", "--enter", str(wid), f"buddy-long take {n}"], capture_output=True, timeout=10)
+        log.info("long story #%s: taken over in pys window %s", n, wid)
+        return 200, t("long.term.opened", n=n, w=wid, cwd=story["cwd"]), wid
+    except subprocess.TimeoutExpired:
+        return 504, t("long.term.failed", why="pys did not answer within 10 s"), ""
+    except OSError as e:
+        return 502, t("long.term.failed", why=str(e)), ""
+
+
 # --- the owner's commands: /status, /handover, /takeback, buddy-long take --------------------
 
 def status(state: Path, number: int) -> str:

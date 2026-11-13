@@ -26,20 +26,43 @@ FIELDS = [  # key, label, kind
     ("language", "language", "choice"), ("workspace", "workspace", "text"),
     ("telegram", "Telegram", "secret"), ("lark", "Lark", "app"), ("feishu", "Feishu", "app"),
     ("allowed", "paired people", "list"), ("chats", "linked chats", "list"), ("port", "web port", "int"),
-    ("notify_feishu", "Feishu on its own", "notify"), ("notify_lark", "Lark on its own", "notify")]
+    ("notify_feishu", "Feishu on its own", "notify"), ("notify_lark", "Lark on its own", "notify"),
+    ("notify_telegram", "Telegram on its own", "notify"), ("notify_web", "the web chat on its own", "notify"),
+    ("notify_webpush", "web push to your browsers (with the tab closed)", "notify"),
+    ("web_token", "web token (LAN access through a forward; empty: off)", "secret"),
+    ("web_hosts", "web: extra addresses allowed (only with the token)", "list")]
+DEFAULT_OF = {"notify_webpush": "off"}
 NOTIFY = ("off", "ends", "all")  # notify.MODES: what Feishu/Lark get without being asked
 RESTART = "the buddy reads this when it starts: restart it to use it (systemctl --user restart buddy)"
+NOW = "applies now: the running buddy follows [notify], the web token and [web] hosts without a restart"
 
 
 def mask(secret: str) -> str:
     return f"…{secret[-4:]}" if len(secret) > 6 else ("set" if secret else "")
 
 
-def view(s: dict) -> list[dict]:
-    """The settings as shown: no secret in it."""
+INTERNATIONAL = ("telegram", "lark", "notify_telegram", "notify_lark")  # apps outside China
+
+
+def hidden(s: dict, show_all: bool = False) -> set[str]:
+    """Rows a zh-CN setup leaves out unless asked (the owner, 2026-11-12: "for zh-CN disable Lark and
+    Telegram", new installs only): Telegram's and Lark's, while neither is set. A buddy that has one
+    shows both, so an existing setup is never hidden from its owner."""
+    if show_all or s.get("language") != "zh-CN" or s.get("telegram") or (s.get("lark") or ["", ""])[0]:
+        return set()
+    return set(INTERNATIONAL)
+
+
+def view(s: dict, show_all: bool = False) -> list[dict]:
+    """The settings as shown: no secret in it. A zh-CN setup without Telegram or Lark leaves their rows
+    out (hidden()); show_all brings them back."""
     out = []
+    skip = hidden(s, show_all)
     for key, label, kind in FIELDS:
-        v = s.get(key, "off") if kind == "notify" else s[key]
+        if key in skip:
+            continue
+        v = (s.get(key, DEFAULT_OF.get(key, "off")) if kind == "notify"
+             else s.get(key, "" if kind == "secret" else []) if key.startswith("web_") else s[key])
         if kind == "secret":
             shown = f"token {mask(v)}" if v else "not set"
         elif kind == "app":
@@ -115,11 +138,14 @@ def write(path: Path, s: dict, before: dict) -> tuple[bool, list[str]]:
         notes = configure.save(path, s, before)
     except ValueError as e:
         return False, [f"not written: {e}"]
+    changed = [k for k in s if s.get(k) != before.get(k)]
+    if changed and all(k.startswith(("notify_", "web_")) for k in changed):  # followed live (notify.watch, webauth)
+        return True, ["written"] + notes + [NOW]
     return True, ["written"] + notes + [RESTART]
 
 
 ENV_KEYS = ("TELEGRAM_BOT_TOKEN", "FEISHU_APP_ID", "FEISHU_APP_SECRET", "LARK_APP_ID", "LARK_APP_SECRET",
-            "BUDDY_ALLOWED_IDS")
+            "BUDDY_ALLOWED_IDS", "BUDDY_WEB_TOKEN")
 
 
 def reload_env(path: Path, env=None) -> None:

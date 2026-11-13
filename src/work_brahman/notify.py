@@ -48,17 +48,57 @@ def app_of(prefix: str, domain: str) -> str:
     return "lark" if prefix == "lark:" else ("lark" if domain == "lark" else "feishu")
 
 
-def mode(cfg: dict, app: str) -> str:
-    m = str((cfg.get("notify") or {}).get(app, "off"))
-    return m if m in MODES else "off"
+def mode(cfg: dict, app: str, default: str = "off") -> str:
+    m = str((cfg.get("notify") or {}).get(app, default))
+    return m if m in MODES else default
+
+
+# [notify] live (the owner, 2026-11-12: "does the notify setting need a restart? a better way to
+# reload?"): buddy.toml is read again when its mtime changes, at most once a second, so a switch
+# changed in the Setup tab, the TUI or by hand applies to the next message. Other settings
+# (tokens, chats, the port) still need the restart that builds the channels.
+_watch: dict = {"path": None, "mtime": None, "checked": 0.0, "cfg": {}}
+
+
+def watch(path) -> None:
+    """Follow this buddy.toml for [notify] (cli does it when it builds the channels)."""
+    _watch.update(path=Path(path), mtime=None, checked=0.0, cfg={})
+
+
+def config() -> dict:
+    """buddy.toml as it is now, when watched ({} otherwise)."""
+    p = _watch["path"]
+    if p is None:
+        return {}
+    now = time.time()
+    if now - _watch["checked"] >= 1.0:
+        _watch["checked"] = now
+        try:
+            m = p.stat().st_mtime
+            if m != _watch["mtime"]:
+                import tomllib
+                _watch["cfg"], _watch["mtime"] = tomllib.loads(p.read_text()), m
+        except (OSError, ValueError):  # a half-written file: keep what was read last
+            pass
+    return _watch["cfg"]
+
+
+def live_mode(app: str, fallback: str) -> str:
+    """[notify] <app> now, or the mode given at start when buddy.toml is not watched."""
+    return mode(config(), app, fallback) if _watch["path"] is not None else fallback
 
 
 class Quiet:
     """A Feishu channel with its proactive calls held back by mode. Everything else passes through."""
 
     def __init__(self, inner, mode: str, app: str):
-        self.inner, self.mode, self.app = inner, mode, app
+        self.inner, self.app = inner, app
+        self._mode = mode  # as started; live_mode() follows buddy.toml when it is watched
         self.heard: dict[str, float] = {}  # chat -> when the owner last wrote or pressed there
+
+    @property
+    def mode(self) -> str:
+        return live_mode(self.app, self._mode)
 
     def __getattr__(self, name):  # owns, reply, progress, answer, failure, api, name …
         return getattr(self.inner, name)

@@ -175,7 +175,8 @@ def init(args) -> int:
     language = args.language or (_ask("Language, zh-CN or en", "zh-CN") if asking else "zh-CN")
     workspace = args.workspace or (_ask("Workspace, where chat turns run", "~") if asking else "~")
     token = args.telegram_token
-    if token is None and asking:
+    china = language == "zh-CN"  # the owner, 2026-11-12: a zh-CN setup doesn't offer Telegram or Lark (flags still work)
+    if token is None and asking and not china:
         print(f"Telegram: a token from {GET['telegram']} (empty: skip).")
         token = _ask("Telegram bot token", secret=True)
     apps = {"lark": [args.lark_app_id, args.lark_app_secret, ""], "feishu": [args.feishu_app_id, args.feishu_app_secret, ""]}
@@ -183,7 +184,7 @@ def init(args) -> int:
     for brand, title, where in (("lark", "Lark, international", GET["lark"]), ("feishu", "Feishu, China", GET["feishu"])):
         app = apps[brand]
         scanning = getattr(args, f"{brand}_scan", False)
-        if app[0] is None and asking and not scanning:
+        if app[0] is None and asking and not scanning and not (china and brand == "lark"):
             print(f"{title} (optional): App ID and Secret from {where}, or `scan`: a QR code makes the "
                   "app for you (empty: skip).")
             app[0] = _ask(f"{brand.capitalize()} App ID")
@@ -547,17 +548,56 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
     from . import notify  # what Feishu and Lark get on their own, and the calls spent this month
     used = notify.calls(state)
     for app, on in (("feishu", bool(os.environ.get("FEISHU_APP_ID")) and domain == "feishu"),
-                    ("lark", bool(os.environ.get("LARK_APP_ID")) or (bool(os.environ.get("FEISHU_APP_ID")) and domain == "lark"))):
+                    ("lark", bool(os.environ.get("LARK_APP_ID")) or (bool(os.environ.get("FEISHU_APP_ID")) and domain == "lark")),
+                    ("telegram", bool(os.environ.get("TELEGRAM_BOT_TOKEN"))), ("web", bool(cfg.get("web", {}).get("port")))):
         if not on:
             continue
         m = notify.mode(cfg, app)
         said = {"off": "nothing on its own: it answers you; story cards and posts go to the other chats",
                 "ends": "a story's card at its start and end only; posts and questions",
                 "all": "every card change, post and mirror"}[m]
-        row(True if m != "all" else None,
-            f"{app.capitalize()}: notify = {m}, {said} · {used.get(app, 0)} message calls this month (this buddy)",
-            "" if m != "all" else "each card change is a call against the monthly quota: notify = ends saves most "
-            "(buddy tui → Config, or the Setup tab)")
+        quota = app in ("feishu", "lark")  # the apps whose message calls count against a monthly quota
+        row(True if m != "all" or not quota else None,
+            f"notify · {'the web chat' if app == 'web' else app.capitalize()}: {m}, {said}"
+            + (f" · {used.get(app, 0)} message calls this month (this buddy)" if quota else ""),
+            "" if m != "all" or not quota else "each card change is a call against the monthly quota: notify = ends "
+            "saves most (buddy tui → Config, or the Setup tab)")
+    # Outside calls (the owner, 2026-11-12: "ready to deploy by default in an enterprise or offline"):
+    # a fresh install calls nothing until something is switched on; this row says what is on, so an
+    # admin sees every endpoint this buddy talks to (Claude Code's own is Claude Code's to configure).
+    out = []
+    if os.environ.get("FEISHU_APP_ID"):
+        out.append("open.feishu.cn" if domain == "feishu" else "open.larksuite.com")
+    if os.environ.get("LARK_APP_ID"):
+        out.append("open.larksuite.com")
+    if os.environ.get("TELEGRAM_BOT_TOKEN"):
+        out.append("api.telegram.org")
+    from . import notify as _n, webpush as _wp
+    if _n.mode(cfg, "webpush") != "off":
+        out += sorted({__import__("urllib.parse").parse.urlparse(x["endpoint"]).netloc for x in _wp.subs(state)}) or ["(web push on, no browser yet)"]
+    try:
+        from . import peer as _peer
+        out += [f"peer {k}" for k in sorted(_peer.load(os.environ)["points"])]
+    except Exception:  # noqa: BLE001 - no peers file: nothing to list
+        pass
+    row(True, "outside calls: " + (", ".join(dict.fromkeys(out)) if out else "none (nothing is switched on)")
+        + "; plus Claude Code's own endpoint (ANTHROPIC_BASE_URL or its default)", "")
+    from . import webauth  # who may use the workbench (webauth.py)
+    tok, hosts = webauth.token(), list(cfg.get("web", {}).get("hosts") or [])
+    if tok:
+        row(None if hosts else True, "workbench: a web token is set" + (f"; also reachable as {', '.join(hosts)}" if hosts else ""),
+            "plain HTTP: on that network the token and the pages can be read; an SSH client on the device "
+            "(-L to 127.0.0.1) needs no token" if hosts else "")
+    elif hosts:
+        row(None, f"workbench: [web] hosts lists {', '.join(hosts)}, but no BUDDY_WEB_TOKEN is set: they are ignored",
+            "set a long random BUDDY_WEB_TOKEN (Setup → Config) to use them")
+    from . import webpush  # web push to the owner's browsers (webpush.py): off by default
+    wp, browsers = webpush.mode(cfg), webpush.subs(state)
+    if wp != "off" or browsers:
+        row(True if wp == "off" or browsers else None,
+            f"web push: notify = {wp}, {len(browsers)} browser(s) subscribed · {used.get('webpush', 0)} pushes this month"
+            + (" (off: nothing is sent)" if wp == "off" else ""),
+            "" if browsers or wp == "off" else "🔔 in the workbench subscribes this browser (buddy push test sends one)")
     for r in wrote[:5]:  # wrote, refused, not paired since
         row(None, f"wrote but not paired: {r['sender']} on {r['channel']} ({r['times']}×, last {r['last']})",
             f"if that is you: {r['allow']}, then restart the buddy")

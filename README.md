@@ -163,20 +163,54 @@ cp buddy.example.toml buddy.toml           # workspace, allowed tools, jobs
 scripts/link-skills.sh                     # make skills/ visible to Claude Code
 ```
 
-**Feishu and Lark count every message call against a monthly quota** (code 99991403 once it
-is spent): a short story's card is one call to show and one per change, in each chat. So
-`[notify]` in buddy.toml says what each app gets on its own, and the default is nothing:
+**Nothing is sent on its own until you say so.** `[notify]` in buddy.toml says, per app, what the
+buddy sends without being asked: story cards, duty results, mirrors of what you said elsewhere.
+The default for every app is `off`: it answers you, nothing else.
 
 ```toml
 [notify]
-feishu = "off"   # off (default): it answers you, nothing else · ends: a story's start and end · all
-lark = "ends"
+telegram = "all"   # off (default) · ends: a story's start and end · all: every card change
+feishu = "ends"    # Feishu and Lark count every message call against a monthly quota (99991403)
+lark = "off"
+web = "all"        # the workbench's chat
+webpush = "off"    # your browsers, even with no tab open (🔔)
 ```
 
-Telegram and the web have no quota and get everything. A chat you wrote or pressed in within ten
-minutes still gets the posts and questions that follow from it. `buddy doctor` shows each
-app's setting and the message calls this buddy made this month; `buddy tui` → Config and the
-Setup tab change it.
+A chat you wrote or pressed in within ten minutes still gets the posts and questions that follow
+from it. It is followed live: a change applies to the next message, no restart. `buddy doctor` shows
+each app's setting, the message calls this buddy made this month (Feishu, Lark), and every outside
+endpoint in use (a fresh install calls none); `buddy tui` → Config and the Setup tab change it.
+A zh-CN setup doesn't offer Telegram or Lark (`buddy init` doesn't ask; Setup shows them on request).
+
+`[notify]` is followed live: the running buddy reads it again when buddy.toml changes, so a switch
+changed in the Setup tab, the TUI or by hand applies to the next message, with no restart (other
+settings still need one).
+
+**The workbench from another device on your LAN** (an SSH forward with a wildcard bind, e.g.
+`ssh -L 0.0.0.0:18787:127.0.0.1:8787 server` on a machine the phone can reach): set a long random
+`BUDDY_WEB_TOKEN` in `.env` (`python -c "import secrets; print(secrets.token_urlsafe(32))"`) and
+list the addresses the browser will use in `[web] hosts` (e.g. `["192.168.1.10"]` or
+`["192.168.0.0/16"]`), then restart. Every request then needs the token: open
+`http://192.168.1.10:18787/?token=…` once (it becomes a cookie and leaves the address bar), or type it
+on the login page; scripts send `Authorization: Bearer …`. Without a token, `[web] hosts` is ignored.
+Plain HTTP: anyone on that network can read the token and the pages, and web push needs
+127.0.0.1 or HTTPS; an SSH client on the device itself (`-L` to 127.0.0.1) has neither problem.
+
+**A long story into a terminal, from the phone:** in its thread, `/takeover` opens a pys window on
+the buddy's machine, in the story's folder, running `buddy-long take N` (it waits for the buddy's turn
+to end); `/shift` brings up the pys window that holds it already. The story's first message lists
+them with `/status`, `/handover` and `/takeback`. The workbench's Resume and Attach do the same.
+
+**Notifications outside the chats.** In the workbench, 🔔 (top right):
+
+- by default, system notifications **from that tab** (a question, a story that ends or fails, while
+  the tab is behind); nothing leaves the machine;
+- with `[notify] webpush = "ends"` (or `"all"`) in buddy.toml and a restart, 🔔 **subscribes that
+  browser to real web push**: notifications come even with no tab open. Nothing to register
+  anywhere: the buddy makes its own VAPID key; each browser makes its own keys, and every message is
+  end-to-end encrypted for it (RFC 8291), so the browser maker's push service (Google's, Mozilla's,
+  Apple's) only carries it. Each browser you want subscribes once; click again to unsubscribe.
+  `buddy push test` sends one to every subscribed browser. Off by default.
 
 ### 3. Run and pair
 
