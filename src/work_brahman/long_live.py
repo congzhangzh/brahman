@@ -340,7 +340,7 @@ def _ended(state: Path, channels: list, number: int) -> None:
 
 
 def pump(state: Path, channels: list, engines: dict | None = None) -> None:
-    """Every live story's new events; a /takeback that waited for a terminal or a release
+    """Every live story's new events; a /frompys that waited for a terminal or a release
     to end starts the live session once nobody holds it."""
     for s in L.all_stories(state):
         if s.get("live"):
@@ -379,7 +379,7 @@ def _waiting(state: Path, number: int) -> str:
     return "\n\n".join(got)
 
 
-# --- into a terminal through pys: the workbench's Resume and Attach, and /takeover, /shift ------
+# --- into a terminal through pys: the workbench's Resume and Attach, and /topys, /frompys ---
 
 def pys_path() -> str:
     """Where pys is, or "" when this machine has none."""
@@ -389,8 +389,8 @@ def pys_path() -> str:
 
 def to_terminal(story: dict, what: str, pys: str | None = None) -> tuple[int, str, object]:
     """A long story into a terminal (the owner, 2026-11-10: "attach or resume by pys"; 2026-11-12:
-    "/takeover … /shift to the active pys window, if one exists"). (status, what to say, window):
-    - "resume" (/takeover, the page's Resume): a new pys window in its folder runs
+    "/topys … /frompys"). (status, what to say, window):
+    - "resume" (/topys when no window holds it, the page's Resume): a new pys window in its folder runs
       `buddy-long take N`, which hands over when the buddy holds it, waits for its turn to end
       and resumes the session there;
     - "attach" (/shift, the page's Attach): the pys window a terminal holds it in comes to the
@@ -433,7 +433,7 @@ def to_terminal(story: dict, what: str, pys: str | None = None) -> tuple[int, st
         return 502, t("long.term.failed", why=str(e)), ""
 
 
-# --- the owner's commands: /status, /handover, /takeback, buddy-long take --------------------
+# --- the owner's commands: /status, /handover, /frompys, buddy-long take --------------------
 
 def status(state: Path, number: int) -> str:
     story = L.load(state, number)

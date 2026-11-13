@@ -9,7 +9,7 @@ the web keeps no state of its own:
     GET  /api/data    workflows, recent runs, asks, pause, and each kind's SOP (runs.SOPS)
     GET  /api/chat    the web chat: my messages, the buddy's answers, mirrors from the apps,
                       and the topics (topics.py); a message's "thread" is its topic, "" = main
-    POST /api/chat    {"text": ..., "thread": topic id or ""}: a message, as one typed in Lark
+    POST /api/chat    {"text": ..., "thread": topic id or "", "reply_to": a question's id}: a message, as one typed in Lark
     POST /api/topic   {"name": ...}: a new topic, opened in Lark (a thread) and here (a tab)
     POST /api/answer  {"ask": id, "choice": key}: an answer, as a button press in a chat is
     POST /api/stop    ■ STOP, the same as /stop in a chat
@@ -36,6 +36,7 @@ No secret is ever sent to the page; it sends a new one, or "-" to remove one.
     GET  /api/push        web push: {mode, key (VAPID, when on), browsers}
     POST /api/push/subscribe {"subscription": PushSubscription.toJSON()} · /api/push/unsubscribe {"endpoint"}
     POST /api/push/test   one test push to every subscribed browser: {sent, failed, dropped}
+    GET  /api/changes     What's new: {version, commit, checkout, markdown (CHANGES.md), latest}
     GET  /api/lanes?id=short-story:12   the story's swimlanes: who did what, where, in parallel (lanes.py)
     POST /api/lanes/attach {id, machine, session}   that session's pys window, brought up (pys select)
     POST /api/setup/ping     {"chat": ...}: "🏓 ping <code>" into that linked chat (pings.py); `pong`
@@ -219,11 +220,22 @@ class WebChat(_Posts):
                 f.rename(f.with_suffix(".bad"))
         return done
 
-    def say(self, text: str, thread: str = "") -> None:
-        """A message typed on the page; thread: the topic's tab it was typed in."""
-        self._add({"from": "you", "markdown": text, "thread": thread})
+    def say(self, text: str, thread: str = "", reply_to: str = "") -> None:
+        """A message typed on the page; thread: the topic's tab it was typed in; reply_to: the
+        question (prompt()) it answers, which is then marked answered."""
+        if reply_to and not any(m["id"] == reply_to and m.get("prompt") for m in self.history()):
+            reply_to = ""  # not an open question: an ordinary message
+        self._add({"from": "you", "markdown": text, "thread": thread, **({"reply_to": reply_to} if reply_to else {})})
+        if reply_to:
+            self._edit(reply_to, {"prompt": False, "line": t("chat.replied")})
         if self.on_message:
-            self.on_message(Incoming(CHAT, f"web:{time.time_ns()}", CHAT, text, thread=thread))
+            self.on_message(Incoming(CHAT, f"web:{time.time_ns()}", CHAT, text, reply_to=reply_to, thread=thread))
+
+    def prompt(self, chat: str, text: str) -> str | None:
+        """A question answered by a reply (a long story's task, a folder typed by hand): the page
+        puts ↩ Reply on it and makes the newest open one the reply box's target, as Telegram's
+        force reply does; the answer comes back as Incoming(reply_to=its id)."""
+        return self._add({"markdown": text, "prompt": True})
 
     def history(self) -> list[dict]:
         with self.lock:
@@ -342,6 +354,11 @@ class Web:
                     key = parse_qs(urlparse(self.path).query).get("id", [""])[0]
                     run = web.detail(key)
                     return self._json(run) if run else self._send(404, b"no such run", "text/plain")
+                if path == "/api/changes":  # What's new (changes.py): the notes and the running version
+                    from . import changes
+                    sha, checkout = changes.commit()
+                    return self._json({"version": changes.version(), "commit": sha, "checkout": checkout,
+                                       "markdown": changes.text(), "latest": (changes.released() or ("", ""))[0]})
                 if path == "/api/setup":
                     return self._json(web.setup(show_all=parse_qs(urlparse(self.path).query).get("all", [""])[0] == "1"))
                 if path == "/api/lanes":  # who did what, where, in parallel (lanes.py): a story's swimlanes
@@ -384,7 +401,7 @@ class Web:
                     thread = str(body.get("thread") or "")
                     if thread and not (topics.find(web.state, CHAT, thread) or longs.find(web.state, CHAT, thread)):
                         return self._send(400, b"no such topic", "text/plain")
-                    web.chat.say(text[:8000], thread)
+                    web.chat.say(text[:8000], thread, str(body.get("reply_to") or ""))
                     return self._json({"ok": True})
                 if path == "/api/topic":
                     if not web.chat:
@@ -605,13 +622,21 @@ class Web:
 
     def long(self, n: str, what) -> tuple[int, dict | str]:
         """A long story into a terminal, through pys (long_live.to_terminal: the page's Resume and
-        Attach, and the chats' /takeover and /shift). Codex: take is Claude's only."""
+        Attach, and the chats' /topys). Codex: take is Claude's only."""
         s = longs.load(self.state, int(n)) if n.isdigit() else None
-        if s is None or what not in ("attach", "resume"):
-            return 400, "n (a long story's number) and what (attach|resume)"
+        if s is None or what not in ("attach", "resume", "topys", "frompys"):
+            return 400, "n (a long story's number) and what (topys|frompys|attach|resume)"
         from . import long_live
-        code, said, window = long_live.to_terminal(s, what, pys_path())
-        return (200, {"ok": True, "window": window}) if code == 200 else (code, said)
+        if what == "frompys":  # back to the buddy, as /frompys: it waits for a terminal to let go
+            if not self.bot:
+                return 409, "the buddy is not running here"
+            said = long_live.takeback(self.state, self.bot.channels, s["id"],
+                                      longs.pick(getattr(self.bot, "long_engines", {}), "claude-code", s.get("mode")))
+            return 200, {"ok": True, "said": said}
+        code, said, window = long_live.to_terminal(s, "attach" if what == "topys" else what, pys_path())
+        if what == "topys" and code == 409 and not longs.held(s):  # no pys window holds it: take it over
+            code, said, window = long_live.to_terminal(s, "resume", pys_path())
+        return (200, {"ok": True, "window": window, "said": said}) if code == 200 else (code, said)
 
     def detail(self, key: str) -> dict | None:
         """A family's run whole, by its id ("short-story:12", "team:kit")."""

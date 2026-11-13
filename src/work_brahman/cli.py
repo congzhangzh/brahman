@@ -841,6 +841,13 @@ def main() -> int:
                   state, linked, scheduler)
         bot.long_engines = long
         bot.team_opts = team_opts
+        try:  # What's new (changes.py): the first start of a new version posts its notes once, following [notify]
+            from . import changes
+            said = changes.announce_once(state, channels, list(linked.chats))
+            if said:
+                log.info("version %s: %s", changes.version(), said)
+        except Exception:  # noqa: BLE001 - notes never stop the buddy
+            log.exception("what's new: the announcement failed")
         adopted = procs.adopt(bot.adopted)  # what the last instance left running: delivered when it ends
         if adopted:
             log.info("adopted %d runs from the last instance: %s", len(adopted), ", ".join(adopted))

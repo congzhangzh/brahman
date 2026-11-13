@@ -168,10 +168,10 @@ class Bot:
                 return self._safe(lambda c, m: self.long_new(c, m, *pending, text), ch, msg)
             story = longs.find(self.state, msg.chat, msg.thread) if msg.thread and self.state else None
             word, _, arg = text.partition(" ")
-            # /shiftto = /shift (into the owner's pys), /shiftfrom = /takeback (back to the buddy): the owner's
-            # names, 2026-11-12; the old ones still work
-            word = {"/shiftto": "/shift", "/shiftfrom": "/takeback"}.get(word, word) if story else word
-            if story and word in ("/status", "/handover", "/takeback", "/takeover", "/shift"):  # long_live.py
+            # /status (who holds it), /topys (into the owner's pys), /frompys (back to the buddy): the owner's
+            # three, 2026-11-12 ("I want it simple", then "/status: I need it"); a Telegram command is letters,
+            # digits and _, so they can be tapped
+            if story and word in ("/status", "/topys", "/frompys"):  # long_live.py
                 return self._safe(lambda c, m: self.long_holder(c, m, story, word), ch, msg)
             if story and (text in ("/help", "/start") or word in self.commands):
                 # the buddy's own command in a long story's thread: answered there by its code,
@@ -358,20 +358,18 @@ class Bot:
                 self.long_prompts[(msg.chat, handle)] = (engine, folder, mode)
 
     def long_holder(self, ch: Channel, msg: Incoming, story: dict, word: str) -> None:
-        """/status, /handover, /takeback, /takeover, /shift in a long story's thread: who holds the
-        session, and moving it to a terminal (a new pys window, or the one that holds it)."""
+        """/status, /topys, /frompys in a long story's thread: who holds the session; into the owner's pys (the window that holds it, else
+        a new one that takes it over, `buddy-long take`, which hands over by itself), and back to the
+        buddy (it waits for a terminal to let go)."""
         n = story["id"]
-        if word in ("/takeover", "/shift"):
+        if word == "/topys":
             now = longs.load(self.state, n) or story
-            code, said, _ = long_live.to_terminal(now, "resume" if word == "/takeover" else "attach")
-            if word == "/shift" and code == 409 and not longs.held(now):
-                # the owner, 2026-11-12 ("a"): /shift with no pys window holding it takes it over into one
+            code, said, _ = long_live.to_terminal(now, "attach")
+            if code == 409 and not longs.held(now):  # no pys window holds it: take it over into a new one
                 _, said, _ = long_live.to_terminal(now, "resume")
         elif word == "/status":
             said = long_live.status(self.state, n)
-        elif word == "/handover":
-            said = long_live.handover(self.state, self.channels, n)
-        else:
+        else:  # /frompys
             said = long_live.takeback(self.state, self.channels, n,
                                       longs.pick(self.long_engines, "claude-code", story.get("mode")))
         if said:

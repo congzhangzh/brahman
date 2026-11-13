@@ -163,6 +163,10 @@ pre.log.bad { border-color:var(--bad); }
 .sk-fit { font-size:12px; fill:var(--gold); }
 /* tabs and the chat */
 .tabs, .langs { display:flex; gap:4px; }
+.mdh { margin:12px 0 4px; font-size:1.05em; } h2.mdh { font-size:1.25em; } h3.mdh { font-size:1.12em; }
+.mdq { margin:4px 0; padding:2px 10px; border-left:3px solid var(--line); color:var(--dim, inherit); }
+#replying { font-size:12px; margin:0 0 4px; } #replying button { padding:0 6px; }
+.tabs button.dot::after { content:"●"; color:var(--gold); font-size:9px; margin-left:4px; vertical-align:top; }
 .bell { border:1px solid var(--line); background:var(--card); border-radius:999px; padding:1px 8px; cursor:pointer; font-size:13px; }
 .tabs button, .langs button { border:1px solid var(--line); background:var(--card); border-radius:999px; padding:3px 14px; font-size:13px; }
 .tabs button.on, .langs button.on { background:var(--sel); border-color:var(--gold); box-shadow:0 0 0 3px var(--glow); }
@@ -192,7 +196,7 @@ pre.log.bad { border-color:var(--bad); }
 </style>
 </head>
 <body>
-<header><h1>brahman</h1><div class="tabs"><button data-tab="bench" class="on" data-t="tab.bench">Workbench</button><button data-tab="chat" data-t="tab.chat">Chat</button><button data-tab="setup" data-t="tab.setup">Setup</button></div><span class="live" id="live" data-t="connecting"><i></i>connecting…</span><div class="corner"><video id="film" muted autoplay loop playsinline data-t-title="film_title" title="The film: click to watch it large"></video><div class="motto"><span class="mode"><button data-motto="what" data-t="motto.what">What</button><button data-motto="why" data-t="motto.why">Why</button></span><span class="humble" id="m-top"></span><span class="main" id="m-main"></span><span class="rot" id="rot"></span><span class="meter" id="meter"><span class="bar"><i></i></span><span></span></span></div></div><button class="bell" id="bell" data-t-title="bell_title" title="system notifications from this tab">🔕</button><div class="langs" data-t-title="lang_title" title="the page's language"><button data-lang="en">EN</button><button data-lang="zh-CN">中文</button></div><button class="stop" data-stop="1" title="stop everything that is running or waiting, and pause the schedule" data-t="stop" data-t-title="stop_title">■ STOP</button></header>
+<header><h1>brahman</h1><div class="tabs"><button data-tab="bench" class="on" data-t="tab.bench">Workbench</button><button data-tab="chat" data-t="tab.chat">Chat</button><button data-tab="setup" data-t="tab.setup">Setup</button><button data-tab="news" id="newstab" data-t="tab.news">What's new</button></div><span class="live" id="live" data-t="connecting"><i></i>connecting…</span><div class="corner"><video id="film" muted autoplay loop playsinline data-t-title="film_title" title="The film: click to watch it large"></video><div class="motto"><span class="mode"><button data-motto="what" data-t="motto.what">What</button><button data-motto="why" data-t="motto.why">Why</button></span><span class="humble" id="m-top"></span><span class="main" id="m-main"></span><span class="rot" id="rot"></span><span class="meter" id="meter"><span class="bar"><i></i></span><span></span></span></div></div><button class="bell" id="bell" data-t-title="bell_title" title="system notifications from this tab">🔕</button><div class="langs" data-t-title="lang_title" title="the page's language"><button data-lang="en">EN</button><button data-lang="zh-CN">中文</button></div><button class="stop" data-stop="1" title="stop everything that is running or waiting, and pause the schedule" data-t="stop" data-t-title="stop_title">■ STOP</button></header>
 <div class="filmbox" id="filmbox" hidden><button class="x" id="filmx" data-t-title="film_close" title="close (Esc)">✕</button><video id="filmbig" controls playsinline></video></div>
 <div class="halt" id="halt" hidden></div>
 <div id="chatview" hidden>
@@ -200,6 +204,7 @@ pre.log.bad { border-color:var(--bad); }
   <div class="thread" id="thread"></div>
   <div class="compose"><textarea id="say" placeholder="Message the buddy: the same session as Lark and Telegram, mirrored to them. Enter sends, Shift+Enter is a new line." data-t-placeholder="chat.say"></textarea><button id="send" data-t="send">Send</button></div>
 </div>
+<div id="newsview" hidden style="max-width:900px;margin:0 auto;padding:10px 20px 24px"><div class="dim" id="news-ver"></div><div id="news-md"></div></div>
 <div id="setupview" hidden>
   <div id="sv-banner"></div>
   <div class="sub"><button data-sv="doctor" class="on" data-t="setup.doctor">Doctor</button><button data-sv="ping" data-t="setup.ping">Ping</button><button data-sv="config" data-t="setup.config">Config</button><button data-sv="peers" data-t="setup.peers">Peers</button><button data-sv="log" data-t="setup.log">Log</button></div>
@@ -233,7 +238,7 @@ pre.log.bad { border-color:var(--bad); }
   <section class="level"><h2 data-t="h.l3">Level 3 · Observation<span id="l3h"></span></h2><div class="observe" id="observe"></div></section>
 </main>
 <script>
-const S = { run: null, part: "", data: null, drafts: {}, topic: "", detail: {}, fetching: {}, role: "", scrollRole: false, fromLink: false, notFound: "" };  // topic: the chat tab's conversation, "" = main  // drafts: a story's reply being typed
+const S = { run: null, part: "", data: null, drafts: {}, topic: "", detail: {}, fetching: {}, role: "", scrollRole: false, fromLink: false, notFound: "", replyTo: "", replyNo: "" };  // topic: the chat tab's conversation, "" = main  // drafts: a story's reply being typed
 // The page's words in each language (text.py's "page." keys, and the SOP labels as "label."):
 // web.py fills TEXTS in when it serves the page and sets <html lang> to buddy.toml's language.
 // The page starts in ?lang= (this load only), else the choice kept in this browser (EN / 中文),
@@ -270,17 +275,27 @@ function inline(s) {
   return esc(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
     .replace(/(^|\W)_(.+?)_(\W|$)/g, "$1<i>$2</i>$3").replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
 }
-function md(text) {  // the Markdown duties post: paragraphs, lists, tables, code blocks
+function md(text) {  // the Markdown duties post: headings, paragraphs, lists, quotes, tables, code blocks
   const out = [], lines = String(text || "").split("\n");
   for (let i = 0; i < lines.length; i++) {
-    const l = lines[i];
-    if (l.startsWith("```")) { const b = []; for (i++; i < lines.length && !lines[i].startsWith("```"); i++) b.push(lines[i]); out.push(`<pre>${esc(b.join("\n"))}</pre>`); }
+    const l = lines[i], h = /^(#{1,6})\s+(.*)$/.exec(l);
+    if (h) { const n = Math.min(h[1].length + 1, 6); out.push(`<h${n} class="mdh">${inline(h[2])}</h${n}>`); }
+    else if (l.startsWith(">")) {
+      const q = []; for (; i < lines.length && lines[i].startsWith(">"); i++) q.push(lines[i].replace(/^>\s?/, ""));
+      i--; out.push(`<blockquote class="mdq">${md(q.join("\n"))}</blockquote>`);
+    }
+    else if (l.startsWith("```")) { const b = []; for (i++; i < lines.length && !lines[i].startsWith("```"); i++) b.push(lines[i]); out.push(`<pre>${esc(b.join("\n"))}</pre>`); }
     else if (l.startsWith("|")) {
       const rows = [];
       for (; i < lines.length && lines[i].startsWith("|"); i++) if (!/^\|[-| :]+\|$/.test(lines[i])) rows.push(lines[i].slice(1, -1).split("|").map(c => inline(c.trim())));
       i--; out.push("<table>" + rows.map((r, k) => "<tr>" + r.map(c => k ? `<td>${c}</td>` : `<th>${c}</th>`).join("") + "</tr>").join("") + "</table>");
     } else if (l.startsWith("- ")) {
-      const items = []; for (; i < lines.length && lines[i].startsWith("- "); i++) items.push(`<li>${inline(lines[i].slice(2))}</li>`);
+      const items = [];  // an item's wrapped lines (indented) belong to it
+      for (; i < lines.length && lines[i].startsWith("- "); i++) {
+        let it = lines[i].slice(2);
+        while (i + 1 < lines.length && /^\s{2,}\S/.test(lines[i + 1])) it += " " + lines[++i].trim();
+        items.push(`<li>${inline(it)}</li>`);
+      }
       i--; out.push(`<ul>${items.join("")}</ul>`);
     } else if (l.trim()) out.push(`<div>${inline(l)}</div>`);
   }
@@ -637,10 +652,12 @@ function longBar(L) {
   const sq = s => `'${String(s).replace(/'/g, `'\\''`)}'`;  // a shell word, whatever the folder's name holds
   const cmd = L.engine === "codex" ? `cd ${sq(L.cwd)} && codex resume ${sq(L.session_id)}` : "";
   if (!S.data.pys && L.engine !== "codex" && !(L.held && L.mux !== "pys")) return `<div class="choices" style="grid-column:1/-1;margin-bottom:6px"><span class="mute">${tr("long.no_pys")}</span></div>`;
-  const btn = L.held ? (L.mux === "pys" ? `<button data-long="${L.n}" data-what="attach">${tr("long.attach")}</button>` : `<span class="mute">${tr("long.held_screen")}</span>`)
-    : L.engine === "codex" ? `<span class="mute">${tr("long.codex_by_hand")}</span> <code>${esc(cmd)}</code>`
-    : `<button data-long="${L.n}" data-what="resume">${tr("long.resume")}</button>`;
-  return `<div class="choices" style="grid-column:1/-1;margin-bottom:6px">${btn} <span class="mute" id="long-said"></span></div>`;
+  // To pys = /topys (the window that holds it, else a new one takes it over); From pys = /frompys
+  const btn = L.engine === "codex" && !L.held ? `<span class="mute">${tr("long.codex_by_hand")}</span> <code>${esc(cmd)}</code>`
+    : L.held && L.mux !== "pys" ? `<span class="mute">${tr("long.held_screen")}</span>`
+    : `<button data-long="${L.n}" data-what="topys">${tr("long.topys")}</button>`;
+  const back = L.engine === "codex" ? "" : ` <button data-long="${L.n}" data-what="frompys">${tr("long.frompys")}</button>`;
+  return `<div class="choices" style="grid-column:1/-1;margin-bottom:6px">${btn}${back} <span class="mute" id="long-said"></span></div>`;
 }
 
 // The SOP a run is drawn on: its kind's (runs.SOPS, in /api/data), unless the run recorded a
@@ -901,27 +918,58 @@ async function loadChat() {
           ${m.buttons && m.buttons.length ? `<div class="choices">${m.buttons.map(([l, a]) => { const [, n, what] = a.split(":");
             if (a.startsWith("team:")) return `<button data-team-prefill="${esc(n)}">${esc(l)}</button>`;
             return what === "stop" ? `<button class="danger" data-short-stop="${esc(n)}">${esc(l)}</button>` : what.startsWith("a") ? `<button data-short-answer="${esc(a)}">${esc(l)}</button>` : `<button data-short-prefill="${esc(n)}" title="${tr("chat.prefill", { n: esc(n) })}">${esc(l)}</button>`; }).join("")}</div>` : ""}
+          ${m.prompt ? `<div class="choices"><button data-reply="${esc(m.id)}">${tr("chat.reply")}</button></div>` : ""}
           ${m.line ? `<div class="answered">${esc(m.line)}</div>` : ""}
           ${m.working ? `<div class="choices"><button class="danger" data-stop="1">${tr("stop_btn")}</button></div>` : ""}
           ${m.resume ? `<div class="choices"><button data-resume="1">${tr("resume")}</button></div>` : ""}</div>`).join("")
     : `<div class="mute">${tr("chat.empty")}</div>`;
   if (atEnd) el.scrollTop = el.scrollHeight;
+  const last = msgs[msgs.length - 1];  // the newest message an open question: the reply box answers it (Telegram's force reply)
+  if (last && last.prompt && S.replyNo !== last.id) S.replyTo = last.id;
+  if (S.replyTo && !msgs.some(m => m.id === S.replyTo && m.prompt)) S.replyTo = "";
+  replyBar(msgs);
+}
+function replyBar(msgs) {
+  let bar = document.getElementById("replying");
+  if (!bar) { bar = document.createElement("div"); bar.id = "replying"; bar.className = "mute"; const say = document.getElementById("say"); say.parentNode.insertBefore(bar, say); }
+  const q = S.replyTo && (msgs || []).find(m => m.id === S.replyTo);
+  bar.hidden = !q;
+  if (q) bar.innerHTML = `${esc(tr("chat.replying", { q: q.markdown.replace(/\s+/g, " ").slice(0, 80) }))} <button data-reply-cancel="1" title="${tr("chat.reply_cancel")}">✕</button>`;
 }
 async function send() {
   const box = document.getElementById("say"), text = box.value.trim();
   if (!text) return;
   box.value = "";
-  await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json", "X-Buddy": "1" }, body: JSON.stringify({ text, thread: S.topic }) });
+  const reply_to = S.replyTo || "";
+  if (reply_to) { S.replyNo = reply_to; S.replyTo = ""; }
+  await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json", "X-Buddy": "1" }, body: JSON.stringify({ text, thread: S.topic, reply_to }) });
   loadChat();
 }
 document.getElementById("send").addEventListener("click", send);
 document.addEventListener("input", e => { if (e.target.id.startsWith("reply-")) S.drafts[e.target.id.slice(6)] = e.target.value; });
 document.getElementById("say").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
+// What's new (changes.py, CHANGES.md): the notes, the running version; a dot on the tab until the
+// newest released section has been opened in this browser.
+async function newsLoad(open) {
+  let j; try { j = await (await fetch("/api/changes", { cache: "no-store" })).json(); } catch (_) { return; }
+  let seen = ""; try { seen = localStorage.getItem("newsSeen") || ""; } catch (_) {}
+  document.getElementById("newstab").classList.toggle("dot", !!j.latest && j.latest !== seen && !open);
+  if (!open) return;
+  document.getElementById("news-ver").textContent = [tr("news.running", { v: j.version }), j.commit ? tr("news.commit", { c: j.commit }) : "",
+    j.checkout ? tr("news.checkout") : ""].filter(Boolean).join(" · ");
+  const box = document.getElementById("news-md");
+  box.innerHTML = md(j.markdown.replace(/^# .*\n/, ""));
+  const here = j.checkout ? "Unreleased" : j.version;  // a checkout runs what is not released yet
+  box.querySelectorAll("h3.mdh").forEach(e => { if (e.textContent.trim() === here) e.insertAdjacentHTML("beforeend", ` <span class="mute">${tr("news.here")}</span>`); });
+  try { if (j.latest) localStorage.setItem("newsSeen", j.latest); } catch (_) {}
+}
 function tab(name) {
   document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
   document.getElementById("bench").hidden = name !== "bench";
   document.getElementById("chatview").hidden = name !== "chat";
   document.getElementById("setupview").hidden = name !== "setup";
+  document.getElementById("newsview").hidden = name !== "news";
+  if (name === "news") newsLoad(true);
   try { localStorage.setItem("tab", name); } catch (_) {}
   if (name === "setup") setupLoad(true);
   if (name === "chat") { chatSeen = ""; loadChat(); document.getElementById("say").focus(); }
@@ -952,6 +1000,8 @@ document.addEventListener("click", e => {
   if (b.dataset.stop) return post("/api/stop");
   if (b.dataset.resume) return post("/api/resume");
   if (b.dataset.teamPrefill) { if (document.getElementById("chatview").hidden) tab("chat"); const box = document.getElementById("say"); box.value = `/team ${b.dataset.teamPrefill} `; return box.focus(); }
+  if (b.dataset.reply) { S.replyTo = b.dataset.reply; S.replyNo = ""; chatSeen = ""; loadChat(); return document.getElementById("say").focus(); }
+  if (b.dataset.replyCancel) { S.replyNo = S.replyTo; S.replyTo = ""; chatSeen = ""; return loadChat(); }
   if (b.dataset.shortPrefill) { const box = document.getElementById("say"); box.value = `/short ${b.dataset.shortPrefill} `; return box.focus(); }
   if (b.dataset.shortAnswer) { const [, n, what] = b.dataset.shortAnswer.split(":"); b.disabled = true; return post("/api/short", { n: +n, what }); }
   if (b.dataset.shortStop) { b.disabled = true; return post("/api/short", { n: +b.dataset.shortStop, what: "stop" }); }
@@ -965,7 +1015,7 @@ document.addEventListener("click", e => {
     b.disabled = true;
     fetch("/api/long", { method: "POST", headers: { "Content-Type": "application/json", "X-Buddy": "1" },
       body: JSON.stringify({ n: +b.dataset.long, what: b.dataset.what }) })
-      .then(async r => { const said = document.getElementById("long-said"); if (said) said.textContent = r.ok ? tr("long.done", { w: (await r.json()).window }) : await r.text(); })
+      .then(async r => { const said = document.getElementById("long-said"); if (!said) return; if (!r.ok) { said.textContent = await r.text(); return; } const j = await r.json(); said.textContent = j.said || tr("long.done", { w: j.window }); })
       .finally(() => { b.disabled = false; setTimeout(load, 1500); });
     return;
   }
@@ -990,6 +1040,7 @@ function toHash(id) {
 }
 window.addEventListener("hashchange", () => { fromHash(); render(); });
 fromHash();
+newsLoad(false);
 pushState();
 load();
 setInterval(load, 5000);
@@ -1237,7 +1288,7 @@ document.addEventListener("click", async e => {
   }
 });
 setInterval(() => { if (!document.getElementById("setupview").hidden) setupLoad(false); }, 3000);  // who wrote shows up by itself
-try { S.topic = localStorage.getItem("topic") || ""; { const t0 = localStorage.getItem("tab"); if (t0 === "chat" || t0 === "setup") tab(t0); } } catch (_) {}
+try { S.topic = localStorage.getItem("topic") || ""; { const t0 = localStorage.getItem("tab"); if (t0 === "chat" || t0 === "setup" || t0 === "news") tab(t0); } } catch (_) {}
 </script>
 </body>
 </html>

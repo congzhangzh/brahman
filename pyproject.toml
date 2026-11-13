@@ -1,6 +1,6 @@
 [project]
 name = "brahman-buddy"
-version = "20261112.7"
+version = "20261113.1"
 license = "MIT"
 license-files = ["LICENSE"]
 description = "A personal work buddy: Telegram, Lark and Feishu chats driving Claude Code, with scheduled jobs, short and long stories, and portable skills"

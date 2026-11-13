@@ -25,7 +25,7 @@ session's own transcript is the single source of truth; the thread is a mirror o
 | 2 | **Turn**: the session answers | the session | its Stop hook posts the turn's last message | the thread | one message per turn, its prompt as the subtitle |
 | 3 | **Say**: you write in the thread | you | Codex: `codex queue`, which Codex's daemon hands to the terminal or runs itself. Claude Code: held by a terminal: typed into its window when idle, handed over by its Stop hook when busy; held by the buddy (🤖): one JSON line into its live session, a permission it needs comes back as ✅ Allow / ⛔ Deny; handed over (⏳ 📌): it waits for the terminal; held by nobody (💤): it waits and a card asks first, ▶ Resume / ⏸ Not now (a resume loads the whole conversation again: tokens), then the live session starts with what waited | the session | the reply says 📨 sent / ⌨ typed / 📥 queued / 📥 kept, or the card asks |
 | 4 | **Wait**: it needs a person | the session | Claude Code: its Notification hook posts the dialog as the screen shows it; Codex: its PermissionRequest hook posts a card with ✅ Allow / ⛔ Deny and waits (45 s while a terminal holds it, 9 min when none does) | the thread, the card | Claude Code: you reply with a number, that key is pressed; Codex: your press is its answer, or the terminal asks once the wait ends |
-| 5 | **Hand over / take back** | you | `/status` says who holds it (🤖 buddy, ⏳ releasing, 📌 reserved, 👤 terminal, 💤 nobody). `/handover`: the buddy ends its turn and closes, the session is kept for your terminal; `buddy-long take <n>` there does it all and resumes it here. `/takeback`: the buddy holds it again (from a terminal: once it closes, or ⏹ End it now, between turns). Closing the terminal (SessionEnd) leaves it to the thread | the thread | one writer at a time (specs/long-story-protocol.md) |
+| 5 | **Into your pys / back** | you | Three commands (the owner, 2026-11-12: "I want it simple", and /status kept: "I need it"). `/status` says who holds it. `/topys`: the pys window that holds it comes up, else a new one in its folder runs `buddy-long take <n>`, which hands over by itself (the buddy ends its turn and closes) and resumes it there; the reply says who held it (🤖 buddy, ⏳ releasing, 📌 reserved, 👤 terminal, 💤 nobody). `/frompys`: the buddy holds it again (from a terminal: once it closes, or ⏹ End it now, between turns). Closing the terminal (SessionEnd) leaves it to the thread | the thread | one writer at a time (specs/long-story-protocol.md) |
 
 ## Rules
 
@@ -40,7 +40,7 @@ session's own transcript is the single source of truth; the thread is a mirror o
   refusal, same id, two diverging stories). So the buddy starts its process only when nobody
   holds the session and `claude agents --json` shows no other process with it; a terminal goes
   in through `buddy-long take <n>`; a terminal that opens it anyway makes the buddy step back.
-- **A session that ended comes back only after the owner says so** (▶ Resume, /takeback):
+- **A session that ended comes back only after the owner says so** (▶ Resume, /frompys):
   never on its own, since a resume costs tokens.
 - **No test reaches a real agent or terminal** (`tests/conftest.py`): a test once opened a
   real `claude` window in the owner's pys.

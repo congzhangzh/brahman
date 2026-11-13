@@ -196,10 +196,10 @@ on the login page; scripts send `Authorization: Bearer …`. Without a token, `[
 Plain HTTP: anyone on that network can read the token and the pages, and web push needs
 127.0.0.1 or HTTPS; an SSH client on the device itself (`-L` to 127.0.0.1) has neither problem.
 
-**A long story into a terminal, from the phone:** in its thread, `/takeover` opens a pys window on
-the buddy's machine, in the story's folder, running `buddy-long take N` (it waits for the buddy's turn
-to end); `/shift` brings up the pys window that holds it already. The story's first message lists
-them with `/status`, `/handover` and `/takeback`. The workbench's Resume and Attach do the same.
+**A long story into a terminal, from the phone:** in its thread, `/topys` brings up the pys window
+that holds it, or opens one on the buddy's machine, in the story's folder, running `buddy-long take N`
+(it waits for the buddy's turn to end); `/frompys` gives it back to the buddy. The story's first message
+names them, with `/status` (who holds it). The workbench's long-story card has To pys and From pys.
 
 **Notifications outside the chats.** In the workbench, 🔔 (top right):
 

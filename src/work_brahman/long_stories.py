@@ -10,7 +10,7 @@ Whoever drives the session resumes that same session id, one at a time:
   when it is busy. The buddy is only its puppet: it never runs a second process on it, and the
   session lives or ends on its own.
 - **The buddy holds it** (long_live.py, specs/long-story-protocol.md): /newlong, ▶ Resume and
-  /takeback run it as one live process over the stream-json protocol, a unit under the
+  /frompys run it as one live process over the stream-json protocol, a unit under the
   umbrella; a message goes in as one JSON line, a permission comes out as ✅ Allow / ⛔ Deny.
   /handover and `buddy-long take <n>` give it to a terminal: one writer at a time.
 - **Nobody holds it**: what the owner writes waits, and a card asks first whether to resume it,
@@ -488,7 +488,9 @@ def new(state: Path, channels: list[Channel], chats: list[str], text: str, *, cw
     how = ("open" if wrapped else "open-nobwrap") if mode == "open" else ("bwrap" if wrapped else "none")
     gate.check_new(state, text, cwd, short, sandbox=how, who=f"{who}@{where}" if who else where)
     story = _create(state, channels, chats, title=text[:40], session_id="", cwd=cwd, engine=kind, mode=mode)
-    _post(channels, story, t("long.made_live" if live else "long.made", where=app(where), cwd=cwd)
+    asked = text if len(text) <= 1500 else text[:1500] + " …"
+    _post(channels, story, t("long.first", text="\n".join("> " + l for l in asked.splitlines() or [""]))
+          + "\n\n" + t("long.made_live" if live else "long.made", where=app(where), cwd=cwd)
           + ("\n\n" + t("long.mode.open") if mode == "open" else "") + "\n\n" + t("long.moves", n=story["id"]),
           title=t("long.title.new"))
     env, prompt = {}, text
