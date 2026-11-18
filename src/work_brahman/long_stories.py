@@ -66,6 +66,11 @@ def load(state: Path, number: int) -> dict | None:
 
 
 def _save(state: Path, story: dict) -> None:
+    from . import privacy
+    try:  # the private/public tag, judged again when the text changed (privacy.py)
+        privacy.tag("long", story)
+    except Exception:  # noqa: BLE001 - a marker never stops a save; the page treats it as private
+        story["private"] = True
     p = _dir(state) / f"{story['id']}.json"
     tmp = p.with_suffix(".tmp")
     tmp.write_text(json.dumps(story, ensure_ascii=False, indent=1))

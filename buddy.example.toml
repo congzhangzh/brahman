@@ -125,6 +125,14 @@ schedule = "0 9 1 * *"              # the 1st of every month, 09:00: the month t
 
 # What Feishu and Lark get on their own: their API calls count against a monthly quota.
 # off (the default): nothing; they answer you · ends: a story's card at its start and end · all
+# Each short and long story is tagged private or public (privacy.py): the workbench's
+# "public view" (a switch in its header, per browser, 3 h) hides the private ones, for a screen
+# recording. The marker is `brahman-privacy-mark` on PATH or in ~/bin (yours), else the shipped
+# sample (privacy_mark.py: home paths, the user and host names, IPs, e-mail, chat ids, these words,
+# and privacy-scan's patterns). A failing marker means private. `buddy-short private <n> on|off|auto`.
+# [privacy]
+# words = ["a colleague's name", "a private project"]
+
 [notify]
 feishu = "off"
 lark = "off"

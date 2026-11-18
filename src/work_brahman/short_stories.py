@@ -198,6 +198,11 @@ def load(state: Path, number: int) -> dict | None:
 
 
 def _save(state: Path, story: dict) -> None:
+    from . import privacy
+    try:  # the private/public tag, judged again when the text changed (privacy.py)
+        privacy.tag("short", story)
+    except Exception:  # noqa: BLE001 - a marker never stops a save; the page treats it as private
+        story["private"] = True
     p = _dir(state) / f"{story['id']}.json"
     tmp = p.with_suffix(".tmp")
     tmp.write_text(json.dumps(story, ensure_ascii=False, indent=1))
@@ -512,11 +517,13 @@ def _sync_parent(state: Path, channels: list[Channel], child: dict) -> None:
 
 def mark(state: Path, channels: list[Channel], number: int, name: str, *, status: str = "done",
          note: str = "", took: str | None = None, round: int | None = None, by: dict | None = None,
-         inputs: dict | None = None, outputs: dict | None = None, win: dict | None = None) -> dict | None:
+         inputs: dict | None = None, outputs: dict | None = None, win: dict | None = None,
+         links: dict | None = None) -> dict | None:
     """A mark happened. took: the option a fork went down; round: a loop's round (from 1).
     by: who marks it (executor()); inputs, outputs: what the step used and made (key: value);
     win: the pys window the marking session runs in (window, pid, started), for the Lanes'
-    attach (lanes.py)."""
+    attach (lanes.py); links: {"in": {key: url}, "out": {key: url}} for values whose repo was certain
+    (links.py), kept as made."""
     def change(s):
         m = _mark(s, name, status, note, took, round)
         _ids(s)
@@ -528,14 +535,27 @@ def mark(state: Path, channels: list[Channel], number: int, name: str, *, status
         for key, got in (("in", inputs), ("out", outputs)):
             if got:
                 m[key] = {**m.get(key, {}), **got}
+        # links apart for --in and --out ({"in": {...}, "out": {...}}); a value set again loses its old link
+        # unless this mark linked it anew, so run=222 never points at run 111 (review, 2026-11-17)
+        for which, vals in (("in", inputs), ("out", outputs)):
+            if vals:
+                kept = {k: u for k, u in (m.get("links") or {}).get(which, {}).items() if k not in vals}
+                m.setdefault("links", {})[which] = {**kept, **(links or {}).get(which, {})}
         took_ = (m.get("fork") or {}).get("took") if took else None
-        made = " · " + " ".join(f"{k}={v}" for k, v in outputs.items()) if outputs else ""
+        # a linked value is written as a markdown link: the card (Telegram, Lark), the page and the terminal show it
+        out_links = (links or {}).get("out", {})
+        made = (" · " + " ".join(f"[{k}={v}]({out_links[k]})" if k in out_links else f"{k}={v}"
+                                 for k, v in outputs.items())) if outputs else ""
         _event(s, _noted(f"{ICON[status]} {m['name']}" + (f" → {took_}" if took_ else "")
                          + _round(m.get("loop"), m["loop"].get("last") if m.get("loop") else None)
                          + made + moved, note),
                step=m.get("id"), status=status, by=(by or {}).get("by"), **{"in": inputs or {}, "out": outputs or {}},
                **({"win": win} if win else {}))
-    return _change(state, channels, number, change)
+    story = _change(state, channels, number, change)
+    if story is not None and by and by.get("by"):
+        from . import tooluse
+        tooluse.attach(state, by["by"])  # its tool hook now looks for the step this session is doing
+    return story
 
 
 def plan(state: Path, channels: list[Channel], number: int, marks: list[str]) -> dict | None:

@@ -85,11 +85,34 @@ def _bars(story: dict, prefix: str = "") -> list[dict]:
             by = m.get("by", "")
         machine, session, agent = where(by)
         win = next((e["win"] for e in reversed(evs) if isinstance(e.get("win"), dict)), None)
-        out.append({"step": prefix + names.get(sid, sid), "n": order.get(sid), "machine": machine, "session": session,
+        out.append({"step": prefix + names.get(sid, sid), "id": prefix + sid, "n": order.get(sid), "machine": machine, "session": session,
                     "agent": agent, "win": win,
                     "start": _ts((start or last)["at"]), "end": _ts(end["at"]) if end else None,
                     "status": (end or last).get("status", "doing"), "open": end is None and start is not None})
     return out
+
+
+def _owner(story: dict, now: float, prefix: str = "") -> dict:
+    """The owner's lane (specs/views.md, phase 1): what he did on the story and how long it waited for
+    him, from what the story already records. Kinds, apps and times only, never his words.
+    points: each answer (where it came from), each 💬 reply, the ■ Stop; waits: each question from its
+    ask to its answer (an open one to now while the story runs), with the step a fork's answer decides."""
+    points, waits = [], []
+    running = story.get("status") == "running"
+    for q in story.get("questions", []):
+        a, asked = q.get("answer"), _ts(q.get("asked", ""))
+        if a:
+            points.append({"kind": "answer", "at": _ts(a.get("at", "")), "where": a.get("where", ""), "q": prefix + str(q["id"])})
+        if asked:
+            end = _ts(a["at"]) if a else (now if running else None)
+            if end is not None:
+                waits.append({"q": prefix + str(q["id"]), "start": asked, "end": end, "open": not a,
+                              "step": prefix + q["fork"] if q.get("fork") else ""})
+    for r in story.get("replies", []):
+        points.append({"kind": "reply", "at": _ts(r.get("at", "")), "where": r.get("where", "")})
+    if stop := story.get("stop"):
+        points.append({"kind": "stop", "at": _ts(stop.get("at", "")), "where": stop.get("where", "")})
+    return {"points": [p for p in points if p["at"]], "waits": waits}
 
 
 def _held(story: dict, local: set[str]) -> dict:
@@ -110,12 +133,21 @@ def of_story(state: Path, number: int, now: float | None = None, local: set[str]
         return None
     now = now if now is not None else time.time()
     local = here() if local is None else local
-    bars, held = _bars(s), _held(s, local)
+    bars, held, owner = _bars(s), _held(s, local), _owner(s, now)
     for c in shorts.children(s):
         child = shorts.load(state, c)
         if child:
             bars += _bars(child, prefix=f"#{c} ")
             held = {**_held(child, local), **held}
+            o = _owner(child, now, prefix=f"#{c} ")
+            owner["points"] += o["points"]
+            owner["waits"] += o["waits"]
+    owner["points"].sort(key=lambda p: p["at"])
+    owner["waits"].sort(key=lambda w: w["start"])
+    waited = {}  # a step a fork's question decided: how long it waited for him
+    for w in owner["waits"]:
+        if w["step"]:
+            waited[w["step"]] = waited.get(w["step"], 0) + (w["end"] - w["start"])
     for b in bars:
         if b["open"]:
             b["end"] = now
@@ -125,6 +157,8 @@ def of_story(state: Path, number: int, now: float | None = None, local: set[str]
     ends = sorted(b["end"] for b in bars if b["end"] is not None)
     for b in bars:
         b["inferred"] = False
+        if b["step"] in waited:
+            b["waited"] = round(waited[b["step"]])
         if b["end"] is not None and b["start"] == b["end"] and not b["open"]:
             before = [e for e in ends if e < b["end"]]
             b["start"], b["inferred"] = (before[-1] if before else started or b["end"]), True
@@ -147,10 +181,11 @@ def of_story(state: Path, number: int, now: float | None = None, local: set[str]
                      "here": m in local, "window": str(w["window"]) if w else "", "live": live(w)})
     rows.sort(key=lambda r: (not r["here"], r["machine"], first[(r["machine"], r["session"])], r["session"], r["agent"] != "",
                              min(b["start"] for b in r["bars"])))
-    times = [b["start"] for b in bars] + [b["end"] for b in bars if b["end"]]
+    times = ([b["start"] for b in bars] + [b["end"] for b in bars if b["end"]]
+             + [p["at"] for p in owner["points"]] + [w["start"] for w in owner["waits"]] + [w["end"] for w in owner["waits"]])
     t0 = min(times + [_ts(s.get("started", ""))]) if times else _ts(s.get("started", ""))
     t1 = max(times + [t0 + 60]) if times else t0 + 60
     if s.get("status") == "running":
         t1 = max(t1, now)
     return {"id": f"short-story:{number}", "title": s["title"], "status": s.get("status"), "t0": t0, "t1": t1,
-            "lanes": rows}
+            "lanes": rows, "owner": owner}

@@ -92,6 +92,17 @@ which last weeks: a short story lasts minutes to hours.
   under that limit and wait again.
 - Code only, no tokens: `buddy short` posts and edits cards itself; it does not start an agent.
 
+## The tools a step used (specs/views.md, phase 2)
+
+`buddy-short tools install` adds one PostToolUse hook to `~/.claude/settings.json` (a dated copy first;
+`uninstall` takes it out). Claude Code calls it only for `Bash`, `Skill`, `WebSearch`, `WebFetch` and MCP
+tools, and `scripts/buddy-short` stops in the shell unless the session has marked a running story
+(`short_stories/attached/<session>`). It records, by rules and at $0, only the owner's side: an MCP
+server, a skill, his own CLI (under the home folder, or `[views] cli`), the web. Never a built-in.
+The name goes onto the step that session is doing (a mark's `tools`); the arguments are copied apart
+from the story, in `args/<n>.jsonl` (0600, each value cut to 4 KB, never in the events, so never synced),
+shown only behind ⚙ → "🐞 debug: arguments" in the workbench's detail panel. tooluse.py.
+
 ## Where it lives
 
 - The board: `$XDG_STATE_HOME/work_brahman/short_stories/<number>.json` (`src/work_brahman/short_stories.py`).

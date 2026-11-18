@@ -52,10 +52,36 @@ class _Connection(http.client.HTTPSConnection):
     timeout (80 s for a long poll) on every call before trying IPv4.
     """
     good_family = None
+    avoid = None  # a family whose connect timed out: tried last, in every process, for a week
+    remember: Path | None = None  # state/telegram-net.json keeps `avoid` for the processes after this one
+    # (2026-11-14: each buddy-short call is a new process and started from IPv6 again, whose route to
+    # Telegram times out here 5 times in 6: up to 5 s more per call, measured; remembering the family
+    # that worked was not enough, since IPv6 works 1 time in 6 and then cost the next process 5 s)
+
+    @classmethod
+    def recall(cls, path: Path | None) -> None:
+        cls.remember = path
+        try:
+            d = json.loads(path.read_text()) if path else {}
+            if time.time() - float(d.get("at", 0)) < 7 * 86400:
+                cls.avoid = int(d["avoid"])
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+
+    @classmethod
+    def _failed(cls, family) -> None:
+        if cls.avoid == family or cls.remember is None:
+            cls.avoid = family
+            return
+        cls.avoid = family
+        try:
+            cls.remember.write_text(json.dumps({"avoid": int(family), "at": time.time()}))
+        except OSError:
+            pass
 
     def connect(self):
         addrs = socket.getaddrinfo(self.host, self.port, type=socket.SOCK_STREAM)
-        addrs.sort(key=lambda a: a[0] != _Connection.good_family)
+        addrs.sort(key=lambda a: (a[0] == _Connection.avoid, a[0] != _Connection.good_family))
         err = None
         for family, kind, proto, _, addr in addrs:
             sock = socket.socket(family, kind, proto)
@@ -65,6 +91,7 @@ class _Connection(http.client.HTTPSConnection):
             except OSError as e:
                 sock.close()
                 err = e
+                _Connection._failed(family)
                 continue
             sock.settimeout(self.timeout)
             _Connection.good_family = family
@@ -88,6 +115,8 @@ class Telegram:
     def __init__(self, token: str, state: Path | None = None):
         self.token = token  # part of every URL: never log a URL
         self.homes = state / "telegram-home.json" if state else None  # {chat: 🏠's thread}
+        if state and _Connection.remember is None:
+            _Connection.recall(state / "telegram-net.json")
         self.tried: set[str] = set()  # chats where 🏠 could not be opened, this run
 
     def owns(self, chat: str) -> bool:
@@ -246,7 +275,7 @@ class Telegram:
         # 🏠 closed or deleted (Telegram says so): forget it, post to the chat itself. Not on
         # any failure: a network blip ("Connection reset by peer", 2026-11-10 10:10) made the
         # next post open a second 🏠 主线 while the first was still there.
-        if r is None and home and _topic_gone(_last.why):
+        if r is None and home and _topic_gone(getattr(_last, "why", "")):  # set on each failure; read safely anyway
             homes = self._homes()
             homes.pop(chat, None)
             self.homes.write_text(json.dumps(homes))

@@ -6,10 +6,13 @@ Work is done by long-lived member sessions, one per area, assigned by the **rele
 **Names:** `<role>-<context>-g<N>`. The role is one of `po` product owner, `rel` release
 manager, `rev` review, `comp` a component's owner, `dbg` tricky debugging (the owner, 2026-11-12: a
 bug that crosses components; it finds the root cause with evidence, fixes only on its own local
-branch and hands the fix to the area's owner, never commits to another member's branch). The context is usually the project (an area
+branch and hands the fix to the area's owner, never commits to another member's branch), `edu` teaching (the owner,
+2026-11-14: teaches him from the real work in the tutor style, keeps lessons and the project's book; read-only on code;
+like the buddy, not bound to one group: one project, several or all, the context names the scope, `edu-rdp-g1` or
+`edu-all-g1`, and an all-projects edu's pys window goes in the reserved group `shared`: `pys group shared`). The context is usually the project (an area
 only when a project has several members: FreeRDP's `shadow`), short but clear across all of the owner's projects (`rdp`, not `kit`: there are many kits; `shadow`, not
 `server`); clear beats short. E.g. `po-rdp-g2`, `rel-rdp-g1`, `rel-avm-g1`, `rev-freerdp-g2`,
-`comp-shadow-g3`, `comp-xrdp-g2`, `dbg-rdp-g1`. No heavy role: heavy work belongs to the member whose area it
+`comp-shadow-g3`, `comp-xrdp-g2`, `dbg-rdp-g1`, `edu-all-g1`. No heavy role: heavy work belongs to the member whose area it
 is (or its subagent). A live member keeps its old name to the end of its generation.
 
 **Window titles:** every session names its pys window, so the owner sees from the window list what
@@ -33,6 +36,12 @@ keeps its book current. A release manager may start members in pys windows itsel
 the owner's go per member, and records each join, handover and retirement on its kit's team card with
 `buddy-team` (RM only; the card shows each member's window, age, book and short stories, and a
 💬 Reply from the owner wakes the RM).
+
+**Automatic work is script only** (the owner, 2026-11-14): scripts gather and analyze; Claude
+writes and improves the scripts. The model runs at run time only for a person's ask, on that
+person's own login; a scheduled job or duty never calls it (if one ever must, an API key set on
+purpose and shown in the audit). Every review asks: a new model call at run time, why can't a
+script do it?
 
 Read `{detail}` when starting, resuming, retiring or briefing a session, or naming one (roles
 table, where each role lives, the book, the team card, starting a member).

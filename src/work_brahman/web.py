@@ -288,10 +288,17 @@ def pys_path() -> str:
     return found()
 
 
-def page() -> bytes:
+def page(public: float = 0) -> bytes:
     """The workbench page with its words in every language (text.py's page.* keys); it starts
-    in the buddy's, and its EN / 中文 switch changes them in place."""
+    in the buddy's, and its EN / 中文 switch changes them in place. In the public view the server
+    marks the body, so the page's own state can't drop the badge (privacy.py)."""
     html = (HERE / "static" / "index.html").read_text()
+    if public:  # the exact tags, so a mention of them elsewhere in the file is never the one marked
+        for tag, marked in (('<body data-view="private">', '<body data-view="public" class="public">'),
+                            ('data-t="view.off"', 'data-t="view.on"')):
+            if html.count(tag) != 1:
+                raise RuntimeError(f"the page has {html.count(tag)} {tag!r}: the public view can't mark it")
+            html = html.replace(tag, marked)
     html = html.replace('<html lang="en">', f'<html lang="{text.language()}">', 1)
     words = {lang: text.page(lang) for lang in text.LANGUAGES}
     html = html.replace("const TEXTS = {};", f"const TEXTS = {json.dumps(words, ensure_ascii=False)};", 1)
@@ -325,7 +332,7 @@ class Web:
                 if not self._authed(path):  # BUDDY_WEB_TOKEN (webauth.py)
                     return
                 if path == "/":
-                    return self._send(200, page(), "text/html")
+                    return self._send(200, page(self._public()), "text/html")
                 if path.startswith("/media/"):  # the corner's film and its poster
                     name = path[7:]
                     f = HERE / "static" / "media" / name
@@ -349,32 +356,57 @@ class Web:
                 if path == "/tokens.css":
                     return self._send(200, TOKENS.read_bytes() if TOKENS.exists() else b"", "text/css")
                 if path == "/api/data":
-                    return self._json(web.data())
+                    return self._json(web.public_data(web.data()) if self._public() else web.marked(web.data()))
                 if path == "/api/run":  # one story or team whole: a light tile was picked
                     key = parse_qs(urlparse(self.path).query).get("id", [""])[0]
-                    run = web.detail(key)
-                    return self._json(run) if run else self._send(404, b"no such run", "text/plain")
+                    run = web.public_detail(key) if self._public() else web.detail(key)
+                    # every answer says its view, so a public page never draws a private one (viewEnded)
+                    return self._json({**run, "public": bool(self._public())}) if run else self._send(404, b"no such run", "text/plain")
                 if path == "/api/changes":  # What's new (changes.py): the notes and the running version
                     from . import changes
                     sha, checkout = changes.commit()
                     return self._json({"version": changes.version(), "commit": sha, "checkout": checkout,
                                        "markdown": changes.text(), "latest": (changes.released() or ("", ""))[0]})
                 if path == "/api/setup":
+                    if self._public():  # the config, the peers and their hosts: never in the public view
+                        return self._send(403, b"hidden in the public view", "text/plain")
                     return self._json(web.setup(show_all=parse_qs(urlparse(self.path).query).get("all", [""])[0] == "1"))
+                if path == "/api/args":  # ⚙ debug: arguments: a story's copied tool arguments (tooluse.py), this machine only
+                    q = parse_qs(urlparse(self.path).query)
+                    key, step = q.get("id", [""])[0], q.get("step", [None])[0]
+                    kind, _, n = key.partition(":")
+                    if self._public() or kind != "short-story" or not n.isdigit():
+                        return self._send(403, b"arguments: a short story, in the private view only", "text/plain")
+                    from . import tooluse
+                    return self._json({"id": key, "step": step, "calls": tooluse.read_args(web.state, int(n), step)[-50:]})
                 if path == "/api/lanes":  # who did what, where, in parallel (lanes.py): a story's swimlanes
                     key = parse_qs(urlparse(self.path).query).get("id", [""])[0]
                     kind, _, n = key.partition(":")
-                    got = lanes.of_story(web.state, int(n)) if kind == "short-story" and n.isdigit() else None
+                    got = (lanes.of_story(web.state, int(n)) if kind == "short-story" and n.isdigit()
+                           and not (self._public() and web.private(key) is not False) else None)
+                    if got and self._public():
+                        got = web.public_lanes(got)
+                    got = {**got, "public": bool(self._public())} if got else got
                     return self._json(got) if got else self._send(404, b"lanes are for short stories", "text/plain")
                 if path == "/api/chat":
-                    return self._json({"on": web.chat is not None,
-                                       "messages": web.chat.history() if web.chat else [],
-                                       "topics": [t for t in topics.all_topics(web.state).values()
-                                                  if CHAT in t["threads"] and not t.get("closed")]
-                                       + [{"id": x["threads"][CHAT], "name": longs.label(x), "where": "long",
-                                           "threads": x["threads"]} for x in longs.all_stories(web.state)
-                                          if CHAT in x["threads"]]})
+                    if since := self._public():
+                        return self._json(web.public_chat(self._chat(), since))
+                    return self._json(self._chat())
                 self._send(404, b"not found", "text/plain")
+
+            def _chat(self) -> dict:
+                return {"on": web.chat is not None, "public": False,
+                        "messages": web.chat.history() if web.chat else [],
+                        "topics": [t for t in topics.all_topics(web.state).values()
+                                   if CHAT in t["threads"] and not t.get("closed")]
+                        + [{"id": x["threads"][CHAT], "name": longs.label(x), "where": "long",
+                            "threads": x["threads"], "story": x["id"]} for x in longs.all_stories(web.state)
+                           if CHAT in x["threads"]]}
+
+            def _public(self) -> float:
+                """When this browser's public view began, or 0 (privacy.py: a cookie, at most 3 h)."""
+                from . import privacy
+                return privacy.view_since(self.headers.get("Cookie") or "")
 
             def do_POST(self):
                 if not self._local():
@@ -391,6 +423,39 @@ class Web:
                 except ValueError:
                     return self._send(400, b"bad json", "text/plain")
                 path = self.path.split("?")[0]
+                if path == "/api/demo":  # {"id": "short-story:12" | "team:kit", "value": on|off}: the ⭐ tag
+                    from . import privacy
+                    if self._public():
+                        return self._send(403, b"hidden in the public view", "text/plain")
+                    kind, _, ident = str(body.get("id", "")).partition(":")
+                    value = str(body.get("value", ""))
+                    if kind not in privacy.KINDS or value not in ("on", "off"):
+                        return self._send(400, b"id: short-story:N, long-story:N or team:NAME; value: on or off", "text/plain")
+                    rec = privacy.demo(web.state, privacy.KINDS[kind], ident, value)
+                    if rec is None:
+                        return self._send(404, b"no such story or team", "text/plain")
+                    return self._json({"id": body["id"], "demo": bool(rec.get("demo"))})
+                if path == "/api/private":  # {"id": "short-story:12" | "team:kit", "value": on|off|auto}: by hand
+                    from . import privacy
+                    if self._public():  # marking is for the owner's own view
+                        return self._send(403, b"hidden in the public view", "text/plain")
+                    kind, _, ident = str(body.get("id", "")).partition(":")
+                    value = str(body.get("value", ""))
+                    if kind not in privacy.KINDS or value not in ("on", "off", "auto") or (kind == "team" and value == "auto"):
+                        return self._send(400, b"id: short-story:N, long-story:N or team:NAME; value: on, off or auto", "text/plain")
+                    rec = privacy.mark(web.state, privacy.KINDS[kind], ident, value)
+                    if rec is None:
+                        return self._send(404, b"no such story or team", "text/plain")
+                    return self._json({"id": body["id"], "private": privacy.is_private(rec), "by": rec.get("private_by", "")})
+                if path == "/api/view":  # the public view on or off, for this browser (privacy.py)
+                    from . import privacy
+                    self.send_response(204)
+                    self.send_header("Set-Cookie", privacy.view_cookie(bool(body.get("public"))))
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                if self._public() and (path.startswith("/api/setup/") or path == "/api/lanes/attach"):
+                    return self._send(403, b"hidden in the public view", "text/plain")
                 if path.startswith("/api/setup/"):
                     got = web.setup_post(path[11:], body if isinstance(body, dict) else {})
                     return self._json(got) if got is not None else self._send(404, b"not found", "text/plain")
@@ -647,6 +712,94 @@ class Web:
         except Exception:
             log.exception("family %s: detail %s failed", family, rest)
             return None
+
+    def record(self, key: str) -> dict | None:
+        """The story or team a run id names ("short-story:12", "long-story:3", "team:kit"), or None."""
+        from . import short_stories, teams
+        kind, _, n = key.partition(":")
+        if kind == "team":
+            return teams.load(self.state, n)
+        if kind in ("short-story", "long-story") and n.isdigit():
+            return (short_stories if kind == "short-story" else longs).load(self.state, int(n))
+        return None
+
+    def private(self, key: str) -> bool | None:
+        """A story's or a team's run id ("short-story:12", "long-story:3", "team:kit") is private;
+        None: not one of those (a duty's run, a chat)."""
+        from . import privacy, short_stories, teams
+        kind, _, n = key.partition(":")
+        if kind == "team":
+            return privacy.is_private(teams.load(self.state, n))
+        if kind not in ("short-story", "long-story"):
+            return None
+        mod = short_stories if kind == "short-story" else longs
+        return privacy.is_private(mod.load(self.state, int(n)) if n.isdigit() else None)
+
+    def marked(self, d: dict) -> dict:
+        """/api/data with each story's and team's mark, for the page's 🔒 / 🔓 button; "public": False
+        so the page always learns the view from the data it got."""
+        for r in d["runs"]:
+            if (p := self.private(str(r.get("id", "")))) is not None:
+                r["private"] = p
+        return {**d, "runs": self.starred(d["runs"]), "public": False}
+
+    def starred(self, runs: list[dict]) -> list[dict]:
+        """Each story's and team's ⭐ demo tag, for the page's ⭐ Demo filter (privacy.demo)."""
+        for r in runs:
+            if str(r.get("id", "")).split(":")[0] in ("short-story", "long-story", "team"):
+                r["demo"] = bool((self.record(str(r["id"])) or {}).get("demo"))
+        return runs
+
+    def public_data(self, d: dict) -> dict:
+        """/api/data for the public view: only the stories and teams judged or marked public, without
+        their machine fields, and none that still leaks (privacy.leaks); no duty run and no ask at all,
+        since nothing judges them (review, 2026-11-14: a code-review run carried chat ids and an IP)."""
+        from . import privacy
+        runs = [privacy.scrub(r) for r in d["runs"] if self.private(str(r.get("id", ""))) is False]
+        runs = [r for r in runs if not privacy.leaks(r)]
+        total = sum(1 for r in d["runs"] if str(r.get("id", "")).split(":")[0] in ("short-story", "long-story", "team"))
+        return {**d, "runs": self.starred(runs), "asks": [], "public": True, "total": total}  # a count only: "10 of 388"
+
+    def public_detail(self, key: str) -> dict | None:
+        """/api/run in the public view: a public story or team only, scrubbed, and not when it leaks."""
+        from . import privacy
+        if self.private(key) is not False:
+            return None
+        run = self.detail(key)
+        run = privacy.scrub(run) if run else None
+        return run if run and not privacy.leaks(run) else None
+
+    def public_lanes(self, got: dict) -> dict | None:
+        """/api/lanes in the public view: machines as "this machine" or "a peer", no windows, no leaks."""
+        from . import privacy
+        here, peer = t("page.lanes.this_machine"), t("page.lanes.a_peer")
+        got = privacy.scrub(got)
+        for row in got.get("lanes", []):
+            row["machine"] = here if row.get("here") else peer
+            row.pop("live", None)
+            for b in row.get("bars", []):
+                b["machine"] = row["machine"]
+        return None if privacy.leaks(got) else got
+
+    def public_chat(self, chat: dict, since: float) -> dict:
+        """The chat in the public view: public stories' cards, and only what was said since the
+        view began (his own words can't be judged by a rule); no private long story's thread."""
+        from datetime import datetime
+        from . import privacy, short_stories
+        shorts = short_stories.all_stories(self.state)
+        hide = {s["copies"].get(CHAT) for s in shorts if privacy.is_private(s)} - {None}
+        show = {s["copies"].get(CHAT) for s in shorts if not privacy.is_private(s)} - {None}
+        threads = {x["threads"].get(CHAT) for x in longs.all_stories(self.state) if privacy.is_private(x)} - {None}
+
+        def new(m):
+            try:
+                return datetime.strptime(str(m.get("at", "")), "%Y-%m-%dT%H:%M:%S%z").timestamp() >= since
+            except ValueError:
+                return False
+        msgs = [privacy.scrub(m) for m in chat["messages"] if m.get("id") not in hide and m.get("thread") not in threads
+                and (m.get("id") in show or new(m)) and not privacy.leaks(m)]  # a duty's post during a demo too; no links
+        topics_ = [x for x in chat["topics"] if x.get("id") not in threads]
+        return {**chat, "messages": msgs, "topics": topics_, "public": True}
 
     def data(self) -> dict:
         runs = []

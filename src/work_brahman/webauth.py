@@ -13,7 +13,7 @@ Host check alone stops a browser, not a person who sets the header. Hence:
   it; POSTs still need X-Buddy, which no other site can send). Compared in constant time; a
   wrong token waits a second.
 - [web] hosts in buddy.toml: the extra names or addresses a browser may use (e.g.
-  "192.168.1.10", "192.168.0.0/16", "mymac.local"). Honoured only while a token is set: an
+  "192.0.2.10", "192.0.2.0/24", "mymac.local"). Honoured only while a token is set: an
   allowlist without a password would open the door with nothing behind it.
 - Public without the token: the manifest, the icons and the Service Worker: code and pictures
   only, and iOS fetches the manifest without cookies.
@@ -77,7 +77,7 @@ def cookie_value(tok: str) -> str:
 
 
 def host_of(header: str) -> str:
-    """The Host header without its port ("[::1]:8787" → "[::1]", "192.168.1.5:18787" → "192.168.1.5")."""
+    """The Host header without its port ("[::1]:8787" → "[::1]", "192.0.2.5:18787" → "192.0.2.5")."""
     h = (header or "").strip().lower()
     if h.startswith("["):
         return h[:h.index("]") + 1] if "]" in h else h

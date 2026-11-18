@@ -31,6 +31,9 @@
 .lanes .ticks span { position:absolute; transform:translateX(-50%); white-space:nowrap; }
 .lanes .bar { position:absolute; top:3px; height:18px; border-radius:4px; background:var(--ok); color:#fff; font-size:11px; line-height:18px; padding:0 4px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; box-sizing:border-box; min-width:6px; }
 .lanes .bar.failed { background:var(--bad); } .lanes .bar.doing { background:var(--gold); } .lanes .bar.skipped { background:var(--mute); }
+.lanes .bar.wait { background:var(--line); opacity:.9; } .lanes .bar.wait.doing { background:var(--gold); }
+.lanes .point { position:absolute; top:2px; transform:translateX(-50%); font-size:12px; line-height:20px; cursor:default; }
+.lanes .lane.owner .who .name { font-weight:600; }
 .lanes .bar.inferred { background-image:repeating-linear-gradient(135deg, rgba(255,255,255,.35) 0 4px, transparent 4px 8px); opacity:.85; }
 .lanes .note { color:var(--mute); margin-top:6px; }
 .lanes .who { display:flex; align-items:center; gap:4px; } .lanes .who .name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
@@ -193,10 +196,47 @@ pre.log.bad { border-color:var(--bad); }
 .story textarea { width:100%; font:inherit; font-size:13px; border:1px solid var(--line); border-radius:var(--r-sm); padding:6px 8px; min-height:52px; resize:vertical; background:#fff; margin-top:6px; }
 .replies div { font-size:12.5px; padding:2px 0; border-top:1px solid var(--line); } .replies div:first-child { border-top:none; }
 @media (max-width: 900px) { .wf, .observe, .diagram { grid-template-columns:1fr; } .resp, .obs, .tools { grid-column:auto; } }
+/* the public view (privacy.py): the server marks the body tag (data-view), and /api/data says it too; private stories and Setup are not sent */
+#pubbar { display: none; }
+body.public #pubbar { display: block; position: sticky; top: 0; z-index: 50; background: #b3261e; color: #fff;
+  text-align: center; font-weight: 600; font-size: 13px; padding: 3px 8px; }
+body.public .tabs [data-tab="setup"] { display: none; }
+.view { margin-left: 6px; }
+.privbar { margin-bottom: 4px; }
+.ended { max-width: 560px; margin: 18vh auto; text-align: center; } .ended h2 { color: #b3261e; }
+/* Normal view (the owner, 2026-11-14: "the buttons should only show under an advanced view ... showing
+   them in normal use is very noisy"): reading, the answers to what waits for him, ■ Stop and the
+   reply boxes. The rest only under ⚙ Advanced (per browser, off by default): how the page looks
+   (What/Why, the bell, the languages), Setup, and each item's actions in one ⋯ menu. */
+body:not(.adv) :is(.mode, .bell, .langs, .tabs [data-tab="setup"], .more, [data-lane-attach], [data-team-prefill],
+  [data-newtopic], #newtopic, .dbg) { display: none !important; }
+.more { grid-column: 1 / -1; margin-bottom: 6px; }
+/* the views (specs/views.md) */
+.node.step { cursor: pointer; } .node.step.improvised { border-style: dashed; } .node.step.skipped { opacity: .6; }
+.node.step.sel, .lanes .bar.sel, .cap.sel { outline: 2px solid var(--ink); outline-offset: 1px; }
+.tools-n { font-size: 11px; color: var(--mute); }
+.sys { display: grid; grid-template-columns: 200px 1fr 220px; gap: 7px 14px; }
+.sys .part { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--card); }
+.sys .part b { display: block; font-size: 11px; color: var(--mute); margin-bottom: 3px; }
+.sys .part.faint { opacity: .4; } .sys .top, .sys .floor, .sys .caps { grid-column: 1 / -1; }
+.sys .caps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 7px; }
+.sys .cap { border: 1px solid var(--line); border-radius: 999px; background: var(--card); padding: 0 8px; cursor: pointer; font-size: 12px; }
+.who-chip { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; font-size: 12px; }
+.detail { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+.detail h3 { margin: 0 0 6px; font-size: 13px; } .detail .drow { display: grid; grid-template-columns: 110px 1fr; gap: 8px; font-size: 13px; padding: 2px 0; }
+.detail .dbg { margin-top: 6px; } .lanes .bar { cursor: pointer; }
+@media (max-width: 900px) { .sys, .sys .caps { grid-template-columns: 1fr; } }
+.demo.on, .adv.on { border-color: var(--ink); }
+.filterline { font-size: 12px; color: var(--mute); margin: 2px 0 6px; } .filterline .x { border: 0; background: none; cursor: pointer; color: var(--mute); }
+.more > summary { cursor: pointer; list-style: none; display: inline-block; border: 1px solid var(--line);
+  border-radius: 999px; padding: 0 10px; color: var(--mute); }
+.more > summary::-webkit-details-marker { display: none; }
+.more[open] > summary { color: var(--ink); }
 </style>
 </head>
-<body>
-<header><h1>brahman</h1><div class="tabs"><button data-tab="bench" class="on" data-t="tab.bench">Workbench</button><button data-tab="chat" data-t="tab.chat">Chat</button><button data-tab="setup" data-t="tab.setup">Setup</button><button data-tab="news" id="newstab" data-t="tab.news">What's new</button></div><span class="live" id="live" data-t="connecting"><i></i>connecting…</span><div class="corner"><video id="film" muted autoplay loop playsinline data-t-title="film_title" title="The film: click to watch it large"></video><div class="motto"><span class="mode"><button data-motto="what" data-t="motto.what">What</button><button data-motto="why" data-t="motto.why">Why</button></span><span class="humble" id="m-top"></span><span class="main" id="m-main"></span><span class="rot" id="rot"></span><span class="meter" id="meter"><span class="bar"><i></i></span><span></span></span></div></div><button class="bell" id="bell" data-t-title="bell_title" title="system notifications from this tab">🔕</button><div class="langs" data-t-title="lang_title" title="the page's language"><button data-lang="en">EN</button><button data-lang="zh-CN">中文</button></div><button class="stop" data-stop="1" title="stop everything that is running or waiting, and pause the schedule" data-t="stop" data-t-title="stop_title">■ STOP</button></header>
+<body data-view="private">
+<div id="pubbar" data-t="view.bar">📢 PUBLIC VIEW: private stories, their chat cards, older chat and Setup are hidden</div>
+<header><h1>brahman</h1><div class="tabs"><button data-tab="bench" class="on" data-t="tab.bench">Workbench</button><button data-tab="chat" data-t="tab.chat">Chat</button><button data-tab="setup" data-t="tab.setup">Setup</button><button data-tab="news" id="newstab" data-t="tab.news">What's new</button></div><span class="live" id="live" data-t="connecting"><i></i>connecting…</span><div class="corner"><video id="film" muted autoplay loop playsinline data-t-title="film_title" title="The film: click to watch it large"></video><div class="motto"><span class="mode"><button data-motto="what" data-t="motto.what">What</button><button data-motto="why" data-t="motto.why">Why</button></span><span class="humble" id="m-top"></span><span class="main" id="m-main"></span><span class="rot" id="rot"></span><span class="meter" id="meter"><span class="bar"><i></i></span><span></span></span></div></div><button class="view" id="view" data-t="view.off" data-t-title="view.title">🔒 private shown</button><button class="demo" id="demo" data-t="demo.off" data-t-title="demo.title">☆ Demo</button><button class="adv" id="adv" data-t="adv.off" data-t-title="adv.title">⚙ Advanced</button><button class="bell" id="bell" data-t-title="bell_title" title="system notifications from this tab">🔕</button><div class="langs" data-t-title="lang_title" title="the page's language"><button data-lang="en">EN</button><button data-lang="zh-CN">中文</button></div><button class="stop" data-stop="1" title="stop everything that is running or waiting, and pause the schedule" data-t="stop" data-t-title="stop_title">■ STOP</button></header>
 <div class="filmbox" id="filmbox" hidden><button class="x" id="filmx" data-t-title="film_close" title="close (Esc)">✕</button><video id="filmbig" controls playsinline></video></div>
 <div class="halt" id="halt" hidden></div>
 <div id="chatview" hidden>
@@ -233,8 +273,8 @@ pre.log.bad { border-color:var(--bad); }
 </div>
 <main id="bench">
   <section class="level"><h2 data-t="h.asks">Waiting for you<span data-t="h.asks_sub">the same cards as in Lark and Telegram; the first answer anywhere wins</span></h2><div id="asks"></div></section>
-  <section class="level"><h2 data-t="h.l1">Level 1 · Workflows and their runs<span data-t="h.l1_sub">the last 3 days · click a run</span></h2><div id="workflows"></div></section>
-  <section class="level"><h2 data-t="h.l2">Level 2 · How the system works<span id="l2h" data-t="h.l2_sub">lit by the selected run · click a part</span></h2><div class="l2tabs"><button data-l2="arch" data-t="l2.arch">Architecture</button><button data-l2="lanes" data-t="l2.lanes">Lanes</button></div><div class="diagram" id="diagram"></div><div class="lanes" id="lanes" hidden></div></section>
+  <section class="level"><h2 data-t="h.l1">Level 1 · Workflows and their runs<span data-t="h.l1_sub">the last 3 days · click a run</span></h2><div id="filterline" class="filterline" hidden></div><div id="workflows"></div></section>
+  <section class="level"><h2 data-t="h.l2">Level 2 · How the system works<span id="l2h" data-t="h.l2_sub">lit by the selected run · click a part</span></h2><div class="l2tabs"><button data-l2="plan" data-t="l2.plan">Plan</button><button data-l2="system" data-t="l2.system">System</button><button data-l2="lanes" data-t="l2.lanes">Lanes</button></div><div class="diagram" id="diagram"></div><div class="system" id="system" hidden></div><div class="lanes" id="lanes" hidden></div><div class="detail" id="detail"></div></section>
   <section class="level"><h2 data-t="h.l3">Level 3 · Observation<span id="l3h"></span></h2><div class="observe" id="observe"></div></section>
 </main>
 <script>
@@ -259,7 +299,7 @@ const statusName = s => word("st", s), kindName = k => word("kind", k), appName 
 const sopLabel = l => word("label", l);
 function setLang(lang) {  // the labels written in the HTML; what is drawn later asks tr() itself
   TEXT = TEXTS[lang] || {}; zh = lang === "zh-CN"; document.documentElement.lang = lang;
-  document.title = tr("title");
+  document.title = (isPublic() ? "📢 " : "") + tr("title");
   for (const e of document.querySelectorAll("[data-t]")) {
     const n = [...e.childNodes].find(c => c.nodeType === 3);
     if (n) n.nodeValue = tr(e.dataset.t);
@@ -427,10 +467,23 @@ function tell(D) {
     for (const q of x.q) if (!before || !before.q.includes(q)) show(`❓ #${n} ${x.title}`, tr("bell_question", { q }), id);
   }
 }
+// The public view never ends by itself on screen (review, 2026-11-14: after its 3 h the data came back
+// private and the page followed it, mid-demo): a public page whose answer is no longer public clears
+// itself and asks; only a press turns it private.
+function viewEnded() {
+  if (S.ended) return;
+  S.ended = true;
+  document.body.innerHTML = `<div class="ended"><h2>${esc(tr("view.ended"))}</h2><p>${esc(tr("view.ended_sub"))}</p><button id="ended-go">${esc(tr("view.ended_go"))}</button></div>`;
+  document.getElementById("ended-go").onclick = async () => { await post("/api/view", { public: false }); location.reload(); };
+}
 async function load() {
+  if (S.ended) return;
   try {
     const r = await fetch("/api/data", { cache: "no-store" });
-    S.data = await r.json();
+    const d = await r.json();
+    if (isPublic() && d.public !== true) return viewEnded();
+    S.data = d;
+    showView(S.data.public === true);  // private → public follows the server; public → private never (viewEnded)
     tell(S.data);
     bellDraw();
     document.getElementById("live").className = "live";
@@ -449,7 +502,8 @@ function shown(rs, sel, kind) {
   return kind === "family" ? rs : rs.filter((r, k) => k < 8 || !quiet(r) || r === sel).slice(0, 40);
 }
 // Level 2's Lanes tab: the selected story as swimlanes (GET /api/lanes), one row per machine/session.
-S.l2 = (() => { try { return localStorage.getItem("l2") || "arch"; } catch (_) { return "arch"; } })();
+S.l2 = (() => { try { const v = localStorage.getItem("l2"); return ["plan", "system", "lanes"].includes(v) ? v : "plan"; } catch (_) { return "plan"; } })();
+S.step = "";  // the shared selection (specs/views.md): a step id, lit in every view, fed to the detail panel
 S.lanes = {}; S.lanesFold = new Set(); S.lanesSaid = "";
 document.addEventListener("click", e => {
   const b = e.target.closest("[data-lane-fold],[data-lane-attach]");
@@ -467,10 +521,8 @@ document.addEventListener("click", e => {
     .finally(() => { delete S.lanes[S.lanesId]; render(); });
 });
 function drawLanes(sel) {
-  document.querySelectorAll(".l2tabs button").forEach(b => b.classList.toggle("on", b.dataset.l2 === S.l2));
-  const box = document.getElementById("lanes"), on = S.l2 === "lanes";
-  document.getElementById("diagram").hidden = on; box.hidden = !on;
-  if (!on) return;
+  const box = document.getElementById("lanes");
+  if (S.l2 !== "lanes") return;
   if (!sel.id || !sel.id.startsWith("short-story:")) { box.innerHTML = `<div class="note">${esc(tr("lanes.only_stories"))}</div>`; return; }
   if (S.lanesId !== sel.id) { S.lanesId = sel.id; S.lanesSaid = ""; }
   const got = S.lanes[sel.id];
@@ -478,19 +530,20 @@ function drawLanes(sel) {
     if (!S.lanesFetching) {
       S.lanesFetching = true;
       fetch(`/api/lanes?id=${encodeURIComponent(sel.id)}`, { cache: "no-store" }).then(x => x.ok ? x.json() : null)
-        .then(v => { S.lanes[sel.id] = { v, at: Date.now() }; }).catch(() => {}).finally(() => { S.lanesFetching = false; render(); });
+        .then(v => { if (v && isPublic() && v.public !== true) return viewEnded(); S.lanes[sel.id] = { v, at: Date.now() }; }).catch(() => {}).finally(() => { S.lanesFetching = false; render(); });
     }
     if (!got) { box.innerHTML = `<div class="note">…</div>`; return; }
   }
   const v = got.v;
-  if (!v || !v.lanes.length) { box.innerHTML = `<div class="note">${esc(tr("lanes.none"))}</div>`; return; }
+  const O = (v && v.owner) || { points: [], waits: [] };
+  if (!v || (!v.lanes.length && !O.points.length && !O.waits.length)) { box.innerHTML = `<div class="note">${esc(tr("lanes.none"))}</div>`; return; }
   const span = Math.max(60, v.t1 - v.t0), pct = t => ((t - v.t0) / span * 100).toFixed(2);
   const clock = t => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const ticks = [0, .25, .5, .75, 1].map(f => `<span style="left:${f * 100}%;transform:translateX(${f === 0 ? "0" : f === 1 ? "-100%" : "-50%"})">${clock(v.t0 + f * span)}</span>`).join("");  // the ends inside the box
   const track = bars => bars.map(b => {
     const w = Math.max(.6, (b.end - b.start) / span * 100);
     const how = b.inferred ? tr("lanes.inferred") : b.open ? tr("lanes.running") : "";
-    return `<div class="bar ${esc(b.status)} ${b.inferred ? "inferred" : ""}" style="left:${pct(b.start)}%;width:${w.toFixed(2)}%" title="${esc(`${b.n ? b.n + ". " : ""}${b.step} · ${clock(b.start)}–${clock(b.end)} · ${statusName(b.status)}${how ? " · " + how : ""}`)}">${esc((b.n ? b.n + " " : "") + b.step)}</div>`;
+    return `<div class="bar ${esc(b.status)} ${b.inferred ? "inferred" : ""}" data-step="${esc(b.id || "")}" style="left:${pct(b.start)}%;width:${w.toFixed(2)}%" title="${esc((b.waited ? tr("lanes.step_waited", { d: Math.round(b.waited / 60) }) + " · " : "") + `${b.n ? b.n + ". " : ""}${b.step} · ${clock(b.start)}–${clock(b.end)} · ${statusName(b.status)}${how ? " · " + how : ""}`)}">${esc((b.n ? b.n + " " : "") + b.step)}</div>`;
   }).join("");
   // Three levels: the machine, the session (its row is the main agent's), its subagents one level lower.
   const sessions = [];
@@ -500,6 +553,16 @@ function drawLanes(sel) {
     if (l.agent) se.subs.push(l); else se.main = l;
   }
   let html = `<div class="axis"><div></div><div class="ticks">${ticks}</div></div>`, machine = "";
+  // The owner's lane on top (specs/views.md, phase 1): his answers, replies and Stop as points, the time a
+  // question waited for him as bars; kinds, apps and times only, never his words
+  if (O.points.length || O.waits.length) {
+    const mins = s => s < 60 ? tr("lanes.secs", { n: Math.round(s) }) : tr("lanes.mins", { n: Math.round(s / 60) });
+    const waits = O.waits.map(w => `<div class="bar wait ${w.open ? "doing" : ""}" style="left:${pct(w.start)}%;width:${Math.max(.6, (w.end - w.start) / span * 100).toFixed(2)}%"
+      title="${esc(tr(w.open ? "lanes.waiting_open" : "lanes.waited", { q: w.q, d: mins(w.end - w.start), from: clock(w.start) }) + (w.step ? " · " + w.step : ""))}"></div>`).join("");
+    const pts = O.points.map(p => `<div class="point ${esc(p.kind)}" style="left:${pct(p.at)}%"
+      title="${esc(tr("lanes.p." + p.kind, { at: clock(p.at), where: appName(p.where) }))}">${{ answer: "✓", reply: "💬", stop: "■" }[p.kind] || "•"}</div>`).join("");
+    html += `<div class="lane owner"><div class="who"><span class="name">${esc(tr("lanes.you"))}</span></div><div class="track">${waits}${pts}</div></div>`;
+  }
   for (const se of sessions) {
     if (se.machine !== machine) { machine = se.machine; html += `<div class="lane"><div class="machine">${esc(machine)}${se.here ? ` <span class="here">${esc(tr("lanes.here"))}</span>` : ""}</div><div></div></div>`; }
     const key = se.machine + "/" + se.session, folded = S.lanesFold.has(key);
@@ -521,7 +584,7 @@ function detail(r) {
   if (!S.fetching[r.id]) {
     S.fetching[r.id] = true;
     fetch(`/api/run?id=${encodeURIComponent(r.id)}`, { cache: "no-store" }).then(x => x.ok ? x.json() : null)
-      .then(run => { if (run) S.detail[r.id] = { run, at: Date.now() }; }).catch(() => {})
+      .then(run => { if (run && isPublic() && run.public !== true) return viewEnded(); if (run) S.detail[r.id] = { run, at: Date.now() }; }).catch(() => {})
       .finally(() => { delete S.fetching[r.id]; render(); });
   }
   return d ? d.run : null;
@@ -579,8 +642,11 @@ box.addEventListener("click", e => { if (e.target === box) closeFilm(); });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && !box.hidden) closeFilm(); });
 setMotto(motto);
 
+function demoOn() { return document.body.classList.contains("demo"); }
 function render() {
-  const D = S.data, focused = document.activeElement && document.activeElement.id;
+  // ⭐ Demo (privacy.demo): only the stories and teams tagged for a demo; the server already left out
+  // whatever the public view hides, so a private demo never comes back here
+  const D = demoOn() ? { ...S.data, runs: S.data.runs.filter(r => r.demo) } : S.data, focused = document.activeElement && document.activeElement.id;
   corner(D);
   const halt = document.getElementById("halt");
   halt.hidden = !D.paused;
@@ -604,6 +670,15 @@ function render() {
   S.fromLink = false;
   notFound();  // before any view returns: each of them redraws only its own boxes
   const sel = D.runs.find(r => r.id === S.run) || D.runs.find(r => r.status !== "ok" && r.status !== "running" && recent(r)) || D.runs[0];
+  // A filter that hides items says so above the list (the owner, 2026-11-14: three stories looked like a bug; it
+  // was ☆ Demo, still on): "⭐ Demo filter on: showing 3 of 388 ✕", "📢 Public view: 10 of 388 shown"
+  const fl = document.getElementById("filterline"), kinds = r => /^(short-story|long-story|team):/.test(r.id);
+  const all = S.data.public ? S.data.total || 0 : S.data.runs.filter(kinds).length, shownN = D.runs.filter(kinds).length;
+  const lines = [];
+  if (isPublic()) lines.push(esc(tr("filter.public", { n: S.data.runs.filter(kinds).length, all })));
+  if (demoOn()) lines.push(`${esc(tr("filter.demo", { n: shownN, all: S.data.runs.filter(kinds).length }))} <button class="x" data-demo-off="1" title="${esc(tr("filter.demo_off"))}">✕</button>`);
+  fl.hidden = !lines.length;
+  fl.innerHTML = lines.map(l => `<div>${l}</div>`).join("");
   document.getElementById("workflows").innerHTML = groups.map(g => {
     const rs = D.runs.filter(r => `${r.kind}:${r.name}` === g.key);
     const failed = rs.filter(r => FAILED.has(r.status)).length;
@@ -619,10 +694,11 @@ function render() {
   if ((sel.story && sel.story.lite) || sel.team) {
     const whole = detail(sel);
     if (!whole) { document.getElementById("diagram").innerHTML = `<div class="mute">${tr("loading")}</div>`; document.getElementById("observe").innerHTML = ""; return; }
-    return whole.team ? team(whole) : story(whole, focused);
+    if (whole.team) team(whole); else story(whole, focused);
+    addMore(sel);
+    return drawViews(sel, whole);
   }
-  drawLanes(sel);  // level 2's Lanes tab, for a story or any run (it says when it has none)
-  if (sel.story) return story(sel, focused);
+  if (sel.story) { story(sel, focused); addMore(sel); return drawViews(sel, sel); }
 
   // Level 2: the architecture, lit by the selected run: its real steps, in order.
   const failed = FAILED.has(sel.status) || sel.status === "stopped";
@@ -643,8 +719,113 @@ function render() {
   // Level 3: the part that was clicked, or the whole run.
   document.getElementById("l3h").textContent = `${wfName(sel.name)} · ${S.part ? partName(S.part) : tr("whole_run")}`;
   document.getElementById("observe").innerHTML = runSketch(sel) + observe(sel);
-  if (sel.long) document.getElementById("diagram").insertAdjacentHTML("afterbegin", longBar(sel.long));
+  addMore(sel);
+  drawViews(sel, sel);
 }
+// ---- The views (specs/views.md): Plan, System, Lanes, one shared selection, one detail panel -----
+const toolKind = t => (String(t).match(/^(mcp|skill|cli|web):/) || [, "cli"])[1];
+const toolName = t => String(t).replace(/^(mcp|skill|cli|web):/, "");
+function drawViews(sel, run) {
+  const story = !!(run && run.story);
+  document.querySelectorAll(".l2tabs button").forEach(b => b.classList.toggle("on", b.dataset.l2 === S.l2));
+  const sys = document.getElementById("system"), dia = document.getElementById("diagram"), lan = document.getElementById("lanes");
+  // a run that is not a story has one picture: its architecture, lit by the run, for Plan and System alike
+  dia.hidden = S.l2 === "lanes" || (S.l2 === "system" && story);
+  sys.hidden = !(S.l2 === "system" && story);
+  lan.hidden = S.l2 !== "lanes";
+  if (S.l2 === "lanes") drawLanes(sel);
+  if (!sys.hidden) sys.innerHTML = systemView(run);
+  if (story && S.step && !run.steps.some(m => m.id === S.step)) S.step = "";
+  document.getElementById("detail").innerHTML = story ? detailPanel(sel, run) : "";
+  document.querySelectorAll("#diagram [data-step], #lanes [data-step], #system [data-step]")
+    .forEach(e => e.classList.toggle("sel", !!S.step && e.dataset.step === S.step));
+}
+// System (the owner's layout, 2026-10-24/25): responsibility and you on top, input left, orchestration in the
+// centre, capabilities under it, effects right, observability the floor. Lit by the run: only what it
+// used; the rest stays faint, so the shape is always the same picture.
+function systemView(r) {
+  const steps = r.steps || [], st = r.story || {};
+  const used = {};  // kind -> name -> [step ids]
+  for (const m of steps) for (const t of m.tools || []) ((used[toolKind(t)] ||= {})[toolName(t)] ||= []).push(m.id);
+  const sessions = [...new Set(steps.map(m => m.tag).filter(Boolean))];
+  const outs = steps.flatMap(m => Object.entries(m.out || {}).map(([k, v]) => [m.id, `${k}=${v}`]));
+  const asked = (st.questions || []).length, stopped = !!st.stop;
+  const part = (cls, lit, title, body) => `<div class="part ${cls} ${lit ? "lit" : "faint"}"><b>${title}</b>${body || `<span class="mute">—</span>`}</div>`;
+  const chip = (name, ids) => `<button class="cap" data-step="${esc(ids[0] || "")}" title="${esc(tr("sys.used_in", { n: ids.length }))}">${esc(name)}</button>`;
+  const caps = [["skill", "sys.skills"], ["mcp", "sys.mcp"], ["cli", "sys.cli"], ["web", "sys.web"]]
+    .map(([k, label]) => part("cap-" + k, used[k], tr(label), Object.entries(used[k] || {}).map(([n, ids]) => chip(n, ids)).join(" "))).join("");
+  const systems = Object.keys(used.cli || {}).filter(n => /\(.*\)$/.test(n)).map(n => n.match(/\((.*)\)$/)[1]);
+  return `<div class="sys">
+    ${part("top", asked || stopped || true, tr("sys.top"), [tr("sys.you", { q: asked }), stopped ? tr("sys.stopped") : ""].filter(Boolean).join(" · "))}
+    ${part("in", true, tr("story.input"), esc(r.trigger || ""))}
+    ${part("orch", sessions.length, tr("sys.orch"), sessions.map(x => `<span class="who-chip">${esc(x)}</span>`).join(" "))}
+    ${part("out", outs.length, tr("effect"), outs.map(([id, o]) => `<button class="cap" data-step="${esc(id)}">${esc(o)}</button>`).join(" ") || tr("sys.cards"))}
+    <div class="caps">${caps}${part("cap-sys", systems.length, tr("sys.info"), [...new Set(systems)].map(esc).join(" · "))}</div>
+    ${part("floor", true, tr("obs"), tr("story.file", { file: `<code>short_stories/${st.id}.json</code>`, n: Math.round(((r.fitness || {}).seconds || 0) / 60) }))}
+  </div>${Object.keys(used).length ? "" : `<div class="note">${esc(tr("sys.no_tools"))}</div>`}`;
+}
+// One detail panel under whichever view is open, fed by the selection.
+function detailPanel(sel, r) {
+  const m = (r.steps || []).find(x => x.id === S.step);
+  if (!m) return `<div class="note">${esc(tr("detail.pick"))}</div>`;
+  const lanes = (S.lanes[sel.id] || {}).v, bar = lanes ? lanes.lanes.flatMap(l => l.bars).find(b => b.id === m.id) : null;
+  const clock = t => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const waits = lanes && lanes.owner ? lanes.owner.waits.filter(w => w.step === m.name) : [];
+  // a value links only when the mark stored a URL for it (links.py: the repo was certain); opens in a new tab
+  const kv = (o, which) => Object.entries(o || {}).map(([k, v]) => { const u = ((m.links || {})[which] || {})[k] || "";
+    return /^https?:\/\//.test(u) ? `<a href="${esc(u)}" target="_blank" rel="noopener"><code>${esc(k)}=${esc(v)}</code> ↗</a>`
+      : `<code>${esc(k)}=${esc(v)}</code>`; }).join(" ");
+  const rows = [
+    [tr("detail.step"), `${MARK[m.status] || ""} ${esc(m.step)}${m.planned ? "" : " · " + esc(tr("story.unplanned"))}`],
+    [tr("detail.who"), esc(m.tag || "—") + (m.by ? ` <span class="mute">${esc(m.by)}</span>` : "")],
+    [tr("detail.when"), bar ? `${clock(bar.start)}–${bar.open ? "…" : clock(bar.end)}${bar.inferred ? " · " + esc(tr("lanes.inferred")) : ""}` : m.at ? hm(m.at) : "—"],
+    [tr("detail.waited"), waits.length ? esc(tr("lanes.mins", { n: Math.round(waits.reduce((a, w) => a + w.end - w.start, 0) / 60) })) : "—"],
+    [tr("detail.in"), kv(m.in, "in") || "—"], [tr("detail.out"), kv(m.out, "out") || "—"],
+    [tr("detail.tools"), (m.tools || []).map(t => `<span class="who-chip">${esc(toolName(t))}</span>`).join(" ") || `<span class="mute">${esc(tr("detail.no_tools"))}</span>`],
+    [tr("detail.note"), m.note ? esc(m.note) : "—"],
+  ].map(([k, v]) => `<div class="drow"><span class="mute">${esc(k)}</span><span>${v}</span></div>`).join("");
+  const dbg = `<div class="dbg"><button data-dbg="1">${esc(tr(S.dbg ? "detail.dbg_on" : "detail.dbg_off"))}</button>${S.dbg ? `<pre class="log" id="args">…</pre>` : ""}</div>`;
+  if (S.dbg && !isPublic()) setTimeout(() => fetch(`/api/args?id=${encodeURIComponent(sel.id)}&step=${encodeURIComponent(m.id)}`, { cache: "no-store" })
+    .then(x => x.ok ? x.json() : null).then(a => { const box = document.getElementById("args"); if (box) box.textContent = a && a.calls.length ? a.calls.map(c => `${c.at.slice(11, 16)} ${c.name}\n${JSON.stringify(c.input, null, 1)}`).join("\n\n") : tr("detail.no_args"); }), 0);
+  return `<h3>${esc(tr("detail.h", { n: m.id }))}</h3>${rows}${dbg}`;
+}
+S.dbg = (() => { try { return localStorage.getItem("dbg") === "1"; } catch (_) { return false; } })();
+document.addEventListener("click", e => {  // the shared selection: a step in any view lights it in all of them
+  const d = e.target.closest("[data-dbg]");
+  if (d) { S.dbg = !S.dbg; try { localStorage.setItem("dbg", S.dbg ? "1" : ""); } catch (_) {} return render(); }
+  const b = e.target.closest("#diagram [data-step], #lanes [data-step], #system [data-step]");
+  if (!b || !b.dataset.step) return;
+  S.step = S.step === b.dataset.step ? "" : b.dataset.step;
+  render();
+});
+// The selected item's actions, in one ⋯ menu (Advanced view only), for every kind it is drawn as (a
+// short story, a team, a long story, a run): its mark by hand, a long story's pys. sel is the run from
+// /api/data, which carries the mark (a whole record fetched for a light tile does not).
+function addMore(sel) {
+  const acts = (sel.private !== undefined && !isPublic()
+      ? `<div class="privbar"><button data-priv="${esc(sel.id)}" data-v="${sel.private ? "off" : "on"}">${tr(sel.private ? "priv.private" : "priv.public")}</button>`
+        + ` <button data-star="${esc(sel.id)}" data-v="${sel.demo ? "off" : "on"}">${tr(sel.demo ? "demo.tagged" : "demo.untagged")}</button></div>` : "")
+    + (sel.long ? longBar(sel.long) : "");
+  if (acts) document.getElementById("diagram").insertAdjacentHTML("afterbegin",
+    `<details class="more" data-for="${esc(sel.id)}"${S.moreOpen === sel.id ? " open" : ""}><summary title="${esc(tr("more_title"))}">⋯</summary>${acts}</details>`);
+}
+document.addEventListener("toggle", e => {  // the page redraws every 5 s: an open ⋯ stays open
+  if (e.target.matches && e.target.matches("details.more")) S.moreOpen = e.target.open ? e.target.dataset.for : "";
+}, true);
+document.addEventListener("click", async e => {  // ⭐ / ☆: tag this story or team for demos (privacy.demo)
+  const b = e.target.closest("[data-star]");
+  if (!b) return;
+  const r = await fetch("/api/demo", { method: "POST", headers: { "Content-Type": "application/json", "X-Buddy": "1" },
+                                       body: JSON.stringify({ id: b.dataset.star, value: b.dataset.v }) });
+  if (r.ok) load();
+});
+document.addEventListener("click", async e => {  // 🔒 / 🔓: mark this story or team (privacy.py)
+  const b = e.target.closest("[data-priv]");
+  if (!b) return;
+  const r = await fetch("/api/private", { method: "POST", headers: { "Content-Type": "application/json", "X-Buddy": "1" },
+                                          body: JSON.stringify({ id: b.dataset.priv, value: b.dataset.v }) });
+  if (r.ok) load();
+});
 
 // A long story into a terminal, through pys: attach shows the window that holds it, resume opens
 // one in its folder (buddy-long take). Codex has no take: its command, to type by hand.
@@ -809,8 +990,7 @@ function story(r, focused) {
       st.stop ? tr("story.stop", { where: esc(appName(st.stop.where)), at: hm(st.stop.at) }) : unread ? trn("story.unread", unread)
         : live ? tr("story.you") : tr("story.ended"))
     + node("lit", tr("story.input"), esc(r.trigger) + memberLink(r.member))
-    + `<div class="flow">${r.steps.map((m, k) => node(m.status === "failed" ? "bad" : m.status === "todo" ? "todo" : m.status === "doing" ? "doing" : "lit",
-        `${tr("story.mark", { n: k + 1 })}${m.planned ? "" : tr("story.unplanned")}`, `${MARK[m.status]} ${esc(m.step)}${m.at ? ` <span class="mute">${hm(m.at)}</span>` : ""}`)).join('<span class="arrow">→</span>')
+    + `<div class="flow">${r.steps.map((m, k) => `<div class="node step ${m.status === "failed" ? "bad" : m.status === "todo" ? "todo" : m.status === "doing" ? "doing" : m.status === "skipped" ? "skipped" : "lit"} ${m.planned ? "" : "improvised"}" data-step="${esc(m.id || "")}"><b>${tr("story.mark", { n: k + 1 })}${m.planned ? "" : tr("story.unplanned")}</b>${MARK[m.status]} ${esc(m.step)}${m.at ? ` <span class="mute">${hm(m.at)}</span>` : ""}${(m.tools || []).length ? ` <span class="tools-n" title="${esc(m.tools.map(toolName).join(" · "))}">🔧${m.tools.length}</span>` : ""}</div>`).join('<span class="arrow">→</span>')
         || `<span class="mute">${tr("story.no_marks")}</span>`}</div>`
     + node(r.status === "ok" ? "lit" : FAILED.has(r.status) || r.status === "stopped" ? "bad" : "", tr("effect"),
       tr("story." + r.status) + ` · ${esc(r.result)}`)
@@ -894,8 +1074,10 @@ function observe(r) {
 // your linked chats share; a topic (🧵) is another, with its own session (a Lark thread too).
 let chatSeen = "";
 async function loadChat() {
+  if (S.ended) return;
   const r = await fetch("/api/chat", { cache: "no-store" }).then(x => x.json()).catch(() => null);
   if (!r) return;
+  if (isPublic() && r.public !== true) return viewEnded();
   const key = S.topic + JSON.stringify(r.messages) + JSON.stringify(r.topics);
   if (key === chatSeen) return;
   chatSeen = key;
@@ -1288,7 +1470,59 @@ document.addEventListener("click", async e => {
   }
 });
 setInterval(() => { if (!document.getElementById("setupview").hidden) setupLoad(false); }, 3000);  // who wrote shows up by itself
-try { S.topic = localStorage.getItem("topic") || ""; { const t0 = localStorage.getItem("tab"); if (t0 === "chat" || t0 === "setup" || t0 === "news") tab(t0); } } catch (_) {}
+// The public view (privacy.py): one state for the bar, the button, the title and the switch.
+function isPublic() { return document.body.classList.contains("public"); }
+function showView(pub) {
+  if (pub === isPublic()) return;
+  document.body.classList.toggle("public", pub);
+  document.body.dataset.view = pub ? "public" : "private";
+  const b = document.getElementById("view");
+  b.dataset.t = pub ? "view.on" : "view.off";
+  b.textContent = tr(b.dataset.t);
+  document.title = (pub ? "📢 " : "") + tr("title");
+  if (pub && !document.getElementById("setupview").hidden) tab("bench");
+}
+// ⭐ Demo: only what is tagged for a demo; off by default, kept per browser
+function showDemo(on) {
+  document.body.classList.toggle("demo", on);
+  const b = document.getElementById("demo");
+  b.dataset.t = on ? "demo.on" : "demo.off";
+  b.textContent = tr(b.dataset.t);
+  b.classList.toggle("on", on);
+}
+document.addEventListener("click", e => {  // the ✕ on the filter line: ☆ Demo off
+  if (!e.target.closest("[data-demo-off]")) return;
+  try { localStorage.setItem("demo", ""); } catch (_) {}
+  showDemo(false);
+  if (S.data) render();
+});
+document.getElementById("demo").addEventListener("click", () => {
+  const on = !demoOn();
+  try { localStorage.setItem("demo", on ? "1" : ""); } catch (_) {}
+  showDemo(on);
+  if (S.data) render();
+});
+try { showDemo(localStorage.getItem("demo") === "1"); } catch (_) { showDemo(false); }
+// ⚙ Advanced: the page's tools and each item's actions; off by default, kept per browser
+function showAdv(on) {
+  document.body.classList.toggle("adv", on);
+  const b = document.getElementById("adv");
+  b.dataset.t = on ? "adv.on" : "adv.off";
+  b.textContent = tr(b.dataset.t);
+  b.classList.toggle("on", on);
+  if (!on && !document.getElementById("setupview").hidden) tab("bench");
+}
+document.getElementById("adv").addEventListener("click", () => {
+  const on = !document.body.classList.contains("adv");
+  try { localStorage.setItem("adv", on ? "1" : ""); } catch (_) {}
+  showAdv(on);
+});
+try { showAdv(localStorage.getItem("adv") === "1"); } catch (_) { showAdv(false); }
+document.getElementById("view").addEventListener("click", async () => {  // the public view, this browser only
+  await post("/api/view", { public: !isPublic() });
+  location.reload();
+});
+try { S.topic = localStorage.getItem("topic") || ""; { const t0 = localStorage.getItem("tab"); if (t0 === "chat" || (t0 === "setup" && !isPublic() && document.body.classList.contains("adv")) || t0 === "news") tab(t0); } } catch (_) {}
 </script>
 </body>
 </html>

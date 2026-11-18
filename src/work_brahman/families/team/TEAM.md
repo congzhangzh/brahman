@@ -1,9 +1,20 @@
 # Team and roles: long-lived members, generations, books (the owner, 2026-11-07)
 
-The detail behind the team block in the global instructions (`~/.claude/CLAUDE.md`,
-`~/.codex/AGENTS.md`), which `buddy-team setup` writes from brahman (the owner, 2026-11-11: "make it
-global instruction and install by brahman"). Read it when starting, resuming, retiring or
-briefing a session. Moved here from the owner's template repo (`claude_md/global/team.md`); brahman keeps it from now on. Change it here, then run `buddy-team setup` again.
+The detail behind the team rule in the global instructions, which `buddy-team setup` installs
+from brahman (the owner, 2026-11-11: "make it global instruction and install by brahman"). Read it
+when starting, resuming, retiring or briefing a session. Moved here from the owner's template repo
+(`claude_md/global/team.md`); brahman keeps it from now on. Change the rule in `RULE.md` (this
+detail here), then run `buddy-team setup` again.
+
+**Where the rule lives (the owner, 2026-11-14: "not rewrite the global CLAUDE.md, but extend it
+with an xxx.d or rules"):** brahman's own file, never a block inside the owner's.
+- **Claude Code:** `~/.claude/rules/brahman-team.md` (`$CLAUDE_CONFIG_DIR/rules/`), loaded in
+  every project; setup writes it whole, `--uninstall` deletes it. CLAUDE.md keeps one pointer
+  line to it ("every rule keeps a line here").
+- **Codex** has no rules folder (✅ 0.167: only `AGENTS.md` or `AGENTS.override.md` in
+  `~/.codex`). Where AGENTS.md is generated from CLAUDE.md plus `~/.claude/rules/*.md` (the
+  owner's `make-agents-md.sh`), setup leaves it alone and says if it is out of date; rebuild it
+  after setup. Anywhere else, setup keeps the rule there as a managed `brahman-team` block.
 
 ## The shape
 
@@ -22,6 +33,7 @@ other, have professional parts, a stable relationship, and dynamic by release ma
   | `rev` | review: upstream PRs, the MR loop | `rev-freerdp-g2` |
   | `comp` | a component's owner | `comp-shadow-g3` (FreeRDP's shadow server, encoders, sesman, the hosts), `comp-freerdp-web-g9`, `comp-xrdp-g2`, `comp-avm-g1` |
   | `dbg` | tricky debugging across components: the root cause with evidence (A/B, bisect, logs), the fix on its own local branch, handed to the area's owner (never a commit to another member's branch) | `dbg-rdp-g1` |
+  | `edu` | teaching: teaches the owner from the real work in the tutor style (diagnose the gap, the why, one check question, the next step), keeps the lessons and the project's book (the chronicle); read-only on code, never in another member's branch. Like the buddy, not bound to one group (the owner, 2026-11-14: "for edu roles it's like the brahman, no need to restrict to the group; sometimes one all-in-one edu is acceptable too"): one project, several or all; the context names the scope, and an all-projects edu's pys window goes in the reserved group `shared` (`pys group shared`; every group's team shows it as "(shared)") | `edu-rdp-g1`, `edu-all-g1` |
 
   Short context words, so `<name> [<job>] <state>` (e.g. `comp-shadow-g3 #331 keys busy`) fits a pys title (~24 characters; when a clear name is longer, the work part shrinks) (the
   team block, "Window titles"). All the area's work goes to its member, whatever the topic.
@@ -35,6 +47,24 @@ other, have professional parts, a stable relationship, and dynamic by release ma
   owns the integration branch (see git-flow.md, "The release kit coordinates a release bump").
 - A long session answers better because it knows the code, the history and the owner; an old one is
   noisy and loses focus. The rules below keep both sides.
+
+## Automatic work is script only (the owner, 2026-11-14)
+
+A rule for every role. Scripts gather the information and scripts analyze it; Claude writes the
+scripts and improves them. The model runs at run time only for a person's ask (a chat turn, a long
+story, "why did QQQM move?"), on that person's own login. A scheduled job or a duty never calls the
+model. If automatic work ever needs one, it uses an API key, set on purpose in config and shown
+in the audit, never someone's subscription login. The owner's reason: "Anthropic is a good
+company; save them and support them."
+
+- **Building:** a new duty, timer or loop starts as a script. A script finds only what its rules
+  look for. When a miss matters, the person asks, or a rule is added: Claude improves the
+  script, not the run.
+- **Reviewing:** one line on every review checklist: *a new model call at run time: why can't a
+  script do it?*
+- First applied: the personal assistant (`assistant/`, 48e2ab1). The world watch now reads free
+  feeds and price lines by rules, at $0 a run. The scheduled brief is numbers only, and the
+  model answers only the owner's asks.
 
 ## Generations
 

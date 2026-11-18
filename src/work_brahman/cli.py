@@ -114,9 +114,22 @@ def _short(args, state: Path, channels: list, chats: list[str]) -> int:
         if args.wait:
             return _wait(state, args.number, q["id"], args.timeout)
         return _news(state, args.number)
+    inputs = outputs = found = None
+    if a == "mark":  # only mark has --in/--out (eff4688 read them for done, note and plan too, and broke them)
+        from . import links as L
+        inputs, outputs = _pairs(args.inputs), _pairs(args.outputs)
+        # at mark time, kept (links.py); --in and --out apart, so run=111 in and run=222 out never share a link
+        got_in, hint_in = L.resolve(inputs or {}, os.getcwd(), beside=outputs)
+        got_out, hint_out = L.resolve(outputs or {}, os.getcwd(), beside=inputs)
+        found = {"in": got_in, "out": got_out}
+        for hint in dict.fromkeys(h for h in (hint_in, hint_out) if h):
+            print(hint, file=sys.stderr)
+        for which, got in found.items():  # the full URL: a terminal (and pys) makes it clickable
+            for k, u in got.items():
+                print(f"🔗 {which} {k}: {u}")
     t = (shorts.mark(state, channels, args.number, args.name, status=args.status, note=args.note,
                      took=args.took, round=args.round, by=shorts.executor(),
-                     inputs=_pairs(args.inputs), outputs=_pairs(args.outputs), win=_pys_window())
+                     inputs=inputs, outputs=outputs, win=_pys_window(), links=found)
          if a == "mark" else
          shorts.plan(state, channels, args.number, args.marks) if a == "plan" else
          shorts.note(state, channels, args.number, args.text) if a == "note" else
@@ -236,6 +249,18 @@ def _claude_pid() -> int | None:
         if pid <= 1:
             return None
     return None
+
+
+def _story_private(state: Path, kind: str, ident, value: str | None, tag: str = "private") -> int:
+    """`buddy-short private|demo <n> [on|off|auto]`, the same for long stories, and
+    `buddy-team private|demo <team> [on|off]` (privacy.py)."""
+    from . import privacy
+    rec = (privacy.mark if tag == "private" else privacy.demo)(state, kind, str(ident), value)
+    if rec is None:
+        print(f"no {'team ' + str(ident) if kind == 'team' else f'{kind} story #{ident}'}", file=sys.stderr)
+        return 2
+    print(privacy.describe(kind, rec))
+    return 0
 
 
 def run_long_hook(state: Path, channels: list, chats: list[str], engine: str = "claude-code") -> int:
@@ -503,6 +528,18 @@ def main() -> int:
     short = sub.add_parser("short", help="a short story: work that waits on pipelines between its steps, "
                                          "one card in your chats, changed as it goes")
     tsub = short.add_subparsers(dest="action", required=True)
+    tsub.add_parser("tool-hook", help="Claude Code's PostToolUse hook (scripts/buddy-short): the owner's own tools "
+                                      "a step used, by name (tooluse.py)")
+    t = tsub.add_parser("tools", help="install or remove the tool hook in ~/.claude/settings.json (a dated copy first)")
+    t.add_argument("what", choices=["install", "uninstall"])
+    t.add_argument("--settings", default=str(Path.home() / ".claude" / "settings.json"))
+    t = tsub.add_parser("demo", help="⭐ tag a story for demos: the workbench's ⭐ Demo filter shows only these")
+    t.add_argument("number", type=int)
+    t.add_argument("value", nargs="?", choices=["on", "off"], help="none: show it")
+    t = tsub.add_parser("private", help="mark a story private or public by hand (auto: back to the marker); "
+                                        "the workbench's public view hides private ones (privacy.py)")
+    t.add_argument("number", type=int)
+    t.add_argument("value", nargs="?", choices=["on", "off", "auto"], help="none: show it")
     t = tsub.add_parser("start", help="a new short story; prints its number")
     t.add_argument("title")
     t.add_argument("--mark", action="append", default=[], help="a mark expected (repeat, in order); "
@@ -591,10 +628,18 @@ def main() -> int:
     t = msub.add_parser("check", help="the owner's replies on the card, each once; needs no chat")
     t.add_argument("team")
     msub.add_parser("list", help="every team, one line each")
-    t = msub.add_parser("setup", help="write the team rule (names, window titles, generations) into "
-                                      "~/.claude/CLAUDE.md and ~/.codex/AGENTS.md as a managed block")
-    t.add_argument("--dry-run", action="store_true", help="print the plan and the block, change nothing")
-    t.add_argument("--uninstall", action="store_true", help="remove exactly the block")
+    t = msub.add_parser("demo", help="⭐ tag a team for demos (the workbench's ⭐ Demo filter)")
+    t.add_argument("team")
+    t.add_argument("value", nargs="?", choices=["on", "off"], help="none: show it")
+    t = msub.add_parser("private", help="mark a team's card private or public on the workbench page "
+                                        "(private until marked; the public view hides it)")
+    t.add_argument("team")
+    t.add_argument("value", nargs="?", choices=["on", "off"], help="none: show it")
+    t = msub.add_parser("setup", help="install the team rule (names, window titles, generations): "
+                                      "~/.claude/rules/brahman-team.md, and a managed block in "
+                                      "~/.codex/AGENTS.md unless a generator copies the rules file there")
+    t.add_argument("--dry-run", action="store_true", help="print the plan and the rule, change nothing")
+    t.add_argument("--uninstall", action="store_true", help="delete the rules file and remove exactly the block")
     t.add_argument("--agent", choices=("claude", "codex", "all"), default="all")
     long = sub.add_parser("long", help="a long story: one agent session mirrored to a thread in your chats")
     lsub = long.add_subparsers(dest="action", required=True)
@@ -604,6 +649,12 @@ def main() -> int:
     t.add_argument("--pid", type=int, required=True)
     t.add_argument("--title", default="")
     lsub.add_parser("list", help="every long story")
+    t = lsub.add_parser("demo", help="⭐ tag a long story for demos (the workbench's ⭐ Demo filter)")
+    t.add_argument("number", type=int)
+    t.add_argument("value", nargs="?", choices=["on", "off"], help="none: show it")
+    t = lsub.add_parser("private", help="mark a long story private or public by hand (auto: back to the marker)")
+    t.add_argument("number", type=int)
+    t.add_argument("value", nargs="?", choices=["on", "off", "auto"], help="none: show it")
     for name, helptext in (("status", "who holds a long story's session, and what applies now"),
                            ("handover", "the buddy lets go of the session, kept for your terminal"),
                            ("takeback", "the buddy holds the session again (a live process)"),
@@ -703,6 +754,22 @@ def main() -> int:
         print(f"{sum(m['running'] for m in rows)} running, {len(rows)} on record; "
               f"`buddy procs kill` stops them all ({procs.SLICE})")
         return 0
+    if args.cmd == "short" and args.action == "tool-hook":  # every PostToolUse of an attached session: no chat calls
+        from . import tooluse
+        try:
+            event = json.loads(sys.stdin.read() or "{}")
+        except ValueError:
+            return 0
+        said = tooluse.hook(state, event, cfg)
+        if os.environ.get("BUDDY_HOOK_DEBUG"):
+            print(said, file=sys.stderr)
+        return 0
+    if args.cmd == "short" and args.action == "tools":  # the owner's settings file only
+        from . import tooluse
+        print(tooluse.install(Path(args.settings), remove=args.what == "uninstall"))
+        return 0
+    if args.cmd in ("short", "long") and args.action in ("private", "demo"):  # the story file only: no chat calls
+        return _story_private(state, args.cmd, args.number, args.value, args.action)
     if args.cmd == "long" and args.action == "list":  # read-only, needs no channel
         print(longs.board(state))
         return 0
@@ -718,6 +785,8 @@ def main() -> int:
         from . import team_setup
         agents = team_setup.AGENTS if args.agent == "all" else (args.agent,)
         return team_setup.run(agents, dry_run=args.dry_run, uninstall=args.uninstall)
+    if args.cmd == "team" and args.action in ("private", "demo"):  # the team file only: no chat calls
+        return _story_private(state, "team", args.team, args.value, args.action)
     if args.cmd == "team" and args.action in ("show", "check", "list"):  # the team files only: no chat calls
         if args.action == "list":
             print(teams.board(state))
@@ -766,7 +835,7 @@ def main() -> int:
     engine = ClaudeCode(**cfg.get("claude", {}))
     channels = []
     if os.environ.get("FEISHU_APP_ID"):
-        from .feishu import Feishu
+        from .feishu_lazy import LazyFeishu as Feishu  # Lark's SDK only when a call needs it (3.3 s to import)
         channels.append(_quiet(Feishu(os.environ["FEISHU_APP_ID"], os.environ["FEISHU_APP_SECRET"],
                                       cfg.get("domain", "feishu")), cfg, state, ""))
     if os.environ.get("LARK_APP_ID"):  # a Lark app beside a Feishu one: its ids are lark:...
@@ -774,7 +843,7 @@ def main() -> int:
             print("LARK_APP_ID is a second Lark app: FEISHU_APP_ID is already on domain = \"lark\" "
                   "(set domain = \"feishu\" if that one is Feishu)", file=sys.stderr)
             return 2
-        from .feishu import Feishu
+        from .feishu_lazy import LazyFeishu as Feishu
         channels.append(_quiet(Feishu(os.environ["LARK_APP_ID"], os.environ.get("LARK_APP_SECRET", ""),
                                       "lark", prefix="lark:"), cfg, state, "lark:"))
     if os.environ.get("TELEGRAM_BOT_TOKEN"):  # [notify] telegram, off by default like every app (notify.py)
@@ -848,6 +917,12 @@ def main() -> int:
                 log.info("version %s: %s", changes.version(), said)
         except Exception:  # noqa: BLE001 - notes never stop the buddy
             log.exception("what's new: the announcement failed")
+        try:  # down for a while (not a restart): say when, so he resends what got no answer (alive.py)
+            from . import alive
+            if said := alive.start(state, channels, list(linked.chats)):
+                log.info("was down: %s", said)
+        except Exception:  # noqa: BLE001 - the heartbeat never stops the buddy
+            log.exception("alive: the heartbeat failed to start")
         adopted = procs.adopt(bot.adopted)  # what the last instance left running: delivered when it ends
         if adopted:
             log.info("adopted %d runs from the last instance: %s", len(adopted), ", ".join(adopted))

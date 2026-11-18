@@ -72,7 +72,11 @@ class ShortStory:
             "steps": [{"step": m["name"] + (f" → {m['fork']['took']}" if (m.get("fork") or {}).get("took") else "")
                        + shorts.rounds(m),
                        "status": m["status"], "at": m.get("at"),
-                       "note": m.get("note", ""), "planned": m.get("planned", True)}
+                       "note": m.get("note", ""), "planned": m.get("planned", True),
+                       # the shared selection's key (the views) and the detail panel's fields
+                       "id": m.get("id", ""), "name": m["name"], "by": m.get("by", ""), "tag": m.get("tag", ""),
+                       "tools": m.get("tools", []), "in": m.get("in", {}), "out": m.get("out", {}), "links": m.get("links", {}),
+                       "fork": bool(m.get("fork")), "loop": bool(m.get("loop"))}
                       for m in s["marks"]],
             "result": s["events"][-1]["text"] if s["events"] else "",
             "fitness": {"seconds": int(t1 - t0)},

@@ -135,7 +135,7 @@ class Feishu:
         req = ReplyMessageRequest.builder().message_id(message_id).request_body(body).build()
         self._counted()
         got = _check(self.api.im.v1.message.reply(req))
-        code = _last.code
+        code = getattr(_last, "code", None)  # a fresh thread whose calls all worked never set it (a Windows report, 2026-11-17)
         if got is None and in_thread and code not in QUOTA_CODES:
             # A thread reply refused (an app made by a QR scan is a PersonalAgent, and its chats may
             # not take threads; 2026-11-12): the same reply in the main chat, and the refusal kept,

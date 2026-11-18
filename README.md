@@ -189,9 +189,9 @@ settings still need one).
 **The workbench from another device on your LAN** (an SSH forward with a wildcard bind, e.g.
 `ssh -L 0.0.0.0:18787:127.0.0.1:8787 server` on a machine the phone can reach): set a long random
 `BUDDY_WEB_TOKEN` in `.env` (`python -c "import secrets; print(secrets.token_urlsafe(32))"`) and
-list the addresses the browser will use in `[web] hosts` (e.g. `["192.168.1.10"]` or
-`["192.168.0.0/16"]`), then restart. Every request then needs the token: open
-`http://192.168.1.10:18787/?token=…` once (it becomes a cookie and leaves the address bar), or type it
+list the addresses the browser will use in `[web] hosts` (e.g. `["192.0.2.10"]` or
+`["192.0.2.0/24"]`), then restart. Every request then needs the token: open
+`http://192.0.2.10:18787/?token=…` once (it becomes a cookie and leaves the address bar), or type it
 on the login page; scripts send `Authorization: Bearer …`. Without a token, `[web] hosts` is ignored.
 Plain HTTP: anyone on that network can read the token and the pages, and web push needs
 127.0.0.1 or HTTPS; an SSH client on the device itself (`-L` to 127.0.0.1) has neither problem.
