@@ -127,9 +127,11 @@ def _short(args, state: Path, channels: list, chats: list[str]) -> int:
         for which, got in found.items():  # the full URL: a terminal (and pys) makes it clickable
             for k, u in got.items():
                 print(f"🔗 {which} {k}: {u}")
+    from . import notify
+    spent = _step_cost(state, args, notify.config()) if a == "mark" else None  # [views.prices] from the live buddy.toml
     t = (shorts.mark(state, channels, args.number, args.name, status=args.status, note=args.note,
                      took=args.took, round=args.round, by=shorts.executor(),
-                     inputs=inputs, outputs=outputs, win=_pys_window(), links=found)
+                     inputs=inputs, outputs=outputs, win=_pys_window(), links=found, cost=spent)
          if a == "mark" else
          shorts.plan(state, channels, args.number, args.marks) if a == "plan" else
          shorts.note(state, channels, args.number, args.text) if a == "note" else
@@ -249,6 +251,26 @@ def _claude_pid() -> int | None:
         if pid <= 1:
             return None
     return None
+
+
+def _step_cost(state: Path, args, cfg: dict) -> dict | None:
+    """A step this Claude session ends (done, failed, skipped): its cost since its own "doing" (cost.py)."""
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    if not sid or args.status not in ("done", "failed", "skipped"):
+        return None
+    try:
+        from . import cost
+        s = shorts.load(state, args.number)
+        m = shorts._find(s, args.name) if s else None
+        doing = [e for e in (s or {}).get("events", []) if m and e.get("step") == m.get("id")
+                 and e.get("status") == "doing" and f":claude-{sid[:8]}" in (e.get("by") or "")]
+        if not doing:
+            return None
+        start = time.mktime(time.strptime(doing[-1]["at"][:19], "%Y-%m-%dT%H:%M:%S"))
+        return cost.between(cost.transcript(sid), start, time.time(), (cfg.get("views") or {}).get("prices"))
+    except Exception:  # noqa: BLE001 - a cost never stops a mark
+        log.exception("step cost")
+        return None
 
 
 def _story_private(state: Path, kind: str, ident, value: str | None, tag: str = "private") -> int:

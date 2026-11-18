@@ -36,6 +36,8 @@ No secret is ever sent to the page; it sends a new one, or "-" to remove one.
     GET  /api/push        web push: {mode, key (VAPID, when on), browsers}
     POST /api/push/subscribe {"subscription": PushSubscription.toJSON()} · /api/push/unsubscribe {"endpoint"}
     POST /api/push/test   one test push to every subscribed browser: {sent, failed, dropped}
+    GET  /api/health      200 {ok, version, commit, up_s, beat_age_s, channels, scheduler}, 503 when a part fails
+                          (health.py); without the web token, {ok} only
     GET  /api/changes     What's new: {version, commit, checkout, markdown (CHANGES.md), latest}
     GET  /api/lanes?id=short-story:12   the story's swimlanes: who did what, where, in parallel (lanes.py)
     POST /api/lanes/attach {id, machine, session}   that session's pys window, brought up (pys select)
@@ -312,6 +314,7 @@ class Web:
         self.config = config  # buddy.toml, for the Setup tab (None: where `buddy init` puts it)
         self.cfg = cfg  # as the buddy started with it ([notify] webpush, read at start like every setting)
         self.chat = chat
+        self.started = time.time()  # GET /api/health: up_s
         self.families = [f for f in (families or {}).values() if hasattr(f, "runs")]
         self.workflows = [{"kind": kind, "name": name, "schedule": t.get("schedule", ""),
                            "about": t.get("prompt", "")[:120]}
@@ -353,6 +356,13 @@ class Web:
                     rows = webpush.subs(web.state)
                     return self._json({"mode": m, "key": webpush.public_key(web.state) if m != "off" else "",
                                        "browsers": len(rows), "list": [webpush.describe(r) for r in rows]})
+                if path == "/api/health":  # health.py: 200 when it works, 503 when a part doesn't
+                    from . import health, webauth
+                    got = health.report(web.state, web.bot, web.scheduler, web.started)
+                    tok = webauth.token()
+                    if tok and not webauth.authed(self.headers, tok):
+                        got = {"ok": got["ok"]}  # a monitor without the token: works or not, nothing more
+                    return self._send(200 if got["ok"] else 503, json.dumps(got).encode(), "application/json")
                 if path == "/tokens.css":
                     return self._send(200, TOKENS.read_bytes() if TOKENS.exists() else b"", "text/css")
                 if path == "/api/data":

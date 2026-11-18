@@ -518,7 +518,7 @@ def _sync_parent(state: Path, channels: list[Channel], child: dict) -> None:
 def mark(state: Path, channels: list[Channel], number: int, name: str, *, status: str = "done",
          note: str = "", took: str | None = None, round: int | None = None, by: dict | None = None,
          inputs: dict | None = None, outputs: dict | None = None, win: dict | None = None,
-         links: dict | None = None) -> dict | None:
+         links: dict | None = None, cost: dict | None = None) -> dict | None:
     """A mark happened. took: the option a fork went down; round: a loop's round (from 1).
     by: who marks it (executor()); inputs, outputs: what the step used and made (key: value);
     win: the pys window the marking session runs in (window, pid, started), for the Lanes'
@@ -541,6 +541,8 @@ def mark(state: Path, channels: list[Channel], number: int, name: str, *, status
             if vals:
                 kept = {k: u for k, u in (m.get("links") or {}).get(which, {}).items() if k not in vals}
                 m.setdefault("links", {})[which] = {**kept, **(links or {}).get(which, {})}
+        if cost:
+            m["cost"] = cost  # phase 3: tokens, wall and active time of the step's own session (cost.py)
         took_ = (m.get("fork") or {}).get("took") if took else None
         # a linked value is written as a markdown link: the card (Telegram, Lark), the page and the terminal show it
         out_links = (links or {}).get("out", {})

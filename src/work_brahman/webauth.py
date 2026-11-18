@@ -34,7 +34,8 @@ from pathlib import Path
 
 ENV = "BUDDY_WEB_TOKEN"
 COOKIE = "buddy_auth"
-PUBLIC = {"/manifest.webmanifest", "/sw.js", "/icon-180.png", "/icon-192.png", "/icon-512.png"}
+PUBLIC = {"/manifest.webmanifest", "/sw.js", "/icon-180.png", "/icon-192.png", "/icon-512.png",
+          "/api/health"}  # health: {ok} only without the token (web.py)
 LOOPBACK = ("127.0.0.1", "localhost", "[::1]", "::1")
 
 
@@ -146,7 +147,9 @@ form{display:grid;gap:10px;padding:24px;border:1px solid #444;border-radius:12px
 button{background:#c9a227;color:#1f1b16;border:0}p{margin:0;color:#aaa;font-size:13px}</style></head><body>
 <form method="post" action="/login"><b>brahman workbench</b><p>This buddy asks for its web token (BUDDY_WEB_TOKEN in its .env).</p>
 <input name="token" type="password" autocomplete="current-password" autofocus placeholder="token"><input type="hidden" name="next" value="{next}">
-<button>Open</button>{bad}</form></body></html>"""
+<button>Open</button>{bad}</form>
+<script>const n = document.querySelector("[name=next]"); if (location.hash && !n.value.includes("#")) n.value += location.hash;</script>
+</body></html>"""
 
 
 def login_page(next_path: str = "/", bad: bool = False) -> bytes:

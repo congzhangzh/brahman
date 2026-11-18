@@ -5,6 +5,31 @@ once, at the first start of a new version (following `[notify]`).
 
 ## Unreleased
 
+## 20261117.3
+
+- **What a step changed and what it cost**: the detail panel shows a step's effects, by rules on
+  the command run (git commit, push, force-push, merge, rebase, tag, `reset --hard`; gh and glab
+  releases, PRs, merges and comments; systemctl; `rm -r`; docker and podman push, npm, uv and twine
+  publish, `heads publish --yes`; story cards; an MCP tool by its verb). Names only, and an irreversible one is marked: ⚠ on its step in Plan, drawn apart in
+  System. Your own rules go first, from `~/.config/brahman/effects.json`. The cost comes from the
+  marking session's own transcript, between its "doing" and the mark that ends the step: calls,
+  tokens in, out and cache, active time (a gap between two entries counts 5 minutes at most) and wall time.
+  `$` shows only when `[views.prices]` in buddy.toml names the model's prices; the session's
+  subagents are not counted, and the panel says so. Commands are read as the shell runs them: several
+  lines, `sudo`, `timeout`, `git -C`, `gh -R` and quotes are understood. A rule of your own stores
+  only its program unless it names its `"what"`, so a host or a path in your command never reaches
+  the story.
+- **Health check**: `GET /api/health` answers 200 while the buddy works (its heartbeat is fresh,
+  every chat channel still listens, the scheduler runs) and 503 when a part fails, so `curl -f`
+  alone tells. Without the web token it says only whether it works; with it, which part and the
+  version too.
+- **A link to one session**: `#session=3` opens the workbench on that long story (one Claude Code
+  or Codex session), as `#story=12` and `#team=<kit>` open a story or a team; picking its tile
+  writes it. With a web token set, the login page now keeps a link's `#…` part (it went to the plain
+  page before).
+- **Team roles**: `comp` is a **component developer**; "member" stays the word for any long-lived
+  team session.
+
 ## 20261117.2
 
 - **Three views of a story**: the workbench's Level 2 has Plan, System and Lanes on one shared

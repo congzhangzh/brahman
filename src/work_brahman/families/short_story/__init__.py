@@ -75,7 +75,7 @@ class ShortStory:
                        "note": m.get("note", ""), "planned": m.get("planned", True),
                        # the shared selection's key (the views) and the detail panel's fields
                        "id": m.get("id", ""), "name": m["name"], "by": m.get("by", ""), "tag": m.get("tag", ""),
-                       "tools": m.get("tools", []), "in": m.get("in", {}), "out": m.get("out", {}), "links": m.get("links", {}),
+                       "tools": m.get("tools", []), "in": m.get("in", {}), "out": m.get("out", {}), "links": m.get("links", {}), "effects": m.get("effects", []), "cost": m.get("cost"),
                        "fork": bool(m.get("fork")), "loop": bool(m.get("loop"))}
                       for m in s["marks"]],
             "result": s["events"][-1]["text"] if s["events"] else "",

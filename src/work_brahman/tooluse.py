@@ -20,7 +20,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shlex
 import time
 from pathlib import Path
 
@@ -40,16 +39,11 @@ def settings(cfg: dict | None) -> tuple[tuple, dict]:
 
 
 def first_program(command: str) -> str:
-    """The first program a shell command runs: past `cd …&&`, `X=1`, sudo/env/timeout; "" when unsure."""
-    for part in re.split(r"&&|\|\||;|\|", command or ""):
-        try:
-            words = shlex.split(part)
-        except ValueError:
-            words = part.split()
-        while words and (words[0] in WRAPPERS or re.fullmatch(r"\w+=.*", words[0]) or words[0].startswith("-")
-                         or (words[0].isdigit())):
-            words = words[1:]
-        if words and words[0] not in ("cd", "pushd", "popd", "export", "set", "source", "."):
+    """The first program a shell command runs: past `cd …&&` or a `cd` line, `X=1`, sudo/env/timeout and
+    their flags; split as bash does (newlines, quotes, here-documents: effects._split); "" when unsure."""
+    from .effects import _split, _words
+    for seg in _split(command or ""):
+        if words := _words(seg):
             return words[0]
     return ""
 
@@ -133,14 +127,28 @@ def args_file(state: Path, story: int) -> Path:
     return Path(state) / "args" / f"{story}.jsonl"
 
 
-def record(state: Path, story: int, step: str, name: str, tool: str, inp: dict, call_id: str = "") -> None:
-    """The name onto the step (once), the arguments into the story's own args file."""
+def record(state: Path, story: int, step: str, name: str | None, tool: str, inp: dict, call_id: str = "",
+           effects: list[dict] | None = None) -> None:
+    """The name onto the step (once), its effects counted by kind and what (phase 3), the arguments
+    into the story's own args file."""
     from . import short_stories as shorts
     with shorts._locked(state, str(story)):
         s = shorts.load(state, story)
         m = next((m for m in (s or {}).get("marks", []) if m.get("id") == step), None)
-        if m is not None and name not in m.setdefault("tools", []):
+        changed = False
+        if m is not None and name and name not in m.setdefault("tools", []):
             m["tools"].append(name)
+            changed = True
+        for e in effects or []:
+            if m is None:
+                break
+            have = next((x for x in m.setdefault("effects", []) if (x["kind"], x["what"]) == (e["kind"], e["what"])), None)
+            if have:
+                have["n"] = have.get("n", 1) + 1
+            else:
+                m["effects"].append({**e, "n": 1, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")})
+            changed = True
+        if changed:
             shorts._save(state, s)
     f = args_file(state, story)
     f.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -158,15 +166,17 @@ def hook(state: Path, event: dict, cfg: dict | None = None) -> str:
         if not sid or not gate(state, sid).exists():
             return "not attached"
         cli, systems = settings(cfg)
+        from . import effects as E
         name = classify(tool, event.get("tool_input") or {}, Path.home(), cli, systems)
-        if name is None:
+        effs = E.of_call(tool, event.get("tool_input") or {})
+        if name is None and not effs:
             return "built-in"
         where = step_of(state, sid)
         if where is None:
             gate(state, sid).unlink(missing_ok=True)  # no running story's step: stop looking
             return "no step"
-        record(state, where[0], where[1], name, tool, event.get("tool_input") or {}, str(event.get("tool_use_id", "")))
-        return f"#{where[0]} {where[1]}: {name}"
+        record(state, where[0], where[1], name, tool, event.get("tool_input") or {}, str(event.get("tool_use_id", "")), effs)
+        return f"#{where[0]} {where[1]}: {name or ''}" + "".join(f" +{e['kind']}" for e in effs)
     except Exception as e:  # noqa: BLE001 - a hook never breaks the session
         return f"failed: {type(e).__name__}"
 

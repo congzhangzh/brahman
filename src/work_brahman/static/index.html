@@ -214,7 +214,8 @@ body:not(.adv) :is(.mode, .bell, .langs, .tabs [data-tab="setup"], .more, [data-
 /* the views (specs/views.md) */
 .node.step { cursor: pointer; } .node.step.improvised { border-style: dashed; } .node.step.skipped { opacity: .6; }
 .node.step.sel, .lanes .bar.sel, .cap.sel { outline: 2px solid var(--ink); outline-offset: 1px; }
-.tools-n { font-size: 11px; color: var(--mute); }
+.tools-n { font-size: 11px; color: var(--mute); } .irrev { color: var(--bad); border-color: var(--bad); }
+.irrev-box { margin-top: 6px; border-top: 1px dashed var(--bad); padding-top: 4px; } .irrev-box b { color: var(--bad); }
 .sys { display: grid; grid-template-columns: 200px 1fr 220px; gap: 7px 14px; }
 .sys .part { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--card); }
 .sys .part b { display: block; font-size: 11px; color: var(--mute); margin-bottom: 3px; }
@@ -749,6 +750,8 @@ function systemView(r) {
   for (const m of steps) for (const t of m.tools || []) ((used[toolKind(t)] ||= {})[toolName(t)] ||= []).push(m.id);
   const sessions = [...new Set(steps.map(m => m.tag).filter(Boolean))];
   const outs = steps.flatMap(m => Object.entries(m.out || {}).map(([k, v]) => [m.id, `${k}=${v}`]));
+  const effs = steps.flatMap(m => (m.effects || []).map(e => [m.id, e]));
+  const irrev = effs.filter(([, e]) => !e.reversible), rev = effs.filter(([, e]) => e.reversible);
   const asked = (st.questions || []).length, stopped = !!st.stop;
   const part = (cls, lit, title, body) => `<div class="part ${cls} ${lit ? "lit" : "faint"}"><b>${title}</b>${body || `<span class="mute">—</span>`}</div>`;
   const chip = (name, ids) => `<button class="cap" data-step="${esc(ids[0] || "")}" title="${esc(tr("sys.used_in", { n: ids.length }))}">${esc(name)}</button>`;
@@ -759,10 +762,21 @@ function systemView(r) {
     ${part("top", asked || stopped || true, tr("sys.top"), [tr("sys.you", { q: asked }), stopped ? tr("sys.stopped") : ""].filter(Boolean).join(" · "))}
     ${part("in", true, tr("story.input"), esc(r.trigger || ""))}
     ${part("orch", sessions.length, tr("sys.orch"), sessions.map(x => `<span class="who-chip">${esc(x)}</span>`).join(" "))}
-    ${part("out", outs.length, tr("effect"), outs.map(([id, o]) => `<button class="cap" data-step="${esc(id)}">${esc(o)}</button>`).join(" ") || tr("sys.cards"))}
+    ${part("out", outs.length || effs.length, tr("effect"), [...outs.map(([id, o]) => `<button class="cap" data-step="${esc(id)}">${esc(o)}</button>`),
+      ...rev.map(([id, e]) => `<button class="cap" data-step="${esc(id)}">${esc(e.what)}</button>`)].join(" ") || tr("sys.cards"))
+      + (irrev.length ? `<div class="irrev-box"><b>⚠ ${esc(tr("sys.irrev"))}</b>${irrev.map(([id, e]) => `<button class="cap irrev" data-step="${esc(id)}">${esc(e.what)}${e.n > 1 ? " ×" + e.n : ""}</button>`).join(" ")}</div>` : "")}
     <div class="caps">${caps}${part("cap-sys", systems.length, tr("sys.info"), [...new Set(systems)].map(esc).join(" · "))}</div>
     ${part("floor", true, tr("obs"), tr("story.file", { file: `<code>short_stories/${st.id}.json</code>`, n: Math.round(((r.fitness || {}).seconds || 0) / 60) }))}
   </div>${Object.keys(used).length ? "" : `<div class="note">${esc(tr("sys.no_tools"))}</div>`}`;
+}
+// A step's cost (cost.py): tokens, the $ only when a price is configured, active and wall time
+const kTok = n => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(n);
+const dur = s => s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round(s % 3600 / 60)} min` : s >= 60 ? `${Math.round(s / 60)} min` : `${s} s`;
+function costLine(c) {
+  const t = c.tokens || {};
+  return esc(tr("detail.cost_line", { calls: c.calls, out: kTok(t.out || 0), in: kTok((t.in || 0) + (t.cache_read || 0) + (t.cache_write || 0)),
+    usd: c.usd == null ? "—" : "$" + c.usd.toFixed(2), active: dur(c.active_s || 0), wall: dur(c.wall_s || 0) }))
+    + ` <span class="mute" title="${esc(tr("detail.cost_main"))}">ⓘ</span>`;
 }
 // One detail panel under whichever view is open, fed by the selection.
 function detailPanel(sel, r) {
@@ -782,6 +796,8 @@ function detailPanel(sel, r) {
     [tr("detail.waited"), waits.length ? esc(tr("lanes.mins", { n: Math.round(waits.reduce((a, w) => a + w.end - w.start, 0) / 60) })) : "—"],
     [tr("detail.in"), kv(m.in, "in") || "—"], [tr("detail.out"), kv(m.out, "out") || "—"],
     [tr("detail.tools"), (m.tools || []).map(t => `<span class="who-chip">${esc(toolName(t))}</span>`).join(" ") || `<span class="mute">${esc(tr("detail.no_tools"))}</span>`],
+    [tr("detail.effects"), (m.effects || []).map(e => `<span class="who-chip ${e.reversible ? "" : "irrev"}" title="${esc(tr(e.reversible ? "eff.rev" : "eff.irrev"))}">${e.reversible ? "" : "⚠ "}${esc(e.kind)}: ${esc(e.what)}${e.n > 1 ? " ×" + e.n : ""}</span>`).join(" ") || `<span class="mute">${esc(tr("detail.none_recorded"))}</span>`],
+    [tr("detail.cost"), m.cost ? costLine(m.cost) : `<span class="mute">${esc(tr("detail.none_recorded"))}</span>`],
     [tr("detail.note"), m.note ? esc(m.note) : "—"],
   ].map(([k, v]) => `<div class="drow"><span class="mute">${esc(k)}</span><span>${v}</span></div>`).join("");
   const dbg = `<div class="dbg"><button data-dbg="1">${esc(tr(S.dbg ? "detail.dbg_on" : "detail.dbg_off"))}</button>${S.dbg ? `<pre class="log" id="args">…</pre>` : ""}</div>`;
@@ -990,7 +1006,7 @@ function story(r, focused) {
       st.stop ? tr("story.stop", { where: esc(appName(st.stop.where)), at: hm(st.stop.at) }) : unread ? trn("story.unread", unread)
         : live ? tr("story.you") : tr("story.ended"))
     + node("lit", tr("story.input"), esc(r.trigger) + memberLink(r.member))
-    + `<div class="flow">${r.steps.map((m, k) => `<div class="node step ${m.status === "failed" ? "bad" : m.status === "todo" ? "todo" : m.status === "doing" ? "doing" : m.status === "skipped" ? "skipped" : "lit"} ${m.planned ? "" : "improvised"}" data-step="${esc(m.id || "")}"><b>${tr("story.mark", { n: k + 1 })}${m.planned ? "" : tr("story.unplanned")}</b>${MARK[m.status]} ${esc(m.step)}${m.at ? ` <span class="mute">${hm(m.at)}</span>` : ""}${(m.tools || []).length ? ` <span class="tools-n" title="${esc(m.tools.map(toolName).join(" · "))}">🔧${m.tools.length}</span>` : ""}</div>`).join('<span class="arrow">→</span>')
+    + `<div class="flow">${r.steps.map((m, k) => `<div class="node step ${m.status === "failed" ? "bad" : m.status === "todo" ? "todo" : m.status === "doing" ? "doing" : m.status === "skipped" ? "skipped" : "lit"} ${m.planned ? "" : "improvised"}" data-step="${esc(m.id || "")}"><b>${tr("story.mark", { n: k + 1 })}${m.planned ? "" : tr("story.unplanned")}</b>${MARK[m.status]} ${esc(m.step)}${m.at ? ` <span class="mute">${hm(m.at)}</span>` : ""}${(m.tools || []).length ? ` <span class="tools-n" title="${esc(m.tools.map(toolName).join(" · "))}">🔧${m.tools.length}</span>` : ""}${(m.effects || []).some(e => !e.reversible) ? ` <span class="tools-n irrev" title="${esc((m.effects || []).filter(e => !e.reversible).map(e => e.what).join(" · "))}">⚠</span>` : ""}</div>`).join('<span class="arrow">→</span>')
         || `<span class="mute">${tr("story.no_marks")}</span>`}</div>`
     + node(r.status === "ok" ? "lit" : FAILED.has(r.status) || r.status === "stopped" ? "bad" : "", tr("effect"),
       tr("story." + r.status) + ` · ${esc(r.result)}`)
@@ -1206,18 +1222,22 @@ document.addEventListener("click", e => {
   else return;
   render();
 });
-// A link to a story or to a team's member: #story=12, #team=<kit>&role=<role>. It survives a
-// reload and can be shared: picking a tile writes it, a pasted link or the back button reads it.
+// A link to a story, a session or a team's member: #story=12, #session=3 (a long story: one Claude
+// Code or Codex session), #team=<kit>&role=<role>. Stable (the numbers never change); it survives
+// a reload and the token's login page, and can be shared: picking a tile writes it, a pasted link
+// or the back button reads it. A story or session the view doesn't show is said not found.
 function fromHash() {
   const h = new URLSearchParams(location.hash.slice(1));
   if (h.get("story")) { S.run = `short-story:${h.get("story")}`; S.role = ""; }
+  else if (/^\d+$/.test(h.get("session") || "")) { S.run = `long-story:${h.get("session")}`; S.role = ""; }
   else if (h.get("team")) { S.run = `team:${h.get("team")}`; S.role = h.get("role") || ""; S.scrollRole = !!S.role; }
   else return;
   S.part = ""; S.fromLink = true; S.notFound = "";
 }
 function toHash(id) {
   const [fam, key] = [id.slice(0, id.indexOf(":")), id.slice(id.indexOf(":") + 1)];
-  const h = fam === "short-story" ? `#story=${key}` : fam === "team" ? `#team=${encodeURIComponent(key)}` : "";
+  const h = fam === "short-story" ? `#story=${key}` : fam === "long-story" ? `#session=${key}`
+    : fam === "team" ? `#team=${encodeURIComponent(key)}` : "";
   history.replaceState(null, "", location.pathname + location.search + h);
 }
 window.addEventListener("hashchange", () => { fromHash(); render(); });

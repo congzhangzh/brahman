@@ -4,7 +4,7 @@ Work is done by long-lived member sessions, one per area, assigned by the **rele
 (a role, one per kit). Subagents are short tasks inside one session; members are sessions.
 
 **Names:** `<role>-<context>-g<N>`. The role is one of `po` product owner, `rel` release
-manager, `rev` review, `comp` a component's owner, `dbg` tricky debugging (the owner, 2026-11-12: a
+manager, `rev` review, `comp` component developer (the owner, 2026-11-17: "component developer", not "member"), `dbg` tricky debugging (the owner, 2026-11-12: a
 bug that crosses components; it finds the root cause with evidence, fixes only on its own local
 branch and hands the fix to the area's owner, never commits to another member's branch), `edu` teaching (the owner,
 2026-11-14: teaches him from the real work in the tutor style, keeps lessons and the project's book; read-only on code;

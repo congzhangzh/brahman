@@ -1076,6 +1076,17 @@ Anything else goes to Claude Code, in the same session as your last message in t
     "page.detail.out": ("made (--out)", "产出（--out）"),
     "page.detail.tools": ("your tools", "你的工具"),
     "page.detail.no_tools": ("none recorded", "没有记录"),
+    "page.detail.effects": ("what it changed", "改动了什么"),
+    "page.detail.cost": ("cost", "代价"),
+    "page.detail.none_recorded": ("none recorded", "没有记录"),
+    "page.detail.cost_line": ("{calls} calls · {out} tokens out, {in} in · {usd} · active {active} of {wall}",
+                              "{calls} 次调用 · 输出 {out} token，输入 {in} · {usd} · 活跃 {active}，共 {wall}"),
+    "page.detail.cost_main": ("the marking session's own transcript only; its subagents are not counted; $ only with "
+                              "[views.prices] in buddy.toml", "只算标记这一步的会话自己的记录，不含它的子代理；只有在 buddy.toml "
+                              "的 [views.prices] 里配置了价格才显示 $"),
+    "page.eff.rev": ("can be taken back", "可以撤回"),
+    "page.eff.irrev": ("irreversible: it left this machine or can't be undone by the next command", "不可撤销：已离开本机，或无法用下一条命令撤回"),
+    "page.sys.irrev": ("irreversible", "不可撤销"),
     "page.detail.note": ("note", "备注"),
     "page.detail.dbg_off": ("🐞 debug: arguments", "🐞 调试：参数"),
     "page.detail.dbg_on": ("🐞 debug: arguments (on)", "🐞 调试：参数（开）"),

@@ -3,9 +3,9 @@
 A small, extensible work buddy: talk to **Claude Code** from **Feishu / Lark** or
 **Telegram** on your phone, run **scheduled jobs**, and grow it with **portable skills**.
 
-![The buddy in a terminal: install, init, doctor, then a short story started, marked and listed](https://github.com/congzhangzh/brahman/releases/latest/download/buddy-demo.gif)
+![The buddy in a terminal: install, init, doctor, then a short story started, marked and listed](https://github.com/congzhangzh/brahman/releases/download/v20261110.6/buddy-demo.gif)
 
-Recorded for every release, in a clean container as a made-up user ([the same as a video](https://github.com/congzhangzh/brahman/releases/latest/download/buddy-demo.mp4)).
+From release 20261110.6, recorded in a clean container as a made-up user ([the same as a video](https://github.com/congzhangzh/brahman/releases/download/v20261110.6/buddy-demo.mp4)). Later releases carry no recording, so the screens may differ from the current version.
 
 **The guide** ([English](../book/README.md) · [中文](../book/README.zh-CN.md)): why
 brahman exists, how it is designed, a real sample taken up the ladder, and a template to
@@ -112,6 +112,16 @@ Host buddy-wb
     ExitOnForwardFailure yes
     ServerAliveInterval 30
 ```
+
+**Links and a health check.** A link opens the page on one thing and stays valid, so a
+bookmark, a script or another app can use it: `http://localhost:8787/#story=12` (a short
+story), `#session=3` (a long story: one Claude Code or Codex session), `#team=<kit>&role=<role>`.
+Picking a tile writes the link into the address bar; with a web token set, the login page keeps
+it. `GET /api/health` answers 200 while the buddy works (its heartbeat is fresh, every chat
+channel still listens, the scheduler runs) and 503 when a part fails, so `curl -fs
+http://localhost:8787/api/health` alone tells; without the token it says only `{"ok": …}`.
+The page is never framed by another one (`X-Frame-Options: DENY`): open it in a tab or a
+window of its own.
 
 ## Quick start (from the repository)
 

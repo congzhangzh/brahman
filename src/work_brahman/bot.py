@@ -75,18 +75,25 @@ class Bot:
         self.long_prompts: dict[tuple[str, str], tuple[str, str, str]] = {}  # (chat, prompt) -> (engine, folder, mode)
         self.long_engines = {"claude-code": engine, "codex": Codex()}  # serve sets [long]'s (engine.long_engines)
         self.team_opts = None  # serve sets [families.team] (teams.settings); None: the defaults
+        self.listening: dict[str, bool] = {}  # channel name -> its listener runs (GET /api/health)
 
     def serve(self) -> None:
         """Listen on every channel; the first one keeps the main thread."""
         if not self.allowed:
             log.warning("BUDDY_ALLOWED_IDS is empty: every sender is refused and told their id")
+        self.listening = {ch.name: False for ch in self.channels}
         for ch in self.channels[1:]:
             threading.Thread(target=self._listen, args=(ch,), name=ch.name, daemon=True).start()
         self._listen(self.channels[0])
 
     def _listen(self, ch: Channel) -> None:
         log.info("listening on %s", ch.name)
-        ch.listen(lambda msg: self.on_message(ch, msg))
+        self.listening[ch.name] = True
+        try:
+            ch.listen(lambda msg: self.on_message(ch, msg))
+        finally:  # returned or raised: that channel hears nothing any more
+            self.listening[ch.name] = False
+            log.warning("stopped listening on %s", ch.name)
 
     def on_message(self, ch: Channel, msg: Incoming) -> None:
         """Runs on the channel's thread: check, de-duplicate, hand off, return."""

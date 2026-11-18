@@ -31,7 +31,7 @@ other, have professional parts, a stable relationship, and dynamic by release ma
   | `po` | product owner (priorities, the private plan) | `po-rdp-g2` |
   | `rel` | release manager, one per kit | `rel-rdp-g1`, `rel-avm-g1`, `rel-samvada-g1` |
   | `rev` | review: upstream PRs, the MR loop | `rev-freerdp-g2` |
-  | `comp` | a component's owner | `comp-shadow-g3` (FreeRDP's shadow server, encoders, sesman, the hosts), `comp-freerdp-web-g9`, `comp-xrdp-g2`, `comp-avm-g1` |
+  | `comp` | component developer (the owner, 2026-11-17: "for the role, member is not a good word; I prefer component developer"; "member" stays the word for any long-lived team session) | `comp-shadow-g3` (FreeRDP's shadow server, encoders, sesman, the hosts), `comp-freerdp-web-g9`, `comp-xrdp-g2`, `comp-avm-g1` |
   | `dbg` | tricky debugging across components: the root cause with evidence (A/B, bisect, logs), the fix on its own local branch, handed to the area's owner (never a commit to another member's branch) | `dbg-rdp-g1` |
   | `edu` | teaching: teaches the owner from the real work in the tutor style (diagnose the gap, the why, one check question, the next step), keeps the lessons and the project's book (the chronicle); read-only on code, never in another member's branch. Like the buddy, not bound to one group (the owner, 2026-11-14: "for edu roles it's like the brahman, no need to restrict to the group; sometimes one all-in-one edu is acceptable too"): one project, several or all; the context names the scope, and an all-projects edu's pys window goes in the reserved group `shared` (`pys group shared`; every group's team shows it as "(shared)") | `edu-rdp-g1`, `edu-all-g1` |
 
