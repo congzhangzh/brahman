@@ -58,7 +58,7 @@ def _version() -> str:
     here = str(Path(__file__).resolve().parent)
     try:
         sha = subprocess.run(["git", "-C", here, "rev-parse", "--short", "HEAD"],
-                             capture_output=True, text=True, timeout=5).stdout.strip()
+                             capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace").stdout.strip()
         if sha and subprocess.run(["git", "-C", here, "diff", "--quiet", "HEAD", "--", "."],
                                   capture_output=True, timeout=5).returncode == 1:
             sha += "+dirty"
@@ -91,7 +91,7 @@ class Run:
         self.id = run_id or f"{time.strftime('%Y%m%d-%H%M%S')}-{name}-{secrets.token_hex(2)}"
         self.path = root / "runs" / f"{self.id[:4]}-{self.id[4:6]}-{self.id[6:8]}" / f"{self.id}.json"
         if run_id and self.path.exists():
-            self.rec = json.loads(self.path.read_text())
+            self.rec = json.loads(self.path.read_text(encoding="utf-8"))
             return
         self.rec = {"id": self.id, "kind": kind, "name": name, "trigger": trigger,
                     "started": _now(), "status": "running", "version": VERSION, "steps": []}
@@ -114,7 +114,7 @@ class Run:
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self.rec, indent=1, ensure_ascii=False))
+        tmp.write_text(json.dumps(self.rec, indent=1, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, self.path)
 
 
@@ -130,14 +130,14 @@ def turn_cost(root: Path, session_id: str, usd_session: float, resumed: bool = T
     """
     index = root / "session_costs.json"
     try:
-        seen = json.loads(index.read_text())
+        seen = json.loads(index.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         seen = {}
     last = seen.get(session_id)
     seen[session_id] = usd_session
     tmp = index.with_suffix(".tmp")
     tmp.parent.mkdir(parents=True, exist_ok=True)
-    tmp.write_text(json.dumps(seen))
+    tmp.write_text(json.dumps(seen), encoding="utf-8")
     os.replace(tmp, index)
     if not resumed:
         return {"usd_list": round(usd_session, 6), "usd_from": "new"}

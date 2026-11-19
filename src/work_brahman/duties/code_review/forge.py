@@ -118,7 +118,7 @@ def _gh_graphql(query: str) -> dict:
         time.sleep(wait)
         try:
             p = subprocess.run(["gh", "api", "graphql", "-f", f"query={query}"],
-                               capture_output=True, text=True, timeout=120)
+                               capture_output=True, text=True, timeout=120, encoding="utf-8", errors="replace")
         except subprocess.TimeoutExpired:
             err = "gh timed out after 120 s"
             continue

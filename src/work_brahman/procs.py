@@ -64,7 +64,7 @@ def configure(state: Path | None) -> bool:
         return False
     try:
         ok = subprocess.run(["systemctl", "--user", "show", "-p", "Version", "--value"],
-                            capture_output=True, text=True, timeout=10).returncode == 0
+                            capture_output=True, text=True, timeout=10, encoding="utf-8", errors="replace").returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         ok = False
     _dir = (state / "procs") if ok else None
@@ -114,10 +114,10 @@ def _start(name: str, cmd: list[str], *, input, timeout, kind, tag, cwd, env) ->
     d.mkdir(parents=True)
     spec = d / "spec.json"
     fd = os.open(spec, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)  # the env may carry tokens
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump({"cmd": list(cmd), "cwd": str(cwd) if cwd else "",
                    "env": dict(env) if env is not None else dict(os.environ)}, f)
-    (d / "in").write_text(input or "")
+    (d / "in").write_text(input or "", encoding="utf-8")
     meta = {"unit": name, "kind": kind, "tag": tag or {}, "cmd": [str(x) for x in cmd[:3]],
             "started": datetime.now().astimezone().isoformat(timespec="seconds"),
             "timeout": timeout, "owner": os.getpid(), "delivered": False}
@@ -129,8 +129,8 @@ def _start(name: str, cmd: list[str], *, input, timeout, kind, tag, cwd, env) ->
     argv = ["systemd-run", "--user", "--quiet", "--collect", f"--slice={kind_slice(kind)}",
             f"--unit={name}", f"--description=buddy {kind}: {' '.join(meta['cmd'])}"]
     argv += [x for p in props for x in ("-p", p)]
-    argv += ["--", sys.executable, "-I", str(LAUNCHER), str(d)]
-    p = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    argv += ["--", sys.executable, "-I", "-X", "utf8", str(LAUNCHER), str(d)]  # UTF-8 mode (-I ignores PYTHONUTF8)
+    p = subprocess.run(argv, capture_output=True, text=True, timeout=30, encoding="utf-8", errors="replace")
     if p.returncode != 0:
         if "already" in p.stderr:
             raise Busy(name)
@@ -248,7 +248,8 @@ def _run_group(cmd, *, input=None, timeout=None, **kw) -> subprocess.CompletedPr
     group = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
              else {"start_new_session": True})
     p = subprocess.Popen(portable.argv(cmd), stdin=subprocess.PIPE if input is not None else None,
-                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **group, **kw)
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                         encoding="utf-8", errors="replace", **group, **kw)
     with _lock:
         _live.add(p)
     try:
@@ -284,26 +285,26 @@ def _finish(d: Path, code: int | None, *, delivered: bool) -> None:
 
 def _rc(d: Path) -> int | None:
     try:
-        return int((d / "rc").read_text().strip())
+        return int((d / "rc").read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         return None
 
 
 def _meta(d: Path) -> dict | None:
     try:
-        return json.loads((d / "meta.json").read_text())
+        return json.loads((d / "meta.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
 
 
 def _read(p: Path) -> str:
     try:
-        return p.read_text(errors="replace")
+        return p.read_text(errors="replace", encoding="utf-8")
     except OSError:
         return ""
 
 
 def _write(p: Path, data: dict) -> None:
     tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1))
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
     os.replace(tmp, p)

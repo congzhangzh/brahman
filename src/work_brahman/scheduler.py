@@ -119,11 +119,11 @@ class Scheduler:
                 if "schedule" in t:
                     self.tasks[f"{kind}:{name}"] = (kind, name, parse(t["schedule"]), timeout)
         self.last_path = state / "scheduler.json"
-        self.last = json.loads(self.last_path.read_text()) if self.last_path.exists() else {}
+        self.last = json.loads(self.last_path.read_text(encoding="utf-8")) if self.last_path.exists() else {}
         self.running: set[str] = set()
         self.stopping: set[str] = set()  # killed by STOP: they end as "stopped"
         self.paused_path = state / "paused.json"
-        self.paused = json.loads(self.paused_path.read_text()) if self.paused_path.exists() else None
+        self.paused = json.loads(self.paused_path.read_text(encoding="utf-8")) if self.paused_path.exists() else None
         self.lock = threading.Lock()
 
     def adopted(self, meta: dict, p) -> None:
@@ -148,7 +148,7 @@ class Scheduler:
         with self.lock:
             self.paused = {"where": where, "who": who, "at": datetime.now().astimezone().isoformat(timespec="seconds")}
             self.paused_path.parent.mkdir(parents=True, exist_ok=True)
-            self.paused_path.write_text(json.dumps(self.paused))
+            self.paused_path.write_text(json.dumps(self.paused), encoding="utf-8")
             self.stopping |= self.running
             return sorted(self.running)
 
@@ -187,7 +187,7 @@ class Scheduler:
         for day in sorted((self.state / "runs").glob("*"))[-2:]:
             for f in day.glob("*.json"):
                 try:
-                    rec = json.loads(f.read_text())
+                    rec = json.loads(f.read_text(encoding="utf-8"))
                 except (OSError, ValueError):
                     continue
                 if rec.get("status") == "running" and rec.get("trigger") != "manual":
@@ -232,13 +232,13 @@ class Scheduler:
             self.last[key] = t.isoformat(timespec="seconds")
             self.last_path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.last_path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(self.last, indent=1))
+            tmp.write_text(json.dumps(self.last, indent=1), encoding="utf-8")
             os.replace(tmp, self.last_path)
 
     def _run(self, key: str, kind: str, name: str, trigger: str, timeout: int, act: str = "") -> None:
         run = Run(self.state, kind, name, trigger)
         env = dict(os.environ, BUDDY_RUN_ID=run.id, BUDDY_TRIGGER=trigger)
-        cmd = [sys.executable, "-m", "work_brahman.cli", "-c", self.config_path, kind, name]
+        cmd = [sys.executable, "-X", "utf8", "-m", "work_brahman.cli", "-c", self.config_path, kind, name]
         cmd += ["--act", act] if act else []
         log.info("%s: run %s (%s)", key, run.id, trigger)
         try:

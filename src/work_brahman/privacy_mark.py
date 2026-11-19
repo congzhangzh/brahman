@@ -34,7 +34,7 @@ IDS = re.compile(r"\b(?:oc|ou|om|on)_[0-9a-f]{16,}\b|\btg:-?\d{5,}\b")  # Lark/F
 def patterns() -> list:
     conf = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "privacy-scan" / "patterns"
     try:
-        lines = [x.strip() for x in conf.read_text().splitlines()]
+        lines = [x.strip() for x in conf.read_text(encoding="utf-8").splitlines()]
     except OSError:
         return []
     out = []

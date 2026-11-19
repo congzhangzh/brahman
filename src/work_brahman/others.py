@@ -52,7 +52,7 @@ def _found_path() -> Path:
 
 def _load(p: Path) -> dict:
     try:
-        d = json.loads(p.read_text())
+        d = json.loads(p.read_text(encoding="utf-8"))
         return d if isinstance(d, dict) else {}
     except (OSError, ValueError):
         return {}
@@ -61,7 +61,7 @@ def _load(p: Path) -> dict:
 def _write(p: Path, d: dict) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(d))
+    tmp.write_text(json.dumps(d), encoding="utf-8")
     tmp.chmod(0o600)
     tmp.replace(p)
 
@@ -96,7 +96,7 @@ def ours(app_id: str, message_id: str) -> bool:
     for sub in ("asks", "short_stories", "teams", "long_stories"):
         for f in (root / sub).glob("**/*.json") if (root / sub).is_dir() else []:
             try:
-                if message_id in f.read_text(errors="replace"):
+                if message_id in f.read_text(errors="replace", encoding="utf-8"):
                     return True
             except OSError:
                 continue

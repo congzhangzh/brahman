@@ -39,7 +39,7 @@ def between(path: Path | None, start: float, end: float, prices: dict | None = N
     seen, times, anon = set(), [], 0
     tok = {"in": 0, "out": 0, "cache_read": 0, "cache_write": 0}
     models: dict[str, dict] = {}
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         for line in f:
             try:
                 d = json.loads(line)

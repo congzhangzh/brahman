@@ -57,7 +57,7 @@ def _status(config: str | None) -> int:
         print(f"buddy {VERSION}: not set up yet (no {path})\n\n{install.START}")
         return 0
     rows = install.checks(path, offline=True)
-    cfg = tomllib.loads(path.read_text())
+    cfg = tomllib.loads(path.read_text(encoding="utf-8"))
     text.set_language(cfg.get("buddy", {}).get("language"))
     state = Path(os.environ.get("XDG_STATE_HOME", "~/.local/state")).expanduser() / "work_brahman"
     ok = sum(r[0] is True for r in rows)
@@ -149,7 +149,7 @@ def _session_name() -> str:
     pid = _claude_pid()
     p = teams._claude_home() / "sessions" / f"{pid}.json" if pid else None
     try:
-        return json.loads(p.read_text()).get("name", "") if p else ""
+        return json.loads(p.read_text(encoding="utf-8")).get("name", "") if p else ""
     except (OSError, ValueError):
         return ""
 
@@ -238,9 +238,15 @@ def _terminal() -> dict:
 
 def _claude_pid() -> int | None:
     """The `claude` process this hook runs under: the nearest ancestor of that name."""
-    if portable.WINDOWS:  # parent() knows no ancestors there; and os.getppid needs
-        return None       # PssCaptureSnapshot, which Wine lacks: it crashed `buddy short start`
-    pid = os.getppid()
+    # Windows: parent() takes a Toolhelp snapshot, not os.getppid, which needs PssCaptureSnapshot (Wine
+    # lacks it: it crashed `buddy short start` there)
+    if portable.WINDOWS:
+        up = portable.parent(os.getpid())
+        if up is None:
+            return None
+        pid = up[0]
+    else:
+        pid = os.getppid()
     for _ in range(12):
         up = portable.parent(pid)  # /proc on Linux, ps on macOS
         if up is None:
@@ -754,7 +760,7 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     args.config = str(install.config_path(args.config))
     install.load_env(Path(args.config))
-    cfg = tomllib.loads(Path(args.config).read_text()) if Path(args.config).exists() else {}
+    cfg = tomllib.loads(Path(args.config).read_text(encoding="utf-8")) if Path(args.config).exists() else {}
     text.set_language(cfg.get("buddy", {}).get("language"))
     jobs = cfg.get("jobs", {})
     state = Path(os.environ.get("XDG_STATE_HOME", "~/.local/state")).expanduser() / "work_brahman"

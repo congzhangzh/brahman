@@ -55,19 +55,19 @@ def threads_refused(app_id: str, name: str, code) -> None:
     import time
     f = _threads_file()
     try:
-        data = json.loads(f.read_text())
+        data = json.loads(f.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         data = {}
     if app_id in data:
         return
     data[app_id] = {"app": name, "code": code, "at": time.strftime("%Y-%m-%d %H:%M")}
     f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps(data, indent=1))
+    f.write_text(json.dumps(data, indent=1), encoding="utf-8")
 
 
 def threads_refusals() -> dict:
     try:
-        return json.loads(_threads_file().read_text())
+        return json.loads(_threads_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 

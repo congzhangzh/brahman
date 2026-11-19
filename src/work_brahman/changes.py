@@ -31,13 +31,13 @@ def commit() -> tuple[str, bool]:
     """(the source commit, a checkout?): a release's from _build.json (release.sh writes it beside
     this file), a checkout's from git; ("", False) when neither says."""
     try:
-        return json.loads((HERE / "_build.json").read_text()).get("commit", ""), False
+        return json.loads((HERE / "_build.json").read_text(encoding="utf-8")).get("commit", ""), False
     except (OSError, ValueError):
         pass
     import subprocess
     try:
         got = subprocess.run(["git", "-C", str(HERE), "rev-parse", "--short", "HEAD"],
-                             capture_output=True, text=True, timeout=5)
+                             capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace")
         return (got.stdout.strip(), True) if got.returncode == 0 else ("", False)
     except (OSError, subprocess.SubprocessError):
         return "", False
@@ -45,7 +45,7 @@ def commit() -> tuple[str, bool]:
 
 def text() -> str:
     try:
-        return (HERE / "CHANGES.md").read_text()
+        return (HERE / "CHANGES.md").read_text(encoding="utf-8")
     except OSError:
         return ""
 
@@ -77,7 +77,7 @@ def announce_once(state: Path, channels: list, chats: list[str], ver: str | None
         return ""
     p = _seen_path(state)
     try:
-        d = json.loads(p.read_text())
+        d = json.loads(p.read_text(encoding="utf-8"))
         seen, newest = d.get("version", ""), d.get("newest", "") or d.get("version", "")
     except (OSError, ValueError):
         seen = newest = ""
@@ -85,7 +85,7 @@ def announce_once(state: Path, channels: list, chats: list[str], ver: str | None
         return ""
     older = key(ver) is not None and key(newest) is not None and key(ver) < key(newest)  # releases only
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"version": ver, "newest": newest if older or key(ver) is None else ver}))
+    p.write_text(json.dumps({"version": ver, "newest": newest if older or key(ver) is None else ver}), encoding="utf-8")
     if older:  # an older copy started with this state: never its old notes as "what's new" (doctor says it)
         return "older"
     sec = next(((h, b) for h, b in sections() if h == ver), None)
@@ -134,7 +134,7 @@ def newer_known(state: Path, mine: str | None = None) -> list[tuple[str, str]]:
         return []
     out = []
     try:
-        newest = json.loads(_seen_path(state).read_text()).get("newest", "")
+        newest = json.loads(_seen_path(state).read_text(encoding="utf-8")).get("newest", "")
     except (OSError, ValueError):
         newest = ""
     if key(newest) and key(newest) > k:

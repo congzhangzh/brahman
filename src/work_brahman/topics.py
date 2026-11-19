@@ -37,7 +37,7 @@ def _path(state: Path) -> Path:
 
 def all_topics(state: Path) -> dict[str, dict]:
     try:
-        return json.loads(_path(state).read_text())
+        return json.loads(_path(state).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 
@@ -46,7 +46,7 @@ def _save(state: Path, topics: dict) -> None:
     p = _path(state)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(topics, ensure_ascii=False, indent=1))
+    tmp.write_text(json.dumps(topics, ensure_ascii=False, indent=1), encoding="utf-8")
     os.replace(tmp, p)
 
 

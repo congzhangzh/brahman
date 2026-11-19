@@ -165,11 +165,11 @@ def keep_event(event: dict, env=os.environ) -> bool:
     d.mkdir(parents=True, exist_ok=True)
     f = d / (event["story"].replace("#", "-") + ".jsonl")
     if f.exists():
-        for line in f.read_text().splitlines():
+        for line in f.read_text(encoding="utf-8").splitlines():
             e = json.loads(line)
             if (e["origin"], e["seq"]) == (event["origin"], event["seq"]):
                 return False
-    with f.open("a") as out:
+    with f.open("a", encoding="utf-8") as out:
         out.write(json.dumps(event, ensure_ascii=False) + "\n")
     return True
 
@@ -178,7 +178,7 @@ def events(story: str = "", env=os.environ) -> list[dict]:
     """The kept events, of one story or all, in the order they came."""
     d = events_dir(env)
     files = [d / (story.replace("#", "-") + ".jsonl")] if story else sorted(d.glob("*.jsonl")) if d.exists() else []
-    return [json.loads(x) for f in files if f.exists() for x in f.read_text().splitlines() if x.strip()]
+    return [json.loads(x) for f in files if f.exists() for x in f.read_text(encoding="utf-8").splitlines() if x.strip()]
 
 
 def send_event(url: str, sender: str, event: dict, key: bytes, now: float | None = None) -> str:
@@ -203,7 +203,7 @@ def store(inbox: Path, sender: str, bundle: bytes, note: str, now: float) -> Pat
     d.mkdir(parents=True)
     (d / "changes.bundle").write_bytes(bundle)
     (d / "note.json").write_text(json.dumps({"from": sender, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z",
-                                             time.localtime(now)), "note": note}, ensure_ascii=False, indent=1) + "\n")
+                                             time.localtime(now)), "note": note}, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     return d
 
 
@@ -215,14 +215,14 @@ def record(event: str, env=os.environ, **fields) -> None:
     """One line in the peer log: what came, what was refused, what was sent, each check."""
     p = log_path(env)
     p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("a") as f:
+    with p.open("a", encoding="utf-8") as f:
         f.write(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "event": event, **fields},
                            ensure_ascii=False) + "\n")
 
 
 def read_log(env=os.environ, last: int = 200) -> list[dict]:
     try:
-        lines = log_path(env).read_text().splitlines()[-last:]
+        lines = log_path(env).read_text(encoding="utf-8").splitlines()[-last:]
     except OSError:
         return []
     out = []
@@ -405,7 +405,7 @@ def main(args) -> int:
         d = inbox_dir()
         items = sorted(d.iterdir(), reverse=True) if d.exists() else []
         for x in items:
-            n = json.loads((x / "note.json").read_text())
+            n = json.loads((x / "note.json").read_text(encoding="utf-8"))
             print(f"{x.name}\t{n['from']}\t{n['note'][:70]}")
         if not items:
             print(f"nothing in {d}")
@@ -558,7 +558,7 @@ def seen_path(env=os.environ) -> Path:
 def seen(env=os.environ) -> dict:
     """What each peer last said of itself in a ping answer: {peer: {name, desc, res, fp, at}}."""
     try:
-        d = json.loads(seen_path(env).read_text())
+        d = json.loads(seen_path(env).read_text(encoding="utf-8"))
         return d if isinstance(d, dict) else {}
     except (OSError, ValueError):
         return {}
@@ -573,7 +573,7 @@ def remember(peer: str, r: dict, env=os.environ) -> None:
                "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
     p = seen_path(env)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(d, ensure_ascii=False, indent=1))
+    p.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 def check_resource(r: dict, timeout: float = 8.0) -> tuple[bool | None, str]:
@@ -584,7 +584,7 @@ def check_resource(r: dict, timeout: float = 8.0) -> tuple[bool | None, str]:
                "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o ConnectTimeout=5"}
         try:
             p = subprocess.run(["git", "ls-remote", "--heads", url], capture_output=True, text=True,
-                               timeout=timeout, env=env)
+                               timeout=timeout, env=env, encoding="utf-8", errors="replace")
         except subprocess.TimeoutExpired:
             return False, f"git ls-remote: no answer in {int(timeout)} s"
         except OSError as e:
@@ -624,7 +624,7 @@ def config_path(env=os.environ) -> Path:
 def load(env=os.environ) -> dict:
     import tomllib
     try:
-        d = tomllib.loads(config_path(env).read_text())
+        d = tomllib.loads(config_path(env).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         d = {}
     points = {k: {"url": str(v.get("url", "")), "note": str(v.get("note", ""))}
@@ -658,14 +658,14 @@ def fingerprint() -> str:
     raw = ""
     for f in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
         try:
-            raw = Path(f).read_text().strip()
+            raw = Path(f).read_text(encoding="utf-8").strip()
             break
         except OSError:
             pass
     if not raw and sys.platform == "darwin":
         try:
             out = subprocess.run(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"], capture_output=True, text=True,
-                                 timeout=5).stdout
+                                 timeout=5, encoding="utf-8", errors="replace").stdout
             m = re.search(r'"IOPlatformUUID" = "([^"]+)"', out)
             raw = m[1] if m else ""
         except (OSError, subprocess.SubprocessError):
@@ -738,7 +738,7 @@ def save(cfg: dict, env=os.environ) -> Path:
         v = cfg["resources"][k]
         lines += [f"[resources.{_q(k)}]  # how THIS machine reaches it; the peers only learn the name",
                   f"kind = {_q(v.get('kind', 'other'))}", f"url = {_q(v['url'])}", f"note = {_q(v.get('note', ''))}", ""]
-    p.write_text("\n".join(lines))
+    p.write_text("\n".join(lines), encoding="utf-8")
     record("config saved", env, peers=sorted(cfg["points"]), resources=sorted(cfg.get("resources") or {}))
     from . import peer_block
     peer_block.sync(load(env), env)

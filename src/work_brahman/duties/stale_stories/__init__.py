@@ -46,7 +46,7 @@ def quiet_since(story: dict) -> float:
 def claude_sessions() -> list[str] | None:
     """The session ids Claude Code lists as running, or None when it can't be asked."""
     try:
-        p = subprocess.run(portable.argv(["claude", "agents", "--json"]), capture_output=True, text=True, timeout=30)
+        p = subprocess.run(portable.argv(["claude", "agents", "--json"]), capture_output=True, text=True, timeout=30, encoding="utf-8", errors="replace")
         if p.returncode:
             return None
         return [str(r.get("sessionId") or "") for r in json.loads(p.stdout or "[]")]

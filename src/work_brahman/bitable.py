@@ -75,7 +75,7 @@ def _ms(stamp: str | None) -> int | None:
 
 def _read(path: Path) -> dict:
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 
@@ -252,5 +252,5 @@ class Bitable:
 
     def _save(self, st: dict) -> None:
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(st, ensure_ascii=False))
+        tmp.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
         tmp.replace(self.path)

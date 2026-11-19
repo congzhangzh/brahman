@@ -20,6 +20,7 @@ press goes back as a control_response line (answer).
 
 import errno
 import json
+import re
 import logging
 import os
 import shutil
@@ -75,7 +76,7 @@ def holders(session_id: str) -> list[int]:
     """The pids of live processes that have this session open, as Claude Code itself lists
     them (`claude agents --json`: interactive, background and -p sessions alike)."""
     try:
-        p = subprocess.run(portable.argv(["claude", "agents", "--json"]), capture_output=True, text=True, timeout=20)
+        p = subprocess.run(portable.argv(["claude", "agents", "--json"]), capture_output=True, text=True, timeout=20, encoding="utf-8", errors="replace")
         rows = json.loads(p.stdout or "[]")
     except (OSError, subprocess.TimeoutExpired, ValueError):
         return []
@@ -120,7 +121,7 @@ def start(state: Path, channels: list, number: int, engine, prompt: str = "", *,
         pipe = _pipe(d, number)
     (d / "out").touch()
     fd = os.open(d / "spec.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)  # the env may carry tokens
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump({"cmd": portable.argv(cmd), "cwd": story["cwd"], "env": env}  # Windows: claude.cmd's exe
                   | ({"pipe": pipe} if pipe else {}), f)
     try:
@@ -151,19 +152,19 @@ def start(state: Path, channels: list, number: int, engine, prompt: str = "", *,
 def _launch(d: Path, number: int) -> tuple[int, str]:
     """The launcher as a unit under the umbrella (Linux with systemd), else as a child in its
     own session (it then dies with a restart of the buddy: the session can be resumed)."""
-    argv = [sys.executable, "-I", str(LAUNCHER), str(d)]
+    argv = [sys.executable, "-I", "-X", "utf8", str(LAUNCHER), str(d)]  # UTF-8 mode (-I ignores PYTHONUTF8)
     if procs.umbrella():
         unit = f"buddy-live-{number}"
         p = subprocess.run(["systemd-run", "--user", "--quiet", "--collect", f"--slice={SLICE}", f"--unit={unit}",
                             f"--description=buddy long story #{number}: live session",
                             "-p", "StandardInput=null", "-p", f"StandardOutput=append:{d / 'out'}",
                             "-p", f"StandardError=append:{d / 'err'}", "--", *argv],
-                           capture_output=True, text=True, timeout=30)
+                           capture_output=True, text=True, timeout=30, encoding="utf-8", errors="replace")
         if p.returncode != 0:
             raise OSError(f"systemd-run: {p.stderr.strip()}")
         for _ in range(50):
             q = subprocess.run(["systemctl", "--user", "show", "-p", "MainPID", "--value", unit],
-                               capture_output=True, text=True, timeout=10)
+                               capture_output=True, text=True, timeout=10, encoding="utf-8", errors="replace")
             pid = int((q.stdout or "0").strip() or 0)
             if pid:
                 return pid, unit
@@ -223,7 +224,7 @@ def _pipe(d: Path, number: int) -> dict:
         address, family = str(d / "in.sock"), "AF_UNIX"
     pipe = {"address": address, "family": family, "authkey": secrets.token_hex(32)}
     fd = os.open(d / "pipe.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(pipe, f)
     return pipe
 
@@ -238,7 +239,7 @@ def _put_pipe(state: Path, number: int, data: bytes, end: float) -> bool:
     from multiprocessing.connection import Client
     d = folder(state, number)
     try:
-        pipe = json.loads((d / "pipe.json").read_text())
+        pipe = json.loads((d / "pipe.json").read_text(encoding="utf-8"))
         key = bytes.fromhex(pipe["authkey"])
     except (OSError, ValueError, KeyError):
         return False
@@ -294,13 +295,20 @@ def answer(state: Path, number: int, req: str, decision: str) -> None:
     asked = live.get("perms", {}).pop(req, None)
     if asked is None:
         return  # answered already, or the session is gone
-    resp = ({"behavior": "allow", "updatedInput": asked} if decision == "allow"
-            else {"behavior": "deny", "message": "denied by the owner from his phone"})
+    always = live.get("always", {}).get(req) or []
+    if decision == "always" and always:  # allow, and the rule into <cwd>/.claude/settings.local.json
+        resp = {"behavior": "allow", "updatedInput": asked,
+                "updatedPermissions": [dict(s, destination="localSettings") for s in always]}  # never userSettings
+    elif decision in ("allow", "always"):
+        resp = {"behavior": "allow", "updatedInput": asked}
+    else:
+        resp = {"behavior": "deny", "message": "denied by the owner from his phone"}
     put(state, number, {"type": "control_response",
                         "response": {"subtype": "success", "request_id": req, "response": resp}})
 
     def done(s):
         s.get("live", {}).get("perms", {}).pop(req, None)
+        s.get("live", {}).get("always", {}).pop(req, None)
         s["state"] = "busy"
         L._event(s, "decide", decision)
     L._change(state, number, done)
@@ -382,16 +390,55 @@ def _request(state: Path, channels: list, number: int, e: dict) -> None:
         return
     tool, given = r.get("tool_name", "?"), r.get("input") or {}
     what = given.get("description") or given.get("command") or json.dumps(given, ensure_ascii=False)
+    always = always_rules(r.get("permission_suggestions"))
 
     def wait(s):
         s["live"]["perms"][req] = given
+        if always:
+            s["live"].setdefault("always", {})[req] = always
         s["state"] = "waiting"
         L._event(s, "wait", f"{tool}: {L._cut(str(what), 100)}")
     story = L._change(state, number, wait)
-    asks.create(state, channels, list(story["threads"]),
-                t("long.perm", label=L.label(story), tool=tool, what=L._cut(str(what), 1500)),
-                title=t("long.title.waiting"), options=[["allow", t("long.allow")], ["deny", t("long.deny")]],
-                then={"allow": ["long", "perm", number, req, "allow"], "deny": ["long", "perm", number, req, "deny"]})
+    body = t("long.perm", label=L.label(story), tool=tool, what=L._cut(str(what), 1500))
+    if always:  # the whole rule in the card, so a long one can't hide its end on the button
+        body += "\n\n" + t("long.always_rule", rule=rule_text(always))
+    asks.create(state, channels, list(story["threads"]), body,
+                title=t("long.title.waiting"),
+                options=[["allow", t("long.allow")]] + ([["always", t("long.always", rule=rule_text(always, 60))]] if always else [])
+                + [["deny", t("long.deny")]],
+                then={"allow": ["long", "perm", number, req, "allow"], "always": ["long", "perm", number, req, "always"],
+                      "deny": ["long", "perm", number, req, "deny"]})
+
+
+def always_rules(suggestions) -> list[dict]:
+    """The session's own suggestions (can_use_tool's permission_suggestions, checked against Claude Code
+    2026-11-19): addRules that allow, each rule narrower than a whole tool ("Bash" alone would allow
+    every command). [] when there is none such: then no "Always" button."""
+    out = []
+    for s in suggestions or []:
+        if not isinstance(s, dict) or s.get("type") != "addRules" or s.get("behavior") != "allow":
+            continue
+        rules = [r for r in s.get("rules") or [] if isinstance(r, dict) and r.get("toolName")
+                 and _narrow(str(r.get("ruleContent") or ""))]
+        if rules and len(rules) == len(s.get("rules") or []):  # a suggestion with any whole-tool rule: none of it
+            out.append({"type": "addRules", "rules": rules, "behavior": "allow"})
+    return out
+
+
+def _narrow(content: str) -> bool:
+    """A rule narrower than its whole tool: not only wildcards, separators and slashes (Bash(*:*),
+    Bash(* *), Read(**), Edit(/**) each grant the whole tool; the review, 2026-11-19), and no control
+    character (a newline could hide the rule's end on the button)."""
+    if any(ord(c) < 32 or ord(c) == 127 or c == "`" for c in content):  # a backtick would break the card's code
+        return False
+    return not re.fullmatch(r"[\s*:/.]*", content)
+
+
+def rule_text(always: list[dict], cut: int = 0) -> str:
+    """Bash(pys title *), Bash(samvada speak *): what the button writes, as settings.json spells it;
+    cut: at most that many characters (the button), with "…" (the card shows it whole)."""
+    text = ", ".join(f"{r['toolName']}({r['ruleContent']})" for s in always for r in s["rules"])
+    return text if not cut or len(text) <= cut else text[:cut - 1] + "…"
 
 
 def _forget_inbox(d: Path) -> None:
@@ -410,7 +457,7 @@ def _ended(state: Path, channels: list, number: int) -> None:
     if live.get("dir"):
         _forget_inbox(Path(live["dir"]))  # the launcher is gone, so the file is closed (Windows can delete it)
     try:
-        rc = (Path(live.get("dir", "")) / "rc").read_text().strip()
+        rc = (Path(live.get("dir", "")) / "rc").read_text(encoding="utf-8").strip()
     except OSError:
         rc = "?"
     handed = bool(live.get("release")) and not story.get("takeback")
@@ -477,12 +524,15 @@ def pys_path() -> str:
     return p if os.path.isfile(p) else ""
 
 
-def to_terminal(story: dict, what: str, pys: str | None = None) -> tuple[int, str, object]:
+def to_terminal(story: dict, what: str, pys: str | None = None, *, state: Path | None = None,
+                channels: list | None = None) -> tuple[int, str, object]:
     """A long story into a terminal (the owner, 2026-11-10: "attach or resume by pys"; 2026-11-12:
     "/topys … /frompys"). (status, what to say, window):
-    - "resume" (/topys when no window holds it, the page's Resume): a new pys window in its folder runs
-      `buddy-long take N`, which hands over when the buddy holds it, waits for its turn to end
-      and resumes the session there;
+    - "resume" (/topys when no window holds it, the page's Resume): what `buddy-long take N` does, in
+      the buddy itself, no shell (Windows has none; 2026-11-19): hand over when the buddy holds it,
+      wait for its turn to end, then a new pys window in its folder runs `claude --resume <id>` with
+      BUDDY_LONG=1 (never the buddy's .env). When the buddy must first finish a turn, the answer is
+      202 "handing over" at once and the window is reported to the story's threads later;
     - "attach" (/shift, the page's Attach): the pys window a terminal holds it in comes to the
       front (pys select), checked first: the same process still runs there.
     200 done; 409 not possible now (said why); 502/504 pys failed."""
@@ -498,7 +548,7 @@ def to_terminal(story: dict, what: str, pys: str | None = None) -> tuple[int, st
             if not (L.held(story) and story.get("mux") == "pys" and story.get("window") != ""):
                 return 409, t("long.term.not_held", n=n), ""
             r = subprocess.run([pys, "select", str(story["window"])], capture_output=True, text=True, timeout=10,
-                               **({"env": env} if env else {}))
+                               encoding="utf-8", errors="replace", env=portable.child_env(env))
             if r.returncode != 0:
                 return 502, t("long.term.failed", why=r.stderr.strip() or "pys select"), ""
             return 200, t("long.term.shown", n=n, w=story["window"]), story["window"]
@@ -508,19 +558,102 @@ def to_terminal(story: dict, what: str, pys: str | None = None) -> tuple[int, st
             return 409, t("long.term.codex", id=story.get("session_id") or "?"), ""
         if not os.path.isdir(story["cwd"]):
             return 409, t("long.term.gone", cwd=story["cwd"]), ""
-        r = subprocess.run([pys, "new", "--select", "--", "bash"], cwd=story["cwd"], capture_output=True,
-                           text=True, timeout=10)
-        try:
-            wid = json.loads(r.stdout)["wid"]
-        except (ValueError, KeyError, TypeError):
-            return 502, t("long.term.failed", why=(r.stderr or r.stdout).strip() or "pys new"), ""
-        subprocess.run([pys, "send", "--enter", str(wid), f"buddy-long take {n}"], capture_output=True, timeout=10)
-        log.info("long story #%s: taken over in pys window %s", n, wid)
-        return 200, t("long.term.opened", n=n, w=wid, cwd=story["cwd"]), wid
+        if state is None:
+            return 409, t("long.term.no_pys", n=n), ""
+        has_env = pys_has_env(pys, env)
+        if not has_env and portable.WINDOWS:
+            return 409, t("long.term.old_pys"), ""
+        if not pys_running(pys, env):  # never a server started by the buddy (the PO, 2026-11-19)
+            return 409, t("long.term.no_server"), ""
+        if alive(story):  # the buddy holds it: its turn ends first; never block the chat for that
+            threading.Thread(target=_take_then_open, args=(state, channels or [], n, pys, env, has_env),
+                             name=f"topys-{n}", daemon=True).start()
+            return 202, t("long.term.handing", n=n), ""
+        cwd, sid = take(state, channels or [], n, wait=0)
+        return _open(n, pys, env, cwd, sid, has_env)
+    except ValueError as e:  # take(): why not
+        return 409, str(e), ""
     except subprocess.TimeoutExpired:
         return 504, t("long.term.failed", why="pys did not answer within 10 s"), ""
     except OSError as e:
         return 502, t("long.term.failed", why=str(e)), ""
+
+
+_HAS_ENV: dict[str, bool] = {}
+
+
+def pys_has_env(pys: str, env: dict | None = None) -> bool:
+    """Does this pys take `new --env K=V` (py-screen, 2026-11-19)? Asked once per pys path."""
+    if pys not in _HAS_ENV:
+        try:
+            r = subprocess.run([pys, "new", "--help"], capture_output=True, text=True, timeout=10,
+                               encoding="utf-8", errors="replace", env=portable.child_env(env))
+            _HAS_ENV[pys] = "--env" in (r.stdout or "")
+        except (OSError, subprocess.TimeoutExpired):
+            _HAS_ENV[pys] = False
+    return _HAS_ENV[pys]
+
+
+def pys_running(pys: str, env: dict | None = None) -> bool:
+    """Does a pys server run (`pys ls --json` answers)? /topys never starts one: a server the buddy
+    started would be a child of the buddy's environment and lifetime, and so would every window in it."""
+    return subprocess.run([pys, "ls", "--json"], capture_output=True, text=True, timeout=10, encoding="utf-8",
+                          errors="replace", env=portable.child_env(env)).returncode == 0  # a hung or missing pys: 504/502
+
+
+def window_cmd(pys: str, sid: str, has_env: bool) -> list[str]:
+    """The pys command that opens a window running the session, BUDDY_LONG=1 through `--env` where pys
+    takes it, else (POSIX) through `env`.
+    - Windows: claude's exe itself (portable.argv), no shell;
+    - POSIX: a login shell (the PO, 2026-11-19): `$SHELL -lc 'claude --resume <id>; exec $SHELL -l'`, so
+      claude is found on the login PATH (one set only in .zshrc too), and the shell stays when it exits,
+      as the old `buddy-long take` window did. The id is quoted (shlex), never raw; no $SHELL: the
+      login shell from the passwords database, else /bin/sh."""
+    env = ["--env", "BUDDY_LONG=1", "--"] if has_env else ["--", "env", "BUDDY_LONG=1"]
+    if portable.WINDOWS:
+        return [pys, "new", "--select", *env, *portable.argv(["claude", "--resume", sid])]
+    import shlex
+    shell = os.environ.get("SHELL") or _login_shell() or "/bin/sh"
+    script = f"claude --resume {shlex.quote(sid)}; exec {shlex.quote(shell)} -l"
+    return [pys, "new", "--select", *env, shell, "-lc", script]
+
+
+def _login_shell() -> str:
+    """The user's login shell from the passwords database (a launchd agent or a service may run with no
+    SHELL; the review, 2026-11-19)."""
+    try:
+        import pwd
+        return pwd.getpwuid(os.getuid()).pw_shell or ""
+    except (ImportError, KeyError, OSError):
+        return ""
+
+
+def _open(n: int, pys: str, env: dict | None, cwd: str, sid: str, has_env: bool) -> tuple[int, str, object]:
+    try:
+        r = subprocess.run(window_cmd(pys, sid, has_env), cwd=cwd, capture_output=True, text=True, timeout=10,
+                           encoding="utf-8", errors="replace", env=portable.child_env(env))
+    except subprocess.TimeoutExpired:
+        return 504, t("long.term.failed", why="pys did not answer within 10 s"), ""
+    except OSError as e:
+        return 502, t("long.term.failed", why=str(e)), ""
+    try:
+        wid = json.loads(r.stdout)["wid"]
+    except (ValueError, KeyError, TypeError):
+        return 502, t("long.term.failed", why=(r.stderr or r.stdout).strip() or "pys new"), ""
+    log.info("long story #%s: resumed in pys window %s", n, wid)
+    return 200, t("long.term.opened", n=n, w=wid, cwd=cwd), wid
+
+
+def _take_then_open(state: Path, channels: list, n: int, pys: str, env: dict | None, has_env: bool) -> None:
+    """/topys while the buddy holds it: hand over, wait for its turn, open the window; said in its threads."""
+    try:
+        cwd, sid = take(state, channels, n)
+        _, said, _ = _open(n, pys, env, cwd, sid, has_env)
+    except ValueError as e:
+        said = str(e)
+    story = L.load(state, n)
+    if story:
+        L._post(channels, story, said, title=t("long.title.handover"))
 
 
 # --- the owner's commands: /status, /handover, /frompys, buddy-long take --------------------
@@ -573,6 +706,8 @@ def takeback(state: Path, channels: list, number: int, engine, *, force: bool = 
         return start(state, channels, number, engine, _waiting(state, number))
     # a terminal holds it
     if force:
+        if portable.WINDOWS:  # os.kill there is TerminateProcess, a hard kill, not an end between turns
+            return t("long.takeback.windows")
         if story.get("state") == "busy":
             return t("long.takeback.busy")
         L._change(state, number, lambda s: s.update(takeback=True))

@@ -100,12 +100,12 @@ def vapid(state: Path):
     p = vapid_path(state)
     with _lock:
         try:
-            return ECC.import_key(json.loads(p.read_text())["private_pem"])
+            return ECC.import_key(json.loads(p.read_text(encoding="utf-8"))["private_pem"])
         except (OSError, ValueError, KeyError):
             key = ECC.generate(curve="P-256")
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(json.dumps({"private_pem": key.export_key(format="PEM"),
-                                     "public": b64u(key.public_key().export_key(format="raw"))}))
+                                     "public": b64u(key.public_key().export_key(format="raw"))}), encoding="utf-8")
             p.chmod(0o600)
             return key
 
@@ -136,7 +136,7 @@ def subs_path(state: Path) -> Path:
 
 def subs(state: Path) -> list[dict]:
     try:
-        d = json.loads(subs_path(state).read_text())
+        d = json.loads(subs_path(state).read_text(encoding="utf-8"))
         return d if isinstance(d, list) else []
     except (OSError, ValueError):
         return []
@@ -145,7 +145,7 @@ def subs(state: Path) -> list[dict]:
 def _save(state: Path, rows: list[dict]) -> None:
     p = subs_path(state)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(rows, indent=1))
+    p.write_text(json.dumps(rows, indent=1), encoding="utf-8")
     p.chmod(0o600)
 
 

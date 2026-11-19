@@ -31,7 +31,7 @@ class Error(Exception):
 def git(cwd: Path, *args: str, check: bool = True) -> str:
     env = {k: v for k, v in os.environ.items() if k not in ("GIT_DIR", "GIT_WORK_TREE")}
     p = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, timeout=600,
-                       env=env | {"GIT_EDITOR": "true", "GIT_TERMINAL_PROMPT": "0"})
+                       env=env | {"GIT_EDITOR": "true", "GIT_TERMINAL_PROMPT": "0"}, encoding="utf-8", errors="replace")
     if check and p.returncode:
         raise Error(f"git {' '.join(args[:3])}: {(p.stderr or p.stdout).strip()[-400:]}")
     return p.stdout.strip()

@@ -134,9 +134,9 @@ def terminal_in(cwd: str, proc: Path = Path("/proc")) -> bool:
         if not d.name.isdigit():
             continue
         try:
-            if (d / "comm").read_text().strip() != "codex":
+            if (d / "comm").read_text(encoding="utf-8").strip() != "codex":
                 continue
-            tty = int((d / "stat").read_text().rsplit(")", 1)[1].split()[4])  # tty_nr: 0 = none
+            tty = int((d / "stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()[4])  # tty_nr: 0 = none
             if tty and os.path.realpath(os.readlink(d / "cwd")) == want:
                 return True
         except (OSError, ValueError, IndexError):

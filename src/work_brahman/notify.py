@@ -77,7 +77,7 @@ def config() -> dict:
             m = p.stat().st_mtime
             if m != _watch["mtime"]:
                 import tomllib
-                _watch["cfg"], _watch["mtime"] = tomllib.loads(p.read_text()), m
+                _watch["cfg"], _watch["mtime"] = tomllib.loads(p.read_text(encoding="utf-8")), m
         except (OSError, ValueError):  # a half-written file: keep what was read last
             pass
     return _watch["cfg"]
@@ -182,14 +182,14 @@ def count(state: Path | None, app: str, n: int = 1) -> None:
     with _lock:
         p = _path(state)
         try:
-            d = json.loads(p.read_text())
+            d = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             d = {}
         d.setdefault(app, {})
         d[app][month] = d[app].get(month, 0) + n
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(json.dumps(d))
+            p.write_text(json.dumps(d), encoding="utf-8")
         except OSError:
             pass
 
@@ -198,7 +198,7 @@ def calls(state: Path, month: str | None = None) -> dict[str, int]:
     """{app: message calls this month} (or the month given, "YYYY-MM")."""
     month = month or time.strftime("%Y-%m")
     try:
-        d = json.loads(_path(state).read_text())
+        d = json.loads(_path(state).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     return {app: int(v.get(month, 0)) for app, v in d.items() if isinstance(v, dict)}

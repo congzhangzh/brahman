@@ -60,7 +60,7 @@ def _load(state: Path) -> tuple[list[dict], int]:
     """The events in the ring, and the id of the newest one already dropped from it (0: none). The
     file's first line is {"dropped": id} once the ring is full."""
     try:
-        lines = path(state).read_text().splitlines()
+        lines = path(state).read_text(encoding="utf-8").splitlines()
     except OSError:
         return [], 0
     out, dropped = [], 0
@@ -97,7 +97,7 @@ def publish(state: Path, kind: str, title: str, body: str = "", link: str = "", 
         p = path(state)
         tmp = p.with_suffix(".tmp")
         head = json.dumps({"dropped": dropped}) + "\n" if dropped else ""
-        tmp.write_text(head + "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+        tmp.write_text(head + "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
         tmp.chmod(0o600)
         tmp.replace(p)
     return ev
@@ -154,7 +154,7 @@ def tokens_path(state: Path) -> Path:
 
 def tokens(state: Path) -> list[dict]:
     try:
-        d = json.loads(tokens_path(state).read_text())
+        d = json.loads(tokens_path(state).read_text(encoding="utf-8"))
         return d if isinstance(d, list) else []
     except (OSError, ValueError):
         return []
@@ -168,7 +168,7 @@ def _save_tokens(state: Path, rows: list[dict]) -> None:
     p = tokens_path(state)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(rows, indent=1))
+    tmp.write_text(json.dumps(rows, indent=1), encoding="utf-8")
     tmp.chmod(0o600)
     tmp.replace(p)
 

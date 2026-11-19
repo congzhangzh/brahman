@@ -1,6 +1,6 @@
 [project]
 name = "brahman-buddy"
-version = "20261119.3"
+version = "20261119.4"
 license = "MIT"
 license-files = ["LICENSE"]
 description = "A personal work buddy: Telegram, Lark and Feishu chats driving Claude Code, with scheduled jobs, short and long stories, and portable skills"
@@ -31,3 +31,6 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# UTF-8 everywhere (2026-11-19): a call that falls back to the locale's encoding (cp936 on a Chinese
+# Windows) fails the suite. tests/conftest.py starts it under -X warn_default_encoding.
+filterwarnings = ["error::EncodingWarning", "ignore::EncodingWarning:lark_oapi"]

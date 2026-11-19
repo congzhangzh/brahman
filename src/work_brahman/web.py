@@ -231,7 +231,7 @@ class WebRelay(_Posts):
         self.dir.mkdir(parents=True, exist_ok=True)
         n = time.time_ns()
         tmp = self.dir / f".{n}.tmp"  # not *.json: serve skips it until it is whole
-        tmp.write_text(json.dumps(change, ensure_ascii=False))
+        tmp.write_text(json.dumps(change, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, self.dir / f"{n}.json")
 
 
@@ -249,7 +249,7 @@ class WebChat(_Posts):
         self.outbox = state / OUTBOX
         self.lock = threading.Lock()
         try:
-            self.msgs = json.loads(self.path.read_text())
+            self.msgs = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             self.msgs = []
         self.on_message = None
@@ -269,7 +269,7 @@ class WebChat(_Posts):
         done = 0
         for f in sorted(self.outbox.glob("*.json"), key=lambda f: int(f.stem)):
             try:
-                c = json.loads(f.read_text())
+                c = json.loads(f.read_text(encoding="utf-8"))
                 if c["op"] == "add":
                     self._add(c["m"])  # its id and time came with it
                 elif c["op"] == "edit":
@@ -339,7 +339,7 @@ class WebChat(_Posts):
 
     def _save(self) -> None:
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self.msgs, ensure_ascii=False))
+        tmp.write_text(json.dumps(self.msgs, ensure_ascii=False), encoding="utf-8")
         tmp.replace(self.path)
 
 
@@ -353,7 +353,7 @@ def page(public: float = 0) -> bytes:
     """The workbench page with its words in every language (text.py's page.* keys); it starts
     in the buddy's, and its EN / 中文 switch changes them in place. In the public view the server
     marks the body, so the page's own state can't drop the badge (privacy.py)."""
-    html = (HERE / "static" / "index.html").read_text()
+    html = (HERE / "static" / "index.html").read_text(encoding="utf-8")
     if public:  # the exact tags, so a mention of them elsewhere in the file is never the one marked
         for tag, marked in (('<body data-view="private">', '<body data-view="public" class="public">'),
                             ('data-t="view.off"', 'data-t="view.on"')):
@@ -804,7 +804,8 @@ class Web:
         if not pys:
             return 409, "pys is not installed (uv tool install py-screen)"
         try:
-            r = subprocess.run([pys, "select", row["window"]], capture_output=True, text=True, timeout=10)
+            r = subprocess.run([pys, "select", row["window"]], capture_output=True, text=True, timeout=10, encoding="utf-8",
+                               errors="replace", env=portable.child_env())  # never the buddy's .env into pys
         except subprocess.TimeoutExpired:
             return 504, "pys did not answer within 10 s"
         except OSError as e:
@@ -825,10 +826,11 @@ class Web:
             said = long_live.takeback(self.state, self.bot.channels, s["id"],
                                       longs.pick(getattr(self.bot, "long_engines", {}), "claude-code", s.get("mode")))
             return 200, {"ok": True, "said": said}
-        code, said, window = long_live.to_terminal(s, "attach" if what == "topys" else what, pys_path())
+        where = {"state": self.state, "channels": getattr(self.bot, "channels", []) if self.bot else []}
+        code, said, window = long_live.to_terminal(s, "attach" if what == "topys" else what, pys_path(), **where)
         if what == "topys" and code == 409 and not longs.held(s):  # no pys window holds it: take it over
-            code, said, window = long_live.to_terminal(s, "resume", pys_path())
-        return (200, {"ok": True, "window": window, "said": said}) if code == 200 else (code, said)
+            code, said, window = long_live.to_terminal(s, "resume", pys_path(), **where)
+        return (200, {"ok": True, "window": window, "said": said}) if code in (200, 202) else (code, said)
 
     def detail(self, key: str) -> dict | None:
         """A family's run whole, by its id ("short-story:12", "team:kit")."""
@@ -939,13 +941,13 @@ class Web:
         days = sorted((self.state / "runs").glob("*"))[-DAYS:]
         for f in sorted((p for d in days for p in d.glob("*.json")), reverse=True)[:MAX_RUNS]:
             try:
-                runs.append(read_run(json.loads(f.read_text())))
+                runs.append(read_run(json.loads(f.read_text(encoding="utf-8"))))
             except (OSError, ValueError):
                 continue
         asks = []
         for f in sorted((self.state / "asks").glob("*.json"), reverse=True)[:50]:
             try:
-                a = json.loads(f.read_text())
+                a = json.loads(f.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
             if not a["answer"] or time.time() - f.stat().st_mtime < 86400:
@@ -975,5 +977,5 @@ def loopback6_notice(state: Path, channels: list, chats: list[str], server, port
     if mark.exists():
         return False
     post_all(channels, chats, t("web.loopback6_taken", port=port), title="buddy")
-    mark.write_text(time.strftime("%Y-%m-%dT%H:%M:%S%z") + "\n")
+    mark.write_text(time.strftime("%Y-%m-%dT%H:%M:%S%z") + "\n", encoding="utf-8")
     return True

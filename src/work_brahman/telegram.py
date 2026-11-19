@@ -62,7 +62,7 @@ class _Connection(http.client.HTTPSConnection):
     def recall(cls, path: Path | None) -> None:
         cls.remember = path
         try:
-            d = json.loads(path.read_text()) if path else {}
+            d = json.loads(path.read_text(encoding="utf-8")) if path else {}
             if time.time() - float(d.get("at", 0)) < 7 * 86400:
                 cls.avoid = int(d["avoid"])
         except (OSError, ValueError, KeyError, TypeError):
@@ -75,7 +75,7 @@ class _Connection(http.client.HTTPSConnection):
             return
         cls.avoid = family
         try:
-            cls.remember.write_text(json.dumps({"avoid": int(family), "at": time.time()}))
+            cls.remember.write_text(json.dumps({"avoid": int(family), "at": time.time()}), encoding="utf-8")
         except OSError:
             pass
 
@@ -249,13 +249,13 @@ class Telegram:
             return ""
         homes[chat] = str(made["message_thread_id"])
         self.homes.parent.mkdir(parents=True, exist_ok=True)
-        self.homes.write_text(json.dumps(homes))
+        self.homes.write_text(json.dumps(homes), encoding="utf-8")
         self._send(chat, html.escape(t("topic.tg_home"), quote=False), thread=homes[chat])
         return homes[chat]
 
     def _homes(self) -> dict:
         try:
-            return json.loads(self.homes.read_text()) if self.homes else {}
+            return json.loads(self.homes.read_text(encoding="utf-8")) if self.homes else {}
         except (OSError, ValueError):
             return {}
 
@@ -278,7 +278,7 @@ class Telegram:
         if r is None and home and _topic_gone(getattr(_last, "why", "")):  # set on each failure; read safely anyway
             homes = self._homes()
             homes.pop(chat, None)
-            self.homes.write_text(json.dumps(homes))
+            self.homes.write_text(json.dumps(homes), encoding="utf-8")
             params.pop("message_thread_id")
             r = self._call("sendMessage", **params)
         return str(r["message_id"]) if r else None

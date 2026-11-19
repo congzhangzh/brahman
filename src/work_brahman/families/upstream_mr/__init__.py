@@ -63,7 +63,7 @@ class UpstreamMR:
     def _ledger(self) -> list[dict]:
         """Ledger entries: '### <date> · <project> · <title> · <status>'."""
         try:
-            text = self.ledger.read_text()
+            text = self.ledger.read_text(encoding="utf-8")
         except OSError:
             return []
         out = []
@@ -99,7 +99,7 @@ def turn(p: dict, thread: dict | None) -> tuple[str, str]:
 
 def _load(path: Path, field: str) -> dict:
     try:
-        return json.loads(path.read_text())[field]
+        return json.loads(path.read_text(encoding="utf-8"))[field]
     except (OSError, ValueError, KeyError):
         return {}
 

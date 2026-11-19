@@ -48,7 +48,7 @@ def _home_path(p: Path, env: Mapping[str, str]) -> str:
 
 
 def body(env: Mapping[str, str] = os.environ) -> str:
-    return (HERE / "RULE.md").read_text().replace("{detail}", _home_path(HERE / "TEAM.md", env)).rstrip()
+    return (HERE / "RULE.md").read_text(encoding="utf-8").replace("{detail}", _home_path(HERE / "TEAM.md", env)).rstrip()
 
 
 def render(env: Mapping[str, str] = os.environ) -> str:
@@ -92,14 +92,14 @@ def _claude(f: Path, uninstall: bool, env: Mapping[str, str]) -> Step:
     if uninstall:
         return (f, "remove", None, True) if f.exists() else (f, "not there:", None, False)
     new = render(env)
-    old = f.read_text() if f.exists() else None
+    old = f.read_text(encoding="utf-8") if f.exists() else None
     if old == new:
         return f, "unchanged:", None, False
     return f, "write" if old is None else "update", new, False
 
 
 def _codex(f: Path, uninstall: bool, env: Mapping[str, str]) -> Step:
-    old = f.read_text() if f.exists() else ""
+    old = f.read_text(encoding="utf-8") if f.exists() else ""
     if generated(old):
         state = "current" if body(env) in old else "out of date, rebuild it with its generator"
         if uninstall:
@@ -138,7 +138,7 @@ def run(agents: tuple[str, ...], dry_run: bool = False, uninstall: bool = False,
         f.parent.mkdir(parents=True, exist_ok=True)
         if f.name == "AGENTS.md" and f.exists():  # the owner's file: a copy before a change
             shutil.copy2(f, f.with_name(f"{f.name}.brahman-backup-{time.strftime('%Y%m%d-%H%M%S')}"))
-        f.write_text(new)
+        f.write_text(new, encoding="utf-8")
     if all(new is None and not delete for _, _, new, delete in steps):
         out("nothing to change")
     return 0

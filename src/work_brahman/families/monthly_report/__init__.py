@@ -99,7 +99,7 @@ class MonthlyReport:
                  ' first: 100) { issueCount nodes { ... on PullRequest { number title url state'
                  ' createdAt mergedAt closedAt repository { nameWithOwner } } } } }' % f"{start:%Y-%m-%d}")
         p = subprocess.run(["gh", "api", "graphql", "-f", f"query={query}"],
-                           capture_output=True, text=True, timeout=120)
+                           capture_output=True, text=True, timeout=120, encoding="utf-8", errors="replace")
         data = json.loads(p.stdout or "{}").get("data")
         if data:
             me = data["viewer"]["login"]
@@ -203,6 +203,6 @@ def _gantt(prs: list[dict], start: datetime, end: datetime, now: datetime) -> li
 
 def _read(path: Path) -> dict:
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}

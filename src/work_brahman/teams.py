@@ -78,12 +78,12 @@ def _now() -> str:
 
 
 def _read(p: Path) -> dict | None:
-    return json.loads(p.read_text()) if p.exists() else None
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
 
 
 def _write(p: Path, data: dict) -> None:
     tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1))
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
     tmp.replace(p)
 
 
@@ -96,11 +96,11 @@ def role(state: Path, name: str) -> dict | None:
 
 
 def all_teams(state: Path) -> list[dict]:
-    return [json.loads(p.read_text()) for p in sorted(_dir(state).glob("*.json"))]
+    return [json.loads(p.read_text(encoding="utf-8")) for p in sorted(_dir(state).glob("*.json"))]
 
 
 def all_roles(state: Path) -> list[dict]:
-    return [json.loads(p.read_text()) for p in sorted((_dir(state) / "roles").glob("*.json"))]
+    return [json.loads(p.read_text(encoding="utf-8")) for p in sorted((_dir(state) / "roles").glob("*.json"))]
 
 
 def live(r: dict) -> dict | None:
@@ -407,7 +407,7 @@ def _sessions() -> dict[str, dict]:
     out = {}
     for p in sorted((_claude_home() / "sessions").glob("*.json"), key=lambda p: p.stat().st_mtime):
         try:
-            s = json.loads(p.read_text())
+            s = json.loads(p.read_text(encoding="utf-8"))
             pid = int(s["pid"])
         except (OSError, ValueError, KeyError, TypeError):
             continue
@@ -421,7 +421,8 @@ def _sessions() -> dict[str, dict]:
 def _pys_windows() -> dict[int, int]:
     """claude pid → pys window, from `pys ls --json` (agent_owner)."""
     try:
-        p = subprocess.run(["pys", "ls", "--json"], capture_output=True, text=True, timeout=5)
+        p = subprocess.run(["pys", "ls", "--json"], capture_output=True, text=True, timeout=5, encoding="utf-8",
+                           errors="replace", env=portable.child_env())
         ws = json.loads(p.stdout).get("windows", []) if p.returncode == 0 else []
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return {}
@@ -431,7 +432,7 @@ def _pys_windows() -> dict[int, int]:
 def _ctx(wid: int) -> tuple[int, str] | None:
     """The `ctx N% of <size>` on the window's status line (the template's statusline.sh)."""
     try:
-        p = subprocess.run(["pys", "capture", str(wid)], capture_output=True, text=True, timeout=5)
+        p = subprocess.run(["pys", "capture", str(wid)], capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace", env=portable.child_env())
     except (OSError, subprocess.TimeoutExpired):
         return None
     hits = CTX.findall(p.stdout) if p.returncode == 0 else []

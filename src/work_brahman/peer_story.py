@@ -118,7 +118,7 @@ def _event(story: str, step: str, what: str, me: str, env, text: str = "", by: s
 
 def _linked_chats(config: Path) -> list[str]:
     try:
-        return list(tomllib.loads(config.read_text()).get("me", {}).get("chats", []))
+        return list(tomllib.loads(config.read_text(encoding="utf-8")).get("me", {}).get("chats", []))
     except (OSError, ValueError):
         return []
 

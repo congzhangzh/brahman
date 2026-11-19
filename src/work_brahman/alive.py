@@ -29,7 +29,7 @@ def _path(state: Path) -> Path:
 
 def last(state: Path) -> float | None:
     try:
-        return float(json.loads(_path(state).read_text())["at"])
+        return float(json.loads(_path(state).read_text(encoding="utf-8"))["at"])
     except (OSError, ValueError, KeyError, TypeError):
         return None
 
@@ -37,7 +37,7 @@ def last(state: Path) -> float | None:
 def beat(state: Path, now: float | None = None) -> None:
     p = _path(state)
     tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"at": now or time.time()}))
+    tmp.write_text(json.dumps({"at": now or time.time()}), encoding="utf-8")
     tmp.replace(p)
 
 

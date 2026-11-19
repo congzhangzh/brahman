@@ -115,14 +115,14 @@ def live_app_ids() -> set[str]:
     from . import install
     files = {install.CONFIG_DIR / ".env", Path("buddy.toml").resolve().parent / ".env"}
     try:
-        unit = install.service_file("buddy").read_text()
+        unit = install.service_file("buddy").read_text(encoding="utf-8")
         files |= {Path(m.strip().lstrip("-").strip("'\"")) for m in re.findall(r"^EnvironmentFile=(.+)$", unit, re.M)}
     except OSError:
         pass
     ids = {os.environ.get(k, "") for k in ("FEISHU_APP_ID", "LARK_APP_ID")}
     for f in files:
         try:
-            for line in f.read_text().splitlines():
+            for line in f.read_text(encoding="utf-8").splitlines():
                 k, _, v = line.partition("=")
                 if k.strip() in ("FEISHU_APP_ID", "LARK_APP_ID"):
                     ids.add(v.strip().strip("'\""))

@@ -156,7 +156,7 @@ def _project(cwd: str) -> str:
     the folder's own name."""
     try:
         p = subprocess.run(["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-                           capture_output=True, text=True, timeout=5)
+                           capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace")
         if p.returncode == 0 and p.stdout.strip():
             common = Path(p.stdout.strip())
             return (common.parent if common.name == ".git" else common).name.removesuffix(".git")
@@ -194,7 +194,7 @@ def _now() -> str:
 
 def load(state: Path, number: int) -> dict | None:
     p = _dir(state) / f"{number}.json"
-    return json.loads(p.read_text()) if p.exists() else None
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
 
 
 def _save(state: Path, story: dict) -> None:
@@ -205,7 +205,7 @@ def _save(state: Path, story: dict) -> None:
         story["private"] = True
     p = _dir(state) / f"{story['id']}.json"
     tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(story, ensure_ascii=False, indent=1))
+    tmp.write_text(json.dumps(story, ensure_ascii=False, indent=1), encoding="utf-8")
     tmp.replace(p)
 
 
@@ -213,7 +213,7 @@ def all_stories(state: Path) -> list[dict]:
     out = []
     for p in _dir(state).glob("*.json"):
         if p.stem.isdigit():
-            out.append(json.loads(p.read_text()))
+            out.append(json.loads(p.read_text(encoding="utf-8")))
     return sorted(out, key=lambda t: t["id"])
 
 

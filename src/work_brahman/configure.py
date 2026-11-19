@@ -44,7 +44,7 @@ def _show(secret: str) -> str:
 
 def load(path: Path) -> dict:
     """The settings, as the menu sees them (Lark and Feishu by platform, not by variable)."""
-    cfg = tomllib.loads(path.read_text())
+    cfg = tomllib.loads(path.read_text(encoding="utf-8"))
     env = _env(path.parent / ".env")
     first = (env.get("FEISHU_APP_ID", ""), env.get("FEISHU_APP_SECRET", ""))
     second = (env.get("LARK_APP_ID", ""), env.get("LARK_APP_SECRET", ""))
@@ -71,7 +71,7 @@ def load(path: Path) -> dict:
 
 def _env(path: Path) -> dict:
     out = {}
-    for line in path.read_text().splitlines() if path.exists() else []:
+    for line in path.read_text(encoding="utf-8").splitlines() if path.exists() else []:
         key, eq, value = line.strip().partition("=")
         if eq and key and not key.startswith("#"):
             out[key.strip()] = value.strip().strip('"').strip("'")
@@ -143,7 +143,7 @@ def save(path: Path, s: dict, before: dict) -> list[str]:
     """Write what changed; returns what was kept (backups) and what was left for the hand.
     Raises ValueError, writing nothing, when the result wouldn't read back as meant."""
     env_path = path.parent / ".env"
-    toml, notes = path.read_text(), []
+    toml, notes = path.read_text(encoding="utf-8"), []
     on_feishu = bool(s["feishu"][0])
     first, second = (s["feishu"], s["lark"]) if on_feishu else (s["lark"], ["", ""])
     changes = [(None, "workspace", _q(s["workspace"])), (None, "domain", _q("feishu" if on_feishu else "lark")),
@@ -173,18 +173,18 @@ def save(path: Path, s: dict, before: dict) -> list[str]:
             continue  # a default, left out on purpose
         if value != mine and not any(key in n for n in notes):
             raise ValueError(f"{key} would read {value!r}, not {mine!r}: nothing written")
-    env = _env_set(env_path.read_text() if env_path.exists() else "", {
+    env = _env_set(env_path.read_text(encoding="utf-8") if env_path.exists() else "", {
         "TELEGRAM_BOT_TOKEN": s["telegram"], "FEISHU_APP_ID": first[0], "FEISHU_APP_SECRET": first[1],
         "LARK_APP_ID": second[0], "LARK_APP_SECRET": second[1], "BUDDY_ALLOWED_IDS": ",".join(s["allowed"]),
         **({"BUDDY_WEB_TOKEN": s["web_token"]} if "web_token" in s else {})})
-    if toml != path.read_text():
+    if toml != path.read_text(encoding="utf-8"):
         notes.append(f"kept {install._keep(path)}")
-        path.write_text(toml)
-    if not env_path.exists() or env != env_path.read_text():
+        path.write_text(toml, encoding="utf-8")
+    if not env_path.exists() or env != env_path.read_text(encoding="utf-8"):
         if env_path.exists():
             notes.append(f"kept {install._keep(env_path)}")
         env_path.touch(mode=0o600)
-        env_path.write_text(env)
+        env_path.write_text(env, encoding="utf-8")
         env_path.chmod(0o600)
     return notes
 

@@ -52,7 +52,7 @@ def parse_remote(url: str) -> tuple[str, str] | None:
 def remotes(cwd: str) -> list[tuple[str, str]]:
     """The checkout's distinct forge remotes, from `git remote -v` (local, no network)."""
     try:
-        p = subprocess.run(["git", "-C", cwd, "remote", "-v"], capture_output=True, text=True, timeout=5)
+        p = subprocess.run(["git", "-C", cwd, "remote", "-v"], capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace")
     except (OSError, subprocess.TimeoutExpired):
         return []
     seen = []

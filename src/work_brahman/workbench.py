@@ -132,7 +132,7 @@ def skill_steps(home: Path) -> list[Step]:
                                       lambda s=skill, d=dest, w=want: _copy(s, d, w)))
                 else:
                     steps.append(_checkout_link(skill, dest))
-            elif stamp.exists() and json.loads(stamp.read_text()).get("sha256") == _digest(dest):
+            elif stamp.exists() and json.loads(stamp.read_text(encoding="utf-8")).get("sha256") == _digest(dest):
                 if _digest(dest) == want:
                     steps.append(Step(what, "up to date"))
                 else:
@@ -150,7 +150,7 @@ def skill_steps(home: Path) -> list[Step]:
                                   lambda s=skill, d=dest: _link(s, d)))
             else:
                 steps.append(_checkout_link(skill, dest))
-        elif stamp.exists() and json.loads(stamp.read_text()).get("sha256") == _digest(dest):
+        elif stamp.exists() and json.loads(stamp.read_text(encoding="utf-8")).get("sha256") == _digest(dest):
             if _digest(dest) == want:  # our copy, current: where symlinks are not allowed (Windows
                 steps.append(Step(what, "up to date (copied, not linked)", None,  # without Developer Mode)
                                   _NO_SYMLINK_HINT))
@@ -173,7 +173,7 @@ def _copy(src: Path, dest: Path, digest: str) -> None:
         shutil.rmtree(dest)  # only ever our own untouched copy: checked against its stamp first
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(src, dest)
-    (dest / STAMP).write_text(json.dumps({"by": f"brahman-buddy {VERSION}", "sha256": digest}) + "\n")
+    (dest / STAMP).write_text(json.dumps({"by": f"brahman-buddy {VERSION}", "sha256": digest}) + "\n", encoding="utf-8")
 
 
 def _link(src: Path, dest: Path) -> None:
@@ -186,7 +186,7 @@ def _link(src: Path, dest: Path) -> None:
         dest.symlink_to(src, target_is_directory=True)
     except OSError as e:  # Windows without Developer Mode can't make symlinks: a copy then
         shutil.copytree(src, dest)
-        (dest / STAMP).write_text(json.dumps({"by": f"brahman-buddy {VERSION}", "sha256": _digest(src)}) + "\n")
+        (dest / STAMP).write_text(json.dumps({"by": f"brahman-buddy {VERSION}", "sha256": _digest(src)}) + "\n", encoding="utf-8")
         print(f"  {_warn('⚠')} {dest.name}: copied, not linked ({e})\n      hint: {_NO_SYMLINK_HINT}")
 
 
@@ -198,7 +198,7 @@ def rule_steps(home: Path, without: list[str]) -> list[Step]:
         return [Step("rules", "none bundled with this buddy")]
     dest_dir = home / ".claude" / "rules"
     stamp_path = dest_dir / STAMP
-    stamp = json.loads(stamp_path.read_text()) if stamp_path.exists() else {}
+    stamp = json.loads(stamp_path.read_text(encoding="utf-8")) if stamp_path.exists() else {}
     wrote, left_out = stamp.get("files", {}), set(stamp.get("without", [])) | set(without)
     steps = []
     for rule in sorted(src.glob("brahman-*.md")):
@@ -231,18 +231,18 @@ def _write_rule(rule: Path, dest: Path, without: list[str]) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(rule, dest)
     stamp_path = dest.parent / STAMP
-    stamp = json.loads(stamp_path.read_text()) if stamp_path.exists() else {}
+    stamp = json.loads(stamp_path.read_text(encoding="utf-8")) if stamp_path.exists() else {}
     stamp.setdefault("files", {})[rule.name] = _digest(dest)
     stamp["by"] = f"brahman-buddy {VERSION}"
-    stamp_path.write_text(json.dumps(stamp, indent=1) + "\n")
+    stamp_path.write_text(json.dumps(stamp, indent=1) + "\n", encoding="utf-8")
 
 
 def _remember_without(dest_dir: Path, without: list[str]) -> None:
     dest_dir.mkdir(parents=True, exist_ok=True)
     stamp_path = dest_dir / STAMP
-    stamp = json.loads(stamp_path.read_text()) if stamp_path.exists() else {}
+    stamp = json.loads(stamp_path.read_text(encoding="utf-8")) if stamp_path.exists() else {}
     stamp["without"] = sorted(set(stamp.get("without", [])) | set(without))
-    stamp_path.write_text(json.dumps(stamp, indent=1) + "\n")
+    stamp_path.write_text(json.dumps(stamp, indent=1) + "\n", encoding="utf-8")
 
 
 def pys_steps(skip: bool) -> list[Step]:
@@ -254,7 +254,7 @@ def pys_steps(skip: bool) -> list[Step]:
     if pys:
         return [Step("pys", f"found ({pys}); its own setup is yours to run: pys setup (a dry run)")]
     if uv:
-        out = subprocess.run([uv, "tool", "dir", "--bin"], capture_output=True, text=True).stdout.strip()
+        out = subprocess.run([uv, "tool", "dir", "--bin"], capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.strip()
         cand = Path(out) / ("pys.exe" if os.name == "nt" else "pys") if out else None
         if cand and cand.exists():
             return [Step("pys", f"installed ({cand}) but not on PATH", None,

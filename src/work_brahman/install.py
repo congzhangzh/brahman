@@ -128,9 +128,11 @@ def load_env(config: Path) -> None:
     """The .env next to the config, for what the environment doesn't set already (a systemd
     unit's EnvironmentFile, the shell): it never overrides."""
     env = config.parent / ".env"
+    from . import portable
+    portable.ENV_FILE = env  # its keys never reach pys and its windows (portable.child_env)
     if not env.exists():
         return
-    for line in env.read_text().splitlines():
+    for line in env.read_text(encoding="utf-8").splitlines():
         key, eq, value = line.strip().partition("=")
         if eq and key and not key.startswith("#"):
             os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
@@ -233,7 +235,7 @@ def init(args) -> int:
                        language=language, port=args.port)
     if scan_chats:
         toml = toml.replace("\nchats = []", "\nchats = [" + ", ".join(f'"{c}"' for c in scan_chats) + "]", 1)
-    path.write_text(toml)
+    path.write_text(toml, encoding="utf-8")
     secrets = [f"TELEGRAM_BOT_TOKEN={token or ''}",
                f"FEISHU_APP_ID={first[0] or ''}", f"FEISHU_APP_SECRET={first[1] or ''}",
                f"LARK_APP_ID={second[0] or ''}", f"LARK_APP_SECRET={second[1] or ''}",
@@ -243,7 +245,7 @@ def init(args) -> int:
     env.touch(mode=0o600)
     env.chmod(0o600)
     env.write_text("# Written by `buddy init`. Secrets: keep this file to yourself (chmod 600).\n"
-                   + "\n".join(secrets) + "\n")
+                   + "\n".join(secrets) + "\n", encoding="utf-8")
     skills = install_skills()
     print(f"wrote {path}\nwrote {env} (chmod 600)" + "".join(f"\nkept {k}" for k in kept)
           + "".join(f"\nskill {s}" for s in skills))
@@ -302,21 +304,21 @@ def allow(args) -> int:
     if not path.exists() or not env.exists():
         print(f"not set up: {path} is missing; run `buddy init` first", file=sys.stderr)
         return 2
-    lines = env.read_text().splitlines()
+    lines = env.read_text(encoding="utf-8").splitlines()
     k = next((i for i, x in enumerate(lines) if x.startswith("BUDDY_ALLOWED_IDS=")), None)
     ids = [x for x in (lines[k].partition("=")[2].split(",") if k is not None else []) if x.strip()]
     ids += [args.id] if args.id not in ids else []
     line = "BUDDY_ALLOWED_IDS=" + ",".join(ids)
     lines = lines[:k] + [line] + lines[k + 1:] if k is not None else lines + [line]
-    env.write_text("\n".join(lines) + "\n")
+    env.write_text("\n".join(lines) + "\n", encoding="utf-8")
     chat = args.chat or (args.id if args.id.startswith("tg:") else "")  # a Telegram DM's chat is its sender
-    toml = path.read_text()
+    toml = path.read_text(encoding="utf-8")
     if chat and chat not in toml:
         new, n = re.subn(r"^chats = \[(.*)\]$",
                          lambda m: f"chats = [{m[1] + ', ' if m[1].strip() else ''}\"{chat}\"]",
                          toml, count=1, flags=re.M)
         if n:
-            path.write_text(new)
+            path.write_text(new, encoding="utf-8")
         else:
             print(f"add {chat!r} to [me] chats in {path} by hand", file=sys.stderr)
     restart = restart_hint(args.name)
@@ -406,7 +408,7 @@ def codex_server() -> tuple:
     from . import codexd
     try:
         from . import portable
-        p = subprocess.run(portable.argv(["codex", "app-server", "daemon", "version"]), capture_output=True, text=True, timeout=15)
+        p = subprocess.run(portable.argv(["codex", "app-server", "daemon", "version"]), capture_output=True, text=True, timeout=15, encoding="utf-8", errors="replace")
         v = json.loads(p.stdout or "{}")
     except (OSError, subprocess.TimeoutExpired, ValueError):
         v = {}
@@ -467,7 +469,7 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
         loose = env.stat().st_mode & (stat.S_IRWXG | stat.S_IRWXO)
         row(None if loose else True, f"secrets {env}", f"chmod 600 {env}" if loose else "")
     tg = os.environ.get("TELEGRAM_BOT_TOKEN")
-    domain = (tomllib.loads(path.read_text()).get("domain", "feishu") if path.exists() else "feishu")
+    domain = (tomllib.loads(path.read_text(encoding="utf-8")).get("domain", "feishu") if path.exists() else "feishu")
     first = os.environ.get("FEISHU_APP_ID") and ("Feishu" if domain == "feishu" else "Lark")
     second = os.environ.get("LARK_APP_ID") and "Lark (lark: ids)"
     chats = [c for c in ("Telegram" if tg else "", first, second) if c]
@@ -488,7 +490,7 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
                                             "long stories and topics share one chat"),
                 "" if me.get("has_topics_enabled") else
                 "@BotFather → open the Mini App → your bot → Bot Settings → Threaded Mode")
-    cfg = tomllib.loads(path.read_text()) if path.exists() else {}
+    cfg = tomllib.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     if not offline and os.environ.get("FEISHU_APP_ID"):
         _app_rows(row, "Feishu" if domain == "feishu" else "Lark", os.environ["FEISHU_APP_ID"],
                   os.environ.get("FEISHU_APP_SECRET", ""), domain, cfg)
@@ -694,7 +696,7 @@ def _windows_service(args, config: Path) -> int:
         return 2
     STARTUP.mkdir(parents=True, exist_ok=True)
     kept = _keep(cmd) if cmd.exists() else None
-    cmd.write_text(text, newline="")
+    cmd.write_text(text, newline="", encoding="utf-8")
     print(f"wrote {cmd}" + (f"\nkept {kept}" if kept else "") + "\nit starts the buddy when you log on")
     if args.enable:
         subprocess.Popen(["cmd", "/c", str(cmd)], creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
@@ -760,7 +762,8 @@ def service_ctl(action: str, name: str = "buddy", run=subprocess.run) -> int:
     if not f.exists() and action != "status":
         print(f"no service {f}: buddy service install first", file=sys.stderr)
         return 2
-    out = lambda *a: run(list(a), capture_output=True, text=True, check=False)  # noqa: E731
+    out = lambda *a: run(list(a), capture_output=True, text=True, check=False,  # noqa: E731
+                         encoding="utf-8", errors="replace")  # taskkill speaks the console's code page
     if WINDOWS:
         def stop():
             if up:
@@ -837,7 +840,7 @@ def service(args) -> int:
         return 2
     UNITS.mkdir(parents=True, exist_ok=True)
     kept = _keep(unit) if unit.exists() else None
-    unit.write_text(text)
+    unit.write_text(text, encoding="utf-8")
     run = lambda *a: subprocess.run(["systemctl", "--user", *a], check=False)  # noqa: E731
     run("daemon-reload")
     print(f"wrote {unit}" + (f"\nkept {kept}" if kept else ""))

@@ -17,12 +17,15 @@ from . import procs
 QUIET = {"SPEAK": "off"}
 # The chat apps' secrets stay with the buddy: the agent, its Bash commands, hooks and MCP
 # servers never see them (a prompt injection in a README could send its env away).
-SECRETS = ("TELEGRAM_BOT_TOKEN", "FEISHU_APP_ID", "FEISHU_APP_SECRET", "LARK_APP_ID",
-           "LARK_APP_SECRET", "BUDDY_ALLOWED_IDS", "BUDDY_ALLOWED_OPEN_IDS")
+from .portable import SECRETS  # one list for every child (the review, 2026-11-19)
 
 
 def agent_env() -> dict:
-    return {**{k: v for k, v in os.environ.items() if k not in SECRETS}, **QUIET}
+    """A chat turn's or a job's agent: the buddy's environment minus its secrets and every name in its
+    .env (portable.child_env; before, only SECRETS went, so the web token and the peer secret reached
+    every chat turn's claude)."""
+    from .portable import child_env
+    return {**child_env(), **QUIET}
 
 
 @dataclass

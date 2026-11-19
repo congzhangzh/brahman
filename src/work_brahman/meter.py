@@ -33,7 +33,7 @@ def meter(state: Path, days: int | None = DAYS) -> dict:
             continue
         for f in d.glob("*.json"):
             try:
-                r = json.loads(f.read_text())
+                r = json.loads(f.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
             if r.get("started", "") < since:
@@ -44,7 +44,7 @@ def meter(state: Path, days: int | None = DAYS) -> dict:
             human += r.get("kind") == "chat"  # a message the owner sent
     for f in (state / "asks").glob("*.json") if (state / "asks").exists() else []:
         try:
-            a = json.loads(f.read_text())
+            a = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
         if a.get("answer") and not a["answer"].get("stopped") and a["answer"].get("at", "") >= since:

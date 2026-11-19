@@ -96,7 +96,7 @@ def check_new(state: Path, task: str, cwd: str, short: str = "", sandbox: str = 
 def log(state: Path, kind: str, verdict: str, **fields) -> None:
     line = {"at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "kind": kind, "verdict": verdict,
             **{k: v for k, v in fields.items() if v not in ("", None, [])}}
-    with open(Path(state) / "gate.jsonl", "a") as f:
+    with open(Path(state) / "gate.jsonl", "a", encoding="utf-8") as f:
         f.write(json.dumps(line, ensure_ascii=False) + "\n")
 
 
@@ -164,7 +164,7 @@ def open_allowed(cfg: dict | None = None) -> bool:
 def env_names(env_file) -> set[str]:
     """The variable names in the buddy's .env (names only: the values are never read here)."""
     try:
-        lines = Path(env_file).read_text().splitlines() if env_file else []
+        lines = Path(env_file).read_text(encoding="utf-8").splitlines() if env_file else []
     except OSError:
         return set()
     return {ln.split("=", 1)[0].removeprefix("export ").strip() for ln in lines

@@ -5,6 +5,30 @@ once, at the first start of a new version (following `[notify]`).
 
 ## Unreleased
 
+## 20261119.4
+
+- **The buddy's own settings (`.env`: the chat apps' secrets, the web token) no longer reach a pys window
+  it opens.** Before, when no pys was running, the buddy's own pys call started it, and that pys and
+  every window opened in it had the buddy's environment, `.env` included. `/topys` now never starts pys
+  itself: with none running, it says to start it first.
+- **A chat turn's agent no longer gets the buddy's web token, peer secret or other `.env` settings.**
+  Before, only the chat apps' own secrets were kept from it. So `.env` is for the buddy's own keys: a
+  setting meant for claude (an API key, a proxy) belongs in your shell or Claude Code's own config.
+- **"✅ Always: <rule> in this project"** on a long story's permission card, beside Allow and Deny,
+  when Claude Code suggests a rule narrower than a whole tool (`Bash(npm test *)`, never all of `Bash`):
+  it allows this time and writes that rule into the project's `.claude/settings.local.json`, so the
+  session stops asking for it there. Never into your user settings.
+- **Windows: `/topys` works** ("pys: command not found: bash"): the buddy hands the session over itself
+  and opens a pys window running the session (`claude --resume`): on Linux and macOS through your login
+  shell, which stays when the session ends; on Windows claude itself, with no shell in between. While the buddy is still finishing a turn, `/topys` answers "handing over" at once and says
+  the window when it opens. On Windows it needs a pys that can pass an environment (`pys new --env`,
+  py-screen 20261119.2); an older one is named. `/frompys` that would end a terminal's session by force
+  is refused on Windows (it would be a hard kill there): end it in its window, then `/frompys`.
+- **UTF-8 everywhere, not the system's encoding**: every file the buddy reads or writes and every
+  program's output it reads names UTF-8 (a stray bad byte shows as �, never an error), and the Python
+  programs it starts run in UTF-8 mode. On a Chinese Windows (GBK) a program's Chinese or emoji output
+  could raise an error or come back garbled; the tests now fail on a call that leaves it out.
+
 ## 20261119.3
 
 - **`buddy doctor`'s "can't look for a second buddy" warning goes away by itself** once the app's chats

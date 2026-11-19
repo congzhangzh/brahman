@@ -188,13 +188,13 @@ class CodeReview:
         """The state file, locked: a timer tick and a chat /update never interleave."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with portable.locked(self.path.with_suffix(".lock")):
-            st = json.loads(self.path.read_text()) if self.path.exists() else {}
+            st = json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {}
             for field in ("manual", "muted"):
                 st.setdefault(field, [])
             st.setdefault("prs", {})
             yield st
             tmp = self.path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(st, indent=1, ensure_ascii=False))
+            tmp.write_text(json.dumps(st, indent=1, ensure_ascii=False), encoding="utf-8")
             os.replace(tmp, self.path)
 
 

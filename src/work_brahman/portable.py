@@ -14,7 +14,7 @@ reads the same on both:
 - peer_uid(client_port, server_port): who opened a TCP connection to this machine's loopback.
   Linux reads /proc/net/tcp(6): the client socket's line names its owner. None elsewhere.
 - parent(pid): (parent pid, program name). Linux reads /proc; macOS has none, so it asks
-  ps; Windows: None (long stories follow a terminal there through screen, which it lacks).
+  ps; Windows takes a Toolhelp snapshot (ctypes, no package).
 - argv(cmd): the command as the system can start it. POSIX: as it is. Windows: CreateProcess
   finds only an .exe on PATH, and npm installs claude and codex as .cmd shims, so ["claude", ...]
   was "file not found" there (2026-11-18, the VM). The shim's own target is used when it names an
@@ -41,7 +41,7 @@ else:
 
 @contextmanager
 def locked(path: Path):
-    with open(path, "a+") as f:
+    with open(path, "a+", encoding="utf-8") as f:
         if not WINDOWS:
             fcntl.flock(f, fcntl.LOCK_EX)
             yield f
@@ -65,7 +65,7 @@ def hold(path: Path):
     it; closing it, or exiting, frees the lock), or None when another process holds it. The
     holder's pid is in path + ".pid" (a side file: Windows' lock keeps the locked byte from
     being read)."""
-    f = open(path, "a+")
+    f = open(path, "a+", encoding="utf-8")
     try:
         if WINDOWS:
             f.seek(0)
@@ -75,13 +75,13 @@ def hold(path: Path):
     except OSError:
         f.close()
         return None
-    Path(str(path) + ".pid").write_text(f"{os.getpid()}\n")
+    Path(str(path) + ".pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
     return f
 
 
 def holder(path: Path) -> int | None:
     try:
-        return int(Path(str(path) + ".pid").read_text().strip())
+        return int(Path(str(path) + ".pid").read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         return None
 
@@ -112,7 +112,7 @@ def peer_uid(client_port: int, server_port: int) -> int | None:
     """The uid that owns the client end of a loopback connection (Linux), else None."""
     for table in ("/proc/net/tcp", "/proc/net/tcp6"):
         try:
-            lines = Path(table).read_text().splitlines()[1:]
+            lines = Path(table).read_text(encoding="utf-8").splitlines()[1:]
         except OSError:
             continue
         for line in lines:
@@ -127,11 +127,11 @@ def peer_uid(client_port: int, server_port: int) -> int | None:
 
 def parent(pid: int) -> tuple[int, str] | None:
     if WINDOWS:
-        return None
+        return _win_parent(pid)
     try:
         if Path(f"/proc/{pid}/stat").exists():
-            name = Path(f"/proc/{pid}/comm").read_text().strip()
-            return int(Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[1]), name
+            name = Path(f"/proc/{pid}/comm").read_text(encoding="utf-8").strip()
+            return int(Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()[1]), name
         return _ps(pid)
     except (OSError, ValueError, IndexError, subprocess.SubprocessError):
         return None
@@ -145,7 +145,7 @@ def process(pid: int) -> dict | None:
         return None
     try:
         f = subprocess.run(["ps", "-o", "pgid=,tpgid=,tty=,lstart=,comm=", "-p", str(pid)],
-                           capture_output=True, text=True, timeout=5).stdout.split()
+                           capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace").stdout.split()
         return {"pgid": int(f[0]), "tpgid": int(f[1]), "tty": f[2], "started": " ".join(f[3:8]),
                 "comm": Path(" ".join(f[8:])).name}  # macOS ps gives the program's path
     except (OSError, ValueError, IndexError, subprocess.SubprocessError):
@@ -154,7 +154,7 @@ def process(pid: int) -> dict | None:
 
 def _ps(pid: int) -> tuple[int, str]:
     out = subprocess.run(["ps", "-o", "ppid=,comm=", "-p", str(pid)], capture_output=True,
-                         text=True, timeout=5).stdout.strip()
+                         text=True, timeout=5, encoding="utf-8", errors="replace").stdout.strip()
     ppid, _, comm = out.partition(" ")
     return int(ppid), Path(comm.strip()).name  # macOS ps gives the program's path
 
@@ -196,7 +196,7 @@ def argv(cmd: list[str]) -> list[str]:
         return list(cmd)
     if found.lower().endswith((".cmd", ".bat")):
         try:
-            runs = [ln for ln in Path(found).read_text(errors="replace").splitlines() if ln.rstrip().endswith("%*")]
+            runs = [ln for ln in Path(found).read_text(errors="replace", encoding="utf-8").splitlines() if ln.rstrip().endswith("%*")]
         except OSError:
             runs = []
         m = _SHIM_TARGET.search(runs[-1]) if runs else None
@@ -213,3 +213,63 @@ def argv(cmd: list[str]) -> list[str]:
         import logging  # a shim whose form we don't know: visible in buddy.log (review, 2026-11-19)
         logging.getLogger("buddy.portable").info("running %s through cmd.exe (its form is not known)", found)
     return [found, *cmd[1:]]
+
+
+def _win_parent(pid: int) -> tuple[int, str] | None:
+    """Windows: (parent pid, program name without .exe) from a Toolhelp snapshot of the processes
+    (CreateToolhelp32Snapshot + Process32FirstW/NextW): no os.getppid (it needs PssCaptureSnapshot,
+    which Wine lacks), no extra package. None when the process isn't listed."""
+    import ctypes
+    from ctypes import wintypes
+
+    class PROCESSENTRY32W(ctypes.Structure):
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ProcessID", wintypes.DWORD),
+                    ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", wintypes.DWORD),
+                    ("cntThreads", wintypes.DWORD), ("th32ParentProcessID", wintypes.DWORD),
+                    ("pcPriClassBase", ctypes.c_long), ("dwFlags", wintypes.DWORD),
+                    ("szExeFile", wintypes.WCHAR * 260)]
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    k.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    for f in (k.Process32FirstW, k.Process32NextW):  # a HANDLE is pointer-sized: never passed as a C int
+        f.argtypes, f.restype = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)], wintypes.BOOL
+    k.CloseHandle.argtypes, k.CloseHandle.restype = [wintypes.HANDLE], wintypes.BOOL
+    snap = k.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
+    if not snap or snap == wintypes.HANDLE(-1).value:
+        return None
+    try:
+        e = PROCESSENTRY32W()
+        e.dwSize = ctypes.sizeof(e)
+        ok = k.Process32FirstW(snap, ctypes.byref(e))
+        while ok:
+            if e.th32ProcessID == pid:
+                name = e.szExeFile
+                return int(e.th32ParentProcessID), name[:-4] if name.lower().endswith(".exe") else name
+            ok = k.Process32NextW(snap, ctypes.byref(e))
+        return None
+    finally:
+        k.CloseHandle(snap)
+
+
+# The buddy's own secrets never reach a program that may outlive it (the review's VM run, 2026-11-19: when
+# no pys server runs, the buddy's `pys new` starts one, and the server and every window it opens inherit
+# the buddy's environment, its .env included).
+ENV_FILE: Path | None = None  # the .env beside buddy.toml (install.load_env sets it)
+SECRETS = ("TELEGRAM_BOT_TOKEN", "FEISHU_APP_ID", "FEISHU_APP_SECRET", "LARK_APP_ID", "LARK_APP_SECRET",
+           "BUDDY_ALLOWED_IDS", "BUDDY_ALLOWED_OPEN_IDS", "BUDDY_WEB_TOKEN", "BUDDY_PEER_SECRET")  # engine.SECRETS too
+
+
+def child_env(base: dict | None = None) -> dict:
+    """base (else this process's environment) without the buddy's .env keys, however they got here
+    (load_env, a systemd EnvironmentFile, the shell that sourced it) and without the known secret names."""
+    env = dict(os.environ if base is None else base)
+    drop = set(SECRETS)
+    if ENV_FILE is not None:
+        try:
+            for line in ENV_FILE.read_text(encoding="utf-8").splitlines():
+                key, eq, _ = line.strip().partition("=")
+                if eq and key and not key.startswith("#"):
+                    drop.add(key.strip().removeprefix("export ").strip())
+        except OSError:
+            pass
+    return {k: v for k, v in env.items() if k not in drop}

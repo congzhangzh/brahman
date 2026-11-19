@@ -17,14 +17,14 @@ from pathlib import Path
 
 def main(folder: str) -> int:
     d = Path(folder)
-    spec = json.loads((d / "spec.json").read_text())
+    spec = json.loads((d / "spec.json").read_text(encoding="utf-8"))
     (d / "spec.json").unlink()
     p = subprocess.Popen(spec["cmd"], cwd=spec.get("cwd") or None, env=spec.get("env"))
     for s in (signal.SIGTERM, signal.SIGINT):  # pass a polite stop on, then report it
         signal.signal(s, lambda n, _f: p.send_signal(n))
     code = p.wait()
     tmp = d / "rc.tmp"
-    tmp.write_text(str(code))
+    tmp.write_text(str(code), encoding="utf-8")
     os.replace(tmp, d / "rc")
     return code if code >= 0 else 128 - code
 

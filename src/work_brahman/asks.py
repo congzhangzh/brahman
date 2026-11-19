@@ -98,7 +98,7 @@ def load(state: Path, ask_id: str) -> dict | None:
     if not ask_id.isalnum():  # it came from a button press: never a path
         return None
     try:
-        return json.loads((state / "asks" / f"{ask_id}.json").read_text())
+        return json.loads((state / "asks" / f"{ask_id}.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
 
@@ -121,5 +121,5 @@ def _save(state: Path, ask: dict) -> None:
     d = state / "asks"
     d.mkdir(parents=True, exist_ok=True)
     tmp = d / f"{ask['id']}.tmp"
-    tmp.write_text(json.dumps(ask, indent=1, ensure_ascii=False))
+    tmp.write_text(json.dumps(ask, indent=1, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, d / f"{ask['id']}.json")

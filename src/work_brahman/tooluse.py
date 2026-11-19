@@ -154,7 +154,7 @@ def record(state: Path, story: int, step: str, name: str | None, tool: str, inp:
     f.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(f.parent, 0o700)  # the folder too: no window between a create with the umask and a chmod (review)
     fd = os.open(f, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-    with os.fdopen(fd, "a") as out:
+    with os.fdopen(fd, "a", encoding="utf-8") as out:
         out.write(json.dumps({"at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "step": step, "name": name, "tool": tool,
                               "id": call_id, "input": _cut(inp)}, ensure_ascii=False) + "\n")
 
@@ -185,7 +185,7 @@ def read_args(state: Path, story: int, step: str | None = None) -> list[dict]:
     f = args_file(state, story)
     if not f.exists():
         return []
-    rows = [json.loads(x) for x in f.read_text().splitlines() if x.strip()]
+    rows = [json.loads(x) for x in f.read_text(encoding="utf-8").splitlines() if x.strip()]
     return [r for r in rows if step is None or r.get("step") == step]
 
 
@@ -196,7 +196,7 @@ COMMAND = "buddy-short tool-hook"
 
 
 def install(settings_path: Path, remove: bool = False) -> str:
-    d = json.loads(settings_path.read_text()) if settings_path.exists() else {}
+    d = json.loads(settings_path.read_text(encoding="utf-8")) if settings_path.exists() else {}
     hooks = d.setdefault("hooks", {})
     post = [h for h in hooks.get("PostToolUse", []) if not any(x.get("command") == COMMAND for x in h.get("hooks", []))]
     had = len(post) != len(hooks.get("PostToolUse", []))
@@ -214,5 +214,5 @@ def install(settings_path: Path, remove: bool = False) -> str:
         while (copy := settings_path.with_name(f"{settings_path.name}.before-tool-hook-{stamp}" + (f".{k}" if k else ""))).exists():
             k += 1
         shutil.copy2(settings_path, copy)
-    settings_path.write_text(json.dumps(d, indent=2, ensure_ascii=False) + "\n")
+    settings_path.write_text(json.dumps(d, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return f"{'removed the' if remove else 'updated the' if had else 'added the'} tool hook {'from' if remove else 'in'} {settings_path}"

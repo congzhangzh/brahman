@@ -101,7 +101,7 @@ def sync(cfg: dict, env: Mapping[str, str] = os.environ) -> list[str]:
     block = render(cfg, P.seen(env)) if cfg.get("instructions") else None
     said = []
     for f in files(env):
-        old = f.read_text() if f.exists() else ""
+        old = f.read_text(encoding="utf-8") if f.exists() else ""
         if block is None and not BLOCK_RE.search(old):
             continue  # off and not there: the file is not touched, not even created
         new = new_text(old, block)
@@ -110,7 +110,7 @@ def sync(cfg: dict, env: Mapping[str, str] = os.environ) -> list[str]:
         f.parent.mkdir(parents=True, exist_ok=True)
         if f.exists():
             shutil.copy2(f, f.with_name(f"{f.name}.brahman-backup-{time.strftime('%Y%m%d-%H%M%S')}"))
-        f.write_text(new)
+        f.write_text(new, encoding="utf-8")
         said.append(f"{'updated' if block and BLOCK_RE.search(old) else 'added' if block else 'removed'} the peers block "
                     f"in {f}")
     return said
@@ -118,4 +118,4 @@ def sync(cfg: dict, env: Mapping[str, str] = os.environ) -> list[str]:
 
 def state(env: Mapping[str, str] = os.environ) -> list[dict]:
     """Each file and whether the block is in it, for the TUI and the page."""
-    return [{"file": str(f), "has": f.exists() and bool(BLOCK_RE.search(f.read_text()))} for f in files(env)]
+    return [{"file": str(f), "has": f.exists() and bool(BLOCK_RE.search(f.read_text(encoding="utf-8")))} for f in files(env)]

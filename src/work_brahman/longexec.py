@@ -29,7 +29,7 @@ import threading
 
 def main(folder: str) -> int:
     spec_path = os.path.join(folder, "spec.json")
-    with open(spec_path) as f:
+    with open(spec_path, encoding="utf-8") as f:
         spec = json.load(f)
     os.unlink(spec_path)
     p = subprocess.Popen(spec["cmd"], cwd=spec.get("cwd") or None, env=spec.get("env"),
@@ -40,7 +40,7 @@ def main(folder: str) -> int:
     def ended():  # the session exits on its own or after a release: so does the launcher
         code = p.wait()
         tmp = os.path.join(folder, "rc.tmp")
-        with open(tmp, "w") as f:
+        with open(tmp, "w", encoding="utf-8") as f:
             f.write(str(code))
         os.replace(tmp, os.path.join(folder, "rc"))
         os._exit(code if code >= 0 else 128 - code)

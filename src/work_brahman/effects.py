@@ -56,7 +56,7 @@ def rules() -> list[tuple[str, str, bool, str | None]]:
     f = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "brahman" / "effects.json"
     own = []
     try:
-        for r in json.loads(f.read_text()):
+        for r in json.loads(f.read_text(encoding="utf-8")):
             own.append((str(r["match"]), str(r["kind"]), bool(r.get("reversible", False)), str(r.get("what") or "")))
     except (OSError, ValueError, KeyError, TypeError):
         pass

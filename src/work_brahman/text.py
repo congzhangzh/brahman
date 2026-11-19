@@ -455,6 +455,9 @@ Anything else goes to Claude Code, in the same session as your last message in t
     "long.takeback.end_btn": ("⏹ End the terminal session now", "⏹ 现在结束终端里的会话"),
     "long.takeback.busy": ("Its turn is still running in the terminal; press again when it ends.",
                            "终端里这一轮还在运行；结束后再按一次。"),
+    "long.takeback.windows": ("On Windows the buddy can't end a terminal's session safely between turns (it would be a hard kill): "
+                              "end it in its window (/exit), then /frompys.",
+                              "在 Windows 上 buddy 无法在两轮之间安全结束终端里的会话（那会是强制结束）：请在它的窗口里结束它（/exit），再 /frompys。"),
     "long.takeback.ending": ("⏹ Ended the terminal's session between turns; the buddy takes it back.",
                              "⏹ 已在两轮之间结束终端里的会话；buddy 接回来。"),
     "long.takeback.soon": ("⏳ It finishes its turn first; then the buddy starts it again.",
@@ -499,8 +502,17 @@ Anything else goes to Claude Code, in the same session as your last message in t
     "long.term.codex": ("a Codex story is taken by hand: codex resume {id}", "Codex 故事要手动接管：codex resume {id}"),
     "long.term.gone": ("its folder is gone: {cwd}", "它的目录已不在：{cwd}"),
     "long.term.failed": ("pys failed: {why}", "pys 失败：{why}"),
-    "long.term.opened": ("#{n}: pys window {w} opened in `{cwd}`; buddy-long take {n} runs there (it waits for the buddy's turn to end)",
-                         "#{n}：已在 `{cwd}` 打开 pys 窗口 {w}，那里在运行 buddy-long take {n}（会等 buddy 这一轮结束）"),
+    "long.term.opened": ("#{n}: pys window {w} opened in `{cwd}`, the session resumed there",
+                         "#{n}：已在 `{cwd}` 打开 pys 窗口 {w}，会话在那里接着进行"),
+    "long.term.handing": ("#{n}: handing over: once the buddy's turn ends, a pys window opens with the session",
+                          "#{n}：正在交接：buddy 这一轮结束后，会打开一个 pys 窗口接着这个会话"),
+    "long.term.no_server": ("no pys is running: start it first (type `pys` in a terminal), then /topys again; the "
+                            "buddy never starts one itself, so no window inherits its environment",
+                            "pys 没在运行：请先启动它（在终端里输入 `pys`），再 /topys；buddy 从不自己启动 pys，"
+                            "这样没有窗口会继承它的环境"),
+    "long.term.old_pys": ("this pys can't pass an environment to a new window (pys new --env): /topys needs py-screen "
+                          "20261119.2 or newer (uv tool upgrade py-screen)", "这个 pys 不能给新窗口传环境变量（pys new --env）："
+                          "/topys 需要 py-screen 20261119.2 或更新（uv tool upgrade py-screen）"),
     "long.term.shown": ("#{n}: pys window {w} is in front", "#{n}：pys 窗口 {w} 已切到前面"),
     "long.made": ("Started from {where}, in `{cwd}`. Its first turn runs headless now.",
                   "从{where}发起，目录 `{cwd}`。第一轮正在无界面运行。"),
@@ -637,6 +649,9 @@ Anything else goes to Claude Code, in the same session as your last message in t
     "long.perm": ("{label} asks to use **{tool}**:\n\n{what}", "{label} 请求使用 **{tool}**：\n\n{what}"),
     "long.allow": ("✅ Allow", "✅ 允许"),
     "long.deny": ("⛔ Deny", "⛔ 拒绝"),
+    "long.always": ("✅ Always: {rule} in this project", "✅ 总是允许：{rule}（本项目）"),
+    "long.always_rule": ("✅ Always writes into this project's `.claude/settings.local.json`: `{rule}`",
+                         "✅ 总是允许会写进本项目的 `.claude/settings.local.json`：`{rule}`"),
 
     # The scheduler (scheduler.py run_now)
     "sched.none": ("no {kind} {name}", "没有{kind} {name}"),

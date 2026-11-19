@@ -62,7 +62,7 @@ def _now() -> str:
 
 def load(state: Path, number: int) -> dict | None:
     p = _dir(state) / f"{number}.json"
-    return json.loads(p.read_text()) if p.exists() else None
+    return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
 
 
 def _save(state: Path, story: dict) -> None:
@@ -73,12 +73,12 @@ def _save(state: Path, story: dict) -> None:
         story["private"] = True
     p = _dir(state) / f"{story['id']}.json"
     tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(story, ensure_ascii=False, indent=1))
+    tmp.write_text(json.dumps(story, ensure_ascii=False, indent=1), encoding="utf-8")
     tmp.replace(p)
 
 
 def all_stories(state: Path) -> list[dict]:
-    return sorted((json.loads(p.read_text()) for p in _dir(state).glob("*.json") if p.stem.isdigit()),
+    return sorted((json.loads(p.read_text(encoding="utf-8")) for p in _dir(state).glob("*.json") if p.stem.isdigit()),
                   key=lambda s: s["id"])
 
 
@@ -153,7 +153,7 @@ def register(state: Path, *, pid: int, cwd: str, title: str, sty: str = "", wind
     d = _dir(state) / "pending"
     d.mkdir(exist_ok=True)
     (d / f"{pid}.json").write_text(json.dumps({"pid": pid, "cwd": os.path.realpath(cwd), "title": title,
-                                               "sty": sty, "window": window, "at": time.time()}))
+                                               "sty": sty, "window": window, "at": time.time()}), encoding="utf-8")
 
 
 def claim(state: Path, cwd: str) -> dict | None:
@@ -161,7 +161,7 @@ def claim(state: Path, cwd: str) -> dict | None:
     d, mine = _dir(state) / "pending", []
     for p in sorted(d.glob("*.json")) if d.exists() else []:
         try:
-            r = json.loads(p.read_text())
+            r = json.loads(p.read_text(encoding="utf-8"))
             if not portable.alive(r["pid"]):
                 raise OSError("gone")
         except (OSError, ValueError, KeyError):
@@ -541,7 +541,7 @@ def _queue(state: Path, story: dict, text: str, *, where: str, who: str) -> str:
     back through the Stop hook, whoever runs it (the terminal, or Codex's daemon)."""
     try:
         p = subprocess.run(["codex", "queue", "--thread", story["session_id"], "--message", text],
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, timeout=60, encoding="utf-8", errors="replace")
         ok, why = p.returncode == 0, (p.stderr or p.stdout).strip()[-300:]
     except (OSError, subprocess.TimeoutExpired) as e:
         ok, why = False, str(e)
@@ -654,7 +654,7 @@ def last_message(transcript: str) -> str:
     newest last, one content block per line): the run of text after its last tool call or
     prompt. What it said between tool calls stays in the transcript."""
     try:
-        lines = Path(transcript).read_text(errors="replace").splitlines()
+        lines = Path(transcript).read_text(errors="replace", encoding="utf-8").splitlines()
     except OSError:
         return ""
     said = []
@@ -684,7 +684,7 @@ def _type(sty: str, window: str, text: str, enter: bool = True) -> bool:
     for ch in ("\\", "^", "$"):
         line = line.replace(ch, "\\" + ch)
     stuff = lambda keys: subprocess.run(["screen", "-S", sty, "-p", window, "-X", "stuff", keys],
-                                        capture_output=True, text=True, timeout=10).returncode == 0
+                                        capture_output=True, text=True, timeout=10, encoding="utf-8", errors="replace").returncode == 0
     try:
         if line and not stuff(line):
             return False
@@ -705,7 +705,7 @@ def _screen(sty: str, window: str) -> list[str]:
         try:
             subprocess.run(["screen", "-S", sty, "-p", window, "-X", "hardcopy", f.name],
                            capture_output=True, timeout=10)
-            return [x.rstrip() for x in Path(f.name).read_text(errors="replace").splitlines() if x.strip()]
+            return [x.rstrip() for x in Path(f.name).read_text(errors="replace", encoding="utf-8").splitlines() if x.strip()]
         except (OSError, subprocess.TimeoutExpired):
             return []
 
@@ -726,9 +726,10 @@ def _look(story: dict) -> list[str]:
     return _screen(story["sty"], story["window"]) if story.get("sty") else []
 
 
-def _pys_env(session: str) -> dict | None:
-    """session: a pys server's runtime dir ($PYS_SESSION), when it may not be the default one."""
-    return {**os.environ, "PYS_DIR": session} if session else None
+def _pys_env(session: str) -> dict:
+    """session: a pys server's runtime dir ($PYS_SESSION), when it may not be the default one. Never the
+    buddy's .env (portable.child_env): a pys call may start the server, which every window inherits."""
+    return portable.child_env({**os.environ, "PYS_DIR": session} if session else None)
 
 
 def _pys_type(window: str, text: str, enter: bool = True, session: str = "") -> bool:
@@ -737,7 +738,7 @@ def _pys_type(window: str, text: str, enter: bool = True, session: str = "") -> 
     no escaping (argv), and `--` so text starting with "-" is never a flag."""
     line = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", " ".join(text.split()))
     send = lambda *a: subprocess.run(["pys", "send", *a], capture_output=True, text=True, timeout=10,
-                                     env=_pys_env(session)).returncode == 0
+                                     env=_pys_env(session), encoding="utf-8", errors="replace").returncode == 0
     try:
         if line and not send(window, "--", line):
             return False
@@ -755,7 +756,7 @@ def _pys_view(window: str, session: str = "") -> tuple[list[str], bool]:
     placeholder, a suggested prompt) is not typed text, which would have moved the cursor on."""
     try:
         p = subprocess.run(["pys", "capture", "--json", window], capture_output=True, text=True,
-                           timeout=10, env=_pys_env(session))
+                           timeout=10, env=_pys_env(session), encoding="utf-8", errors="replace")
         d = json.loads(p.stdout) if p.returncode == 0 else {}
         col, row = d.get("cursor") or (0, -1)
         lines = d.get("lines") or []
@@ -771,10 +772,10 @@ def _erase(story: dict, n: int) -> bool:
     try:
         if story.get("mux") == "pys":
             return subprocess.run(["pys", "send", story["window"], "--", keys], capture_output=True,
-                                  text=True, timeout=10, env=_pys_env(story.get("session", ""))).returncode == 0
+                                  text=True, timeout=10, env=_pys_env(story.get("session", "")), encoding="utf-8", errors="replace").returncode == 0
         if story.get("sty"):
             return subprocess.run(["screen", "-S", story["sty"], "-p", story["window"], "-X", "stuff", keys],
-                                  capture_output=True, text=True, timeout=10).returncode == 0
+                                  capture_output=True, text=True, timeout=10, encoding="utf-8", errors="replace").returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         pass
     return False
@@ -785,7 +786,7 @@ def _pys_titles(window: str, session: str = "") -> dict | None:
     agent_title (`pys title`), app_title (OSC 2 from its app); None when it is not there."""
     try:
         p = subprocess.run(["pys", "ls", "--json"], capture_output=True, text=True, timeout=10,
-                           env=_pys_env(session))
+                           env=_pys_env(session), encoding="utf-8", errors="replace")
         return next((w for w in json.loads(p.stdout)["windows"] if str(w["wid"]) == str(window)), None)
     except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError):
         return None
@@ -798,7 +799,7 @@ def _pys_title(window: str, session: str, title: str, owner: int) -> bool:
     title = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", title)
     try:
         return subprocess.run(["pys", "title", "--wid", str(window), "--owner", str(owner), "--", title],
-                              capture_output=True, text=True, timeout=10, env=_pys_env(session)).returncode == 0
+                              capture_output=True, text=True, timeout=10, env=_pys_env(session), encoding="utf-8", errors="replace").returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
 
@@ -809,7 +810,7 @@ def _set_title(tty: str, title: str) -> bool:
     keys in it: a story's title is anyone's text, and an ESC would reach the terminal."""
     title = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", title)
     try:
-        with open(f"/dev/{tty}", "w") as f:
+        with open(f"/dev/{tty}", "w", encoding="utf-8") as f:
             f.write(f"\033]2;{title}\007")
         return True
     except OSError:
@@ -820,7 +821,7 @@ def _pys_screen(window: str, session: str = "") -> list[str]:
     """What a pys window shows now (`pys capture`), its blank lines left out."""
     try:
         p = subprocess.run(["pys", "capture", window], capture_output=True, text=True, timeout=10,
-                           env=_pys_env(session))
+                           env=_pys_env(session), encoding="utf-8", errors="replace")
     except (OSError, subprocess.TimeoutExpired):
         return []
     return [x.rstrip() for x in p.stdout.splitlines() if x.strip()] if p.returncode == 0 else []
@@ -931,7 +932,7 @@ def _wake_codex(window: dict, line: str) -> bool:
 def _codex_queue(thread: str, line: str) -> bool:
     try:
         return subprocess.run(["codex", "queue", "--thread", thread, "--message", line],
-                              capture_output=True, text=True, timeout=60).returncode == 0
+                              capture_output=True, text=True, timeout=60, encoding="utf-8", errors="replace").returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
 

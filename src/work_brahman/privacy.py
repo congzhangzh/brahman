@@ -78,7 +78,7 @@ def marker() -> tuple[list[str], str]:
     own = shutil.which(NAME, path=path)
     if own:
         return [own], own.replace(str(home), "~", 1)
-    return [sys.executable, "-I", str(SAMPLE)], "sample"
+    return [sys.executable, "-I", "-X", "utf8", str(SAMPLE)], "sample"
 
 
 def judge(kind: str, story: dict, extra: list[str] | None = None) -> tuple[bool, str]:
@@ -88,7 +88,8 @@ def judge(kind: str, story: dict, extra: list[str] | None = None) -> tuple[bool,
                "story": story}
     try:
         p = _run(cmd, input=json.dumps(payload, ensure_ascii=False), capture_output=True,
-                           text=True, timeout=TIMEOUT)
+                 text=True, timeout=TIMEOUT, encoding="utf-8", errors="replace",
+                 env={**os.environ, "PYTHONUTF8": "1"})  # the marker is often a Python script
     except (OSError, subprocess.TimeoutExpired) as e:
         return True, f"{who} (failed: {type(e).__name__}, so private)"
     said = (p.stdout.split() or [""])[0].lower()

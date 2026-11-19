@@ -193,7 +193,8 @@ Telegram is the quickest channel to try and to debug.
 ### 2. Configure
 
 ```bash
-cp .env.example .env && chmod 600 .env     # App ID / Secret, bot token: here, nowhere else
+cp .env.example .env && chmod 600 .env     # App ID / Secret, bot token: here, nowhere else (the buddy's own:
+                                           # none of it reaches claude; claude's settings stay in your shell)
 cp buddy.example.toml buddy.toml           # workspace, allowed tools, jobs
 scripts/link-skills.sh                     # make skills/ visible to Claude Code
 ```

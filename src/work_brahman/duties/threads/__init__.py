@@ -70,7 +70,7 @@ class Threads:
     def _fetch(self) -> tuple[dict | None, str]:
         """{url: thread} from the L1 tool, or (None, why). The only step that does I/O."""
         try:
-            p = subprocess.run(self.cmd, capture_output=True, text=True, timeout=180)
+            p = subprocess.run(self.cmd, capture_output=True, text=True, timeout=180, encoding="utf-8", errors="replace")
             data = json.loads(p.stdout or "{}")
         except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as e:
             return None, f"threads: {e}"
@@ -84,7 +84,7 @@ class Threads:
     def _watched_elsewhere(self) -> set[str]:
         """URLs of PRs the code-review duty already reports comments on."""
         try:
-            st = json.loads((self.state_dir / "code-review.json").read_text())
+            st = json.loads((self.state_dir / "code-review.json").read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return set()
         return {pr["url"] for pr in st.get("prs", {}).values()}
@@ -101,10 +101,10 @@ class Threads:
         """The state file, locked: a scheduled check and a chat /threads never interleave."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with portable.locked(self.path.with_suffix(".lock")):
-            st = json.loads(self.path.read_text()) if self.path.exists() else {}
+            st = json.loads(self.path.read_text(encoding="utf-8")) if self.path.exists() else {}
             yield st
             tmp = self.path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(st, indent=1, ensure_ascii=False))
+            tmp.write_text(json.dumps(st, indent=1, ensure_ascii=False), encoding="utf-8")
             os.replace(tmp, self.path)
 
 

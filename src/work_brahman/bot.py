@@ -37,7 +37,7 @@ def buddy_id(state: Path | None) -> str:
         return "?"
     p = Path(state) / "buddy-id"
     try:
-        got = p.read_text().strip()
+        got = p.read_text(encoding="utf-8").strip()
         if len(got) == 6 and all(c in "0123456789abcdef" for c in got):
             return got
     except OSError:
@@ -45,7 +45,7 @@ def buddy_id(state: Path | None) -> str:
     got = secrets.token_hex(3)
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(got + "\n")
+        p.write_text(got + "\n", encoding="utf-8")
         p.chmod(0o600)
     except OSError:
         pass
@@ -73,7 +73,7 @@ class Sessions:
     def __init__(self, path: Path):
         self.path = path
         self.lock = threading.Lock()
-        self.map = json.loads(path.read_text()) if path.exists() else {}
+        self.map = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
     def get(self, chat: str) -> str | None:
         return self.map.get(chat)
@@ -86,7 +86,7 @@ class Sessions:
                 self.map.pop(chat, None)
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(self.map, indent=1))
+            tmp.write_text(json.dumps(self.map, indent=1), encoding="utf-8")
             os.replace(tmp, self.path)
 
 
@@ -411,7 +411,7 @@ class Bot:
             now = longs.load(self.state, n) or story
             code, said, _ = long_live.to_terminal(now, "attach")
             if code == 409 and not longs.held(now):  # no pys window holds it: take it over into a new one
-                _, said, _ = long_live.to_terminal(now, "resume")
+                _, said, _ = long_live.to_terminal(now, "resume", state=self.state, channels=self.channels)
         elif word == "/status":
             said = long_live.status(self.state, n)
         else:  # /frompys
