@@ -5,6 +5,11 @@ once, at the first start of a new version (following `[notify]`).
 
 ## Unreleased
 
+## 20261119.3
+
+- **`buddy doctor`'s "can't look for a second buddy" warning goes away by itself** once the app's chats
+  can be listed again (Lark's monthly quota back, or the scope granted), at the next start.
+
 ## 20261119.2
 
 - **Another buddy on the same bot is noticed**: when two buddies use one Feishu or Lark bot, Feishu gives

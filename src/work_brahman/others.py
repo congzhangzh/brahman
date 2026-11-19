@@ -133,6 +133,14 @@ def refused(app: str, code, why: str) -> None:
     _write(state_dir() / "second-buddy-check.json", d)
 
 
+def answered(app: str) -> None:
+    """The app's chats could be listed again (its quota back, its scope granted): its refusal goes."""
+    p = state_dir() / "second-buddy-check.json"
+    d = _load(p)
+    if d.pop(app, None) is not None:
+        _write(p, d)
+
+
 def pressed(app_id: str, app: str, message_id: str) -> None:
     """A card press: a card this buddy never made means another buddy sent it."""
     if message_id and not ours(app_id, message_id):
@@ -171,6 +179,8 @@ def check_start(channels: list, chats: list[str]) -> None:
                     break
                 seen = check(inner.app_id, inner.name, got) or seen
             else:
+                if mine:
+                    answered(inner.name)  # listed without a refusal: the doctor's ⚠️ goes (review, 2026-11-19)
                 if mine and not seen:
                     clear(inner.name)
     threading.Thread(target=run, name="others", daemon=True).start()
