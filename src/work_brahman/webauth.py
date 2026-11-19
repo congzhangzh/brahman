@@ -116,15 +116,15 @@ def authed(headers, tok: str) -> bool:
     want = cookie_value(tok)
     for part in (headers.get("Cookie") or "").split(";"):
         k, _, v = part.strip().partition("=")
-        if k == COOKIE and hmac.compare_digest(v.strip(), want):
+        if k == COOKIE and hmac.compare_digest(v.strip().encode(), want.encode()):  # bytes: any text compares
             return True
     auth = headers.get("Authorization") or ""
-    return auth.startswith("Bearer ") and hmac.compare_digest(auth[7:].strip(), tok)
+    return auth.startswith("Bearer ") and hmac.compare_digest(auth[7:].strip().encode(), tok.encode())
 
 
 def check(tok: str, given: str) -> bool:
     """A token typed or put in the URL: right or wrong; a wrong one waits a second (no fast guessing)."""
-    ok = bool(tok) and hmac.compare_digest(given.strip(), tok)
+    ok = bool(tok) and hmac.compare_digest(given.strip().encode(), tok.encode())
     if not ok:
         time.sleep(1)
     return ok

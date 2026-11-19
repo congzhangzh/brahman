@@ -48,19 +48,23 @@ No secret is ever sent to the page; it sends a new one, or "-" to remove one.
 Families show in level 1 too: a family with runs() is one workflow, and its stories are its
 runs (families/short_story).
 
-Only 127.0.0.1 is bound, and two checks keep other pages in your own browser out: the Host
+Only the loopbacks are bound, 127.0.0.1 and ::1 on the same port (LoopbackServer: "localhost" may
+resolve to ::1 first, and another program must not take that one), and two checks keep other
+pages in your own browser out: the Host
 header must be the local address (a DNS-rebinding page has its own name there), and a POST
 needs the X-Buddy header, which a cross-site request can't send without a CORS preflight
 that this server never answers.
 """
 
 import copy
+import errno
 import json
 import logging
 import os
 import re
 import subprocess
 import shutil
+import socket
 import sys
 import threading
 import time
@@ -78,6 +82,61 @@ from .text import t
 log = logging.getLogger("buddy.web")
 
 HERE = Path(__file__).resolve().parent
+
+
+class _V6(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+    def server_bind(self):
+        self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)  # ::1 only, never a mapped IPv4
+        super().server_bind()
+
+
+class LoopbackServer(ThreadingHTTPServer):
+    """Both loopbacks on one port, 127.0.0.1 and ::1, and never another address (the PO, 2026-11-18).
+    "localhost" may resolve to ::1 first (GLib, browsers): bound to 127.0.0.1 alone, another local
+    program could take [::1]:<port> and get the page and its login. `twin` is the ::1 server: served
+    and stopped with this one. When ::1 can't be had, `twin_error` says why: no IPv6 here (then
+    localhost is 127.0.0.1 only, nothing to take), or the port taken on ::1: `twin_taken`, said in
+    health's `warn` (the service still runs: refusing to start would let any local user stop it by
+    binding [::1] first). Port 0 picks one free on both."""
+
+    def __init__(self, port: int, handler):
+        for _ in range(8):
+            super().__init__(("127.0.0.1", port), handler)
+            self.twin, self.twin_error, self.twin_taken, self._twin_on = None, "", False, False
+            try:
+                self.twin = _V6(("::1", self.server_port), handler)
+                return
+            except OSError as e:
+                if port == 0 and e.errno == errno.EADDRINUSE:  # a free v4 port taken on v6: pick again
+                    self.server_close()
+                    continue
+                self.twin_error = f"[::1]:{self.server_port}: {e.strerror or e}"
+                self.twin_taken = e.errno == errno.EADDRINUSE  # another program listens there
+                return
+        raise OSError(errno.EADDRINUSE, "no port free on both 127.0.0.1 and ::1 after 8 tries")
+
+    @property
+    def warn(self) -> str:
+        """"loopback6_taken" when another program holds [::1] on this port (health's `warn`), else ""."""
+        return "loopback6_taken" if self.twin_taken else ""
+
+    def serve_forever(self, poll_interval=0.5):
+        if self.twin:
+            self._twin_on = True
+            threading.Thread(target=self.twin.serve_forever, args=(poll_interval,), name="web-v6", daemon=True).start()
+        super().serve_forever(poll_interval)
+
+    def shutdown(self):
+        if self.twin and self._twin_on:  # never served: shutdown() would wait forever
+            self.twin.shutdown()
+        super().shutdown()
+
+    def server_close(self):
+        if self.twin:
+            self.twin.server_close()
+        super().server_close()
 
 
 def _owner(client_port: int, server_port: int) -> bool:
@@ -315,6 +374,7 @@ class Web:
         self.cfg = cfg  # as the buddy started with it ([notify] webpush, read at start like every setting)
         self.chat = chat
         self.started = time.time()  # GET /api/health: up_s
+        self.closed = threading.Event()  # set it to end every open event stream (tests; a stopping buddy)
         self.families = [f for f in (families or {}).values() if hasattr(f, "runs")]
         self.workflows = [{"kind": kind, "name": name, "schedule": t.get("schedule", ""),
                            "about": t.get("prompt", "")[:120]}
@@ -359,10 +419,14 @@ class Web:
                 if path == "/api/health":  # health.py: 200 when it works, 503 when a part doesn't
                     from . import health, webauth
                     got = health.report(web.state, web.bot, web.scheduler, web.started)
+                    if warn := getattr(web, "server", None) and web.server.warn:
+                        got["warn"] = warn  # another program on [::1]:<port>; the buddy still works
                     tok = webauth.token()
                     if tok and not webauth.authed(self.headers, tok):
-                        got = {"ok": got["ok"]}  # a monitor without the token: works or not, nothing more
+                        got = {k: got[k] for k in ("ok", "instance", "warn") if k in got}  # works or not, which process
                     return self._send(200 if got["ok"] else 503, json.dumps(got).encode(), "application/json")
+                if path == "/api/events":  # the event stream (events.py): what web push sends, as SSE
+                    return self._events()
                 if path == "/tokens.css":
                     return self._send(200, TOKENS.read_bytes() if TOKENS.exists() else b"", "text/css")
                 if path == "/api/data":
@@ -537,8 +601,14 @@ class Web:
                 return True
 
             def _authed(self, path: str) -> bool:
-                """BUDDY_WEB_TOKEN: the cookie or a Bearer token; ?token=… once sets the cookie."""
-                from . import webauth
+                """BUDDY_WEB_TOKEN: the cookie or a Bearer token; ?token=… once sets the cookie. A
+                device token (events.py) reads GET /api/events and nothing else."""
+                from . import events, webauth
+                if path not in webauth.PUBLIC and events.device(web.state, self.headers) is not None:
+                    if self.command == "GET" and path == "/api/events":
+                        return True
+                    self._send(403, b"a device token reads GET /api/events only", "text/plain")
+                    return False
                 tok = webauth.token()
                 if not tok or path in webauth.PUBLIC or webauth.authed(self.headers, tok):
                     return True
@@ -555,6 +625,51 @@ class Web:
                 else:
                     self._send(401, b"the web token is needed (BUDDY_WEB_TOKEN)", "text/plain")
                 return False
+
+            def _events(self) -> None:
+                """SSE: the events after Last-Event-ID (or ?last=), then each new one as it is written,
+                a keep-alive comment between. The public view (or ?public=1) gets only the events of
+                stories and teams the page shows publicly (web.public_event)."""
+                from . import events, privacy
+                q = parse_qs(urlparse(self.path).query)
+                last = events.last_id(self.headers.get("Last-Event-ID") or q.get("last", [""])[0])
+                public = bool(self._public()) or q.get("public", [""])[0] == "1"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Accel-Buffering", "no")
+                self.send_header("X-Frame-Options", "DENY")
+                self.send_header("Content-Security-Policy", "frame-ancestors 'none'")
+                self.end_headers()
+                self.connection.settimeout(events.STALL)  # a reader that stalls ends its stream; it resumes later
+                if last is None:  # a first connection: from now on
+                    rows = events.read(web.state)
+                    last = rows[-1]["id"] if rows else 0
+                    newer, gap = [], False
+                else:
+                    newer, gap = events.after(web.state, last)
+                try:
+                    self.wfile.write(f"retry: 3000\n\n".encode())
+                    if gap:
+                        self.wfile.write(f"event: gap\ndata: {json.dumps({'after': last})}\n\n".encode())
+                    quiet = time.monotonic()
+                    while not web.closed.is_set():
+                        for ev in newer:
+                            last = ev["id"]
+                            if not public:
+                                self.wfile.write(events.frame(ev))
+                            elif web.public_event(ev):  # as the public page: scrubbed (privacy.scrub)
+                                self.wfile.write(events.frame(privacy.scrub(ev)))
+                                quiet = time.monotonic()
+                        if time.monotonic() - quiet >= events.KEEPALIVE:
+                            self.wfile.write(b": keep-alive\n\n")
+                            quiet = time.monotonic()
+                        self.wfile.flush()
+                        web.closed.wait(events.POLL)
+                        newer, _ = events.after(web.state, last)
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    pass  # the client went away
+                self.close_connection = True
 
             def _login(self) -> None:
                 from . import webauth
@@ -584,9 +699,11 @@ class Web:
                 self.end_headers()
                 self.wfile.write(body)
 
-        server = self.server = ThreadingHTTPServer(("127.0.0.1", self.port), Handler)
+        server = self.server = LoopbackServer(self.port, Handler)  # 127.0.0.1 and ::1
         threading.Thread(target=server.serve_forever, name="web", daemon=True).start()
-        log.info("web workbench on http://127.0.0.1:%d", self.port)
+        log.info("web workbench on http://127.0.0.1:%d%s", self.port, " and http://[::1]:%d" % self.port if server.twin else "")
+        if server.twin_error:
+            (log.warning if "in use" in server.twin_error else log.info)("web workbench: not on %s", server.twin_error)
 
     def _config_path(self) -> Path:
         from . import install
@@ -770,6 +887,12 @@ class Web:
         total = sum(1 for r in d["runs"] if str(r.get("id", "")).split(":")[0] in ("short-story", "long-story", "team"))
         return {**d, "runs": self.starred(runs), "asks": [], "public": True, "total": total}  # a count only: "10 of 388"
 
+    def public_event(self, ev: dict) -> bool:
+        """May the public view see this event? Only one about a story or team the page shows publicly
+        (judged or marked public) and that doesn't leak; never a question or post about nothing."""
+        from . import privacy
+        return bool(ev.get("ref")) and self.private(ev["ref"]) is False and not privacy.leaks(ev)
+
     def public_detail(self, key: str) -> dict | None:
         """/api/run in the public view: a public story or team only, scrubbed, and not when it leaks."""
         from . import privacy
@@ -839,3 +962,18 @@ class Web:
         return {"now": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "workflows": workflows, "sops": SOPS,
                 "runs": runs, "asks": asks, "paused": paused, "running": running,
                 "meter": self.meter(), "pys": bool(pys_path())}
+
+
+def loopback6_notice(state: Path, channels: list, chats: list[str], server, port: int) -> bool:
+    """One notice to the owner when another program first holds [::1]:<port> (the PO, 2026-11-18);
+    a marker in state keeps it to once until the buddy has ::1 again. True when it was posted now."""
+    from .channel import post_all
+    mark = state / "loopback6-taken"
+    if not getattr(server, "twin_taken", False):
+        mark.unlink(missing_ok=True)
+        return False
+    if mark.exists():
+        return False
+    post_all(channels, chats, t("web.loopback6_taken", port=port), title="buddy")
+    mark.write_text(time.strftime("%Y-%m-%dT%H:%M:%S%z") + "\n")
+    return True

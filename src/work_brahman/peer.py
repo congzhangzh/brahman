@@ -107,7 +107,7 @@ def verify(key: bytes, headers, body: bytes, now: float, seen: dict) -> str:
         return "bad sender name"
     if not when.isdigit() or abs(now - int(when)) > SKEW:
         return "time too far off (clocks more than 5 minutes apart?)"
-    if not hmac.compare_digest(sign(key, sender, int(when), body), sig):
+    if not hmac.compare_digest(sign(key, sender, int(when), body).encode(), sig.encode()):  # bytes: a non-ASCII header is a bad signature, not a TypeError
         return "bad signature (not the same secret?)"
     for s, t in list(seen.items()):
         if now - t > 2 * SKEW:
@@ -536,7 +536,7 @@ def ping(url: str, sender: str, key: bytes, timeout: float = 5.0) -> dict:
         name, their_time = str(info["name"]), int(info["time"])
     except (ValueError, KeyError, TypeError):
         return {"ok": False, "why": "not a buddy peer (its answer is not ours)", "ms": ms}
-    if not hmac.compare_digest(sign(key, name, their_time, sig.encode() + data), theirs):
+    if not hmac.compare_digest(sign(key, name, their_time, sig.encode() + data).encode(), theirs.encode()):
         return {"ok": False, "why": "its answer is not signed with our secret", "name": name, "ms": ms}
     skew = their_time - int(t0 + (time.time() - t0) / 2)
     why = f"clocks {abs(skew)} s apart (over {SKEW} s: sends will be refused)" if abs(skew) > SKEW else ""

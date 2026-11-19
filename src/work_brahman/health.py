@@ -6,17 +6,24 @@ The answer is 200 when every part works and 503 when one doesn't, so `curl -f` a
   cleared when it returns or raises);
 - the scheduler's thread is alive, when there are jobs or duties to schedule (none: null).
 
-Without the web token (BUDDY_WEB_TOKEN set, none given) the body is {"ok": …} only: whether it
-works, nothing about which channels or which version. With the token, or with no token set,
+`instance` is a random id made when the process starts (128 bits, hex), and nothing else: a client
+that reaches the buddy on both loopbacks (127.0.0.1 and [::1], web.LoopbackServer) compares it to
+know both are this process, not another program on one of them (the PO, 2026-11-18; the shell's
+Local mode). Without the web token (BUDDY_WEB_TOKEN set, none given) the body is {"ok", "instance"}
+only: whether it works, nothing about which channels or which version. With the token, or with no token set,
 the details too. Only names and numbers: no chat ids, no paths, no hosts.
 """
 
 from __future__ import annotations
 
+import secrets
 import threading
 import time
 from functools import lru_cache
 from pathlib import Path
+
+
+INSTANCE = secrets.token_hex(16)  # new at each start of the process
 
 
 @lru_cache(maxsize=1)
@@ -35,5 +42,5 @@ def report(state: Path, bot, scheduler, started: float, now: float | None = None
     if scheduler is not None and getattr(scheduler, "tasks", None):
         sched = any(t.name == "scheduler" and t.is_alive() for t in threading.enumerate())
     ok = age is not None and age < alive.GAP and all(channels.values()) and sched is not False
-    return {"ok": ok, "version": changes.version(), "commit": _commit(), "up_s": round(now - started),
+    return {"ok": ok, "instance": INSTANCE, "version": changes.version(), "commit": _commit(), "up_s": round(now - started),
             "beat_age_s": age, "channels": channels, "scheduler": sched}

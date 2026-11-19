@@ -89,8 +89,8 @@ and Feishu (China) works, or all three at once: `buddy init` asks for each, and 
 below says how to create a Lark or Feishu app. With both, the Lark app's ids read
 `lark:oc_…` / `lark:ou_…`, so `buddy allow lark:ou_… --chat lark:oc_…` (the bot's reply says it).
 
-**The workbench from another computer.** The page listens on `127.0.0.1:8787` only (`[web]
-port`), so reach it through ssh. On the other computer:
+**The workbench from another computer.** The page listens on the loopbacks only, `127.0.0.1:8787`
+and `[::1]:8787` (`[web] port`; both, since `localhost` may mean either), so reach it through ssh. On the other computer:
 
 ```bash
 ssh -N -L 8787:127.0.0.1:8787 you@server      # then open http://localhost:8787/
@@ -119,7 +119,32 @@ story), `#session=3` (a long story: one Claude Code or Codex session), `#team=<k
 Picking a tile writes the link into the address bar; with a web token set, the login page keeps
 it. `GET /api/health` answers 200 while the buddy works (its heartbeat is fresh, every chat
 channel still listens, the scheduler runs) and 503 when a part fails, so `curl -fs
-http://localhost:8787/api/health` alone tells; without the token it says only `{"ok": …}`.
+http://localhost:8787/api/health` alone tells; without the token it says only `{"ok": …}` and
+`instance`, a random id made at each start, so a client can check that `127.0.0.1` and `[::1]`
+reach the same buddy. If another program already holds `[::1]` on the port, the buddy still runs
+on `127.0.0.1`, health adds `"warn": "loopback6_taken"` (still `ok`), `buddy doctor` names the port,
+and your chats get one notice.
+
+**The event stream.** `GET /api/events` is a Server-Sent Events stream of the events web push
+would send, for an app that has no web push of its own (the same choice of which card, question or
+post notifies). It has its own switch, `[notify] events`, independent of `[notify] webpush`:
+`off` (the default) writes nothing, `ends` a story's start and end, `all` every change. Each event is one `data:` line of JSON, with `id`, `kind` (`story`, `team`, `ask` or `post`),
+`title`, `body`, `link` (relative: `/#story=12`, `/#session=3`, `/#team=<kit>`), `tag`, `ref` (the story or team the privacy rules judge) and `at`:
+
+```
+id: 1795015748426
+data: {"id": 1795015748426, "kind": "story", "title": "✅ short story #12 Release", "body": "3/3 ▓▓▓", "link": "/#story=12", "tag": "story-12", "ref": "short-story:12", "at": "2026-11-18T10:02:03+0000"}
+```
+
+The browser's push carries the same `id`, so a client that gets both shows one. Send
+`Last-Event-ID` (or `?last=<id>`) after a reconnect to get what you missed from the last 200 events
+(`event: gap` when one you missed is no longer there); a first connection gets new events only. A
+`: keep-alive` comment comes every 15 seconds; a reader that stops reading for a minute is
+disconnected and resumes when it comes back. The public view, or `?public=1`, gets only the
+events of stories and teams the public page shows. It needs the page's login; a native client can
+use a device token instead, which reads this stream and nothing else: `buddy token add <name>`
+prints it once (only its hash is kept), then send it as `Authorization: Bearer <token>`;
+`buddy token list` and `buddy token revoke <name>`.
 The page is never framed by another one (`X-Frame-Options: DENY`): open it in a tab or a
 window of its own.
 

@@ -513,6 +513,11 @@ def main() -> int:
     t.add_argument("--name", default="buddy", help="the service's name, for the restart hint")
     t = sub.add_parser("push", help="web push: test sends one notification to every subscribed browser")
     t.add_argument("action", choices=["test"])
+    t = sub.add_parser("token", help="device tokens: a native client reads GET /api/events (the event stream) "
+                                     "and nothing else; stored hashed, listed and revoked by name")
+    t.add_argument("action", choices=["add", "list", "revoke"])
+    t.add_argument("name", nargs="?", default="", help="the device's name (add, revoke)")
+    t.add_argument("--scope", default="events", choices=["events"], help="what it may read (events only)")
     sub.add_parser("tui", help="doctor, config, peers and the peer log in one terminal screen "
                               "(the workbench's Setup tab is the same)")
     t = sub.add_parser("config", help="a menu to change the setup: language, chats, tokens, pairing, port")
@@ -710,6 +715,34 @@ def main() -> int:
         r = webpush.send(st, "brahman · push test", "If you see this, web push works.", "http://127.0.0.1:8787/")
         print(f"sent to {r['sent']} browser(s); failed {r['failed']}; dropped {r['dropped']} (gone)")
         return 0 if r["failed"] == 0 and r["sent"] else 1
+    if args.cmd == "token":  # device tokens for the event stream (events.py): no channel
+        from . import events
+        st = Path(os.environ.get("XDG_STATE_HOME", "~/.local/state")).expanduser() / "work_brahman"
+        if args.action == "list":
+            rows = events.tokens(st)
+            for r in rows:
+                print(f"{r['name']}\t{r['scope']}\tadded {r.get('added', '')}")
+            if not rows:
+                print("no device token: `buddy token add <name> --scope events`")
+            return 0
+        if not args.name:
+            print(f"buddy token {args.action} <name>", file=sys.stderr)
+            return 2
+        if args.action == "revoke":
+            if events.revoke_token(st, args.name):
+                print(f"revoked {args.name}")
+                return 0
+            print(f"no token named {args.name!r}", file=sys.stderr)
+            return 1
+        try:
+            tok = events.add_token(st, args.name, args.scope)
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 2
+        print(tok)
+        print(f"device token {args.name!r} (scope {args.scope}): shown once, only its hash is kept. Send it as "
+              f"Authorization: Bearer to GET /api/events.", file=sys.stderr)
+        return 0
     if args.cmd == "tui":  # setting up, in one screen: no channel, no buddy state
         from . import buddy_tui
         return buddy_tui.run(install.config_path(args.config))
@@ -736,12 +769,19 @@ def main() -> int:
                   file=sys.stderr)
             return 3
         _SERVE_LOCK.append(held)  # held until this process ends
+        if portable.WINDOWS:  # its log is the cmd.exe window there: a turn's traceback scrolled away
+            from logging.handlers import RotatingFileHandler
+            h = RotatingFileHandler(state / "buddy.log", maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+            h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+            logging.getLogger().addHandler(h)  # beside the window: a "buddy 出错" in chat has its traceback here
     # web push (webpush.py): a pseudo-chat beside the owner's chats, always: [notify] webpush is
     # followed live (notify.watch), off by default, so turning it on needs no restart
-    from . import notify, webpush
+    # the event stream (events.py): its own pseudo-chat and [notify] events, before web push's, so the
+    # browsers' push of an event carries the stream's id
+    from . import events, notify, webpush
     notify.watch(Path(args.config))
     push_on = True
-    linked = Linked(list(cfg.get("me", {}).get("chats", [])) + [webpush.CHAT])
+    linked = Linked(list(cfg.get("me", {}).get("chats", [])) + [events.CHAT, webpush.CHAT])  # this order (test_events)
     home = linked.chats[0] if linked.chats else ""  # where a job or duty without chat_id posts
     duties = {name: DUTIES[name]({"chat_id": home} | d, state)
               for name, d in cfg.get("duties", {}).items() if name in DUTIES}
@@ -873,6 +913,7 @@ def main() -> int:
     if push_on and channels:  # web push to the owner's subscribed browsers ([notify] webpush live, off by
         # default); only beside a real chat channel: a process with no chat token (a session behind the
         # gate) must stay with none, so its cards are left undrawn for buddy serve, which pushes too
+        channels.append(events.channel(cfg, state))
         channels.append(webpush.channel(cfg, state))
     if not channels and args.cmd == "short" and os.environ.get("BUDDY_GATE"):
         # Behind the gate (a session in its sandbox): no chat tokens here, on purpose. The story
@@ -928,6 +969,8 @@ def main() -> int:
         teams.start_looker(state, channels, team_opts)  # team cards on a change; the RM woken on a reply
         long_live.start_pump(state, channels, long)  # the buddy's live sessions: their events, their hand-overs
         families["long-story"].connect(channels, long, linked, workspace)  # /newlong
+        from . import bot as _bot
+        _bot.NAME = str((cfg.get("buddy") or {}).get("name") or "")  # which buddy answers, in error replies
         bot = Bot(channels, engine, Sessions(state / "sessions.json"), workspace, allowed, commands,
                   state, linked, scheduler)
         bot.long_engines = long
@@ -948,8 +991,14 @@ def main() -> int:
         adopted = procs.adopt(bot.adopted)  # what the last instance left running: delivered when it ends
         if adopted:
             log.info("adopted %d runs from the last instance: %s", len(adopted), ", ".join(adopted))
-        if port:  # the workbench, on 127.0.0.1 only
-            Web(int(port), state, bot, scheduler, cfg, home, chat, families, Path(args.config)).start()
+        if port:  # the workbench, on the loopbacks only (127.0.0.1 and ::1)
+            from .web import loopback6_notice
+            w = Web(int(port), state, bot, scheduler, cfg, home, chat, families, Path(args.config))
+            w.start()
+            try:  # another program on [::1]:<port>: say it once
+                loopback6_notice(state, channels, list(linked.chats), w.server, int(port))
+            except Exception:  # noqa: BLE001 - a notice never stops the buddy
+                log.exception("the [::1] notice failed")
         if "bitable" in cfg and os.environ.get("FEISHU_APP_ID"):  # the Lark Base workbench
             from .bitable import Bitable
             Bitable(os.environ["FEISHU_APP_ID"], os.environ["FEISHU_APP_SECRET"],
@@ -1099,8 +1148,10 @@ def run_duty(duties: dict, name: str, channels: list, state: Path, linked: Linke
             run.finish("failed", error=str(e)[:300], output=tail(str(e)))
         run.step("act", act=act, said=changes[:200])
     else:
+        if hasattr(d, "channels"):  # a duty that edits cards (stale-stories) gets the chat channels
+            d.channels = channels
         changes, _ = d.tick()
-        run.step("check", changes=changes.count("\n- ") + changes.startswith("- "))
+        run.step("check", changes=changes.count("\n- ") + changes.startswith("- "), **getattr(d, "last", {}))
     for markdown, title, options, then in getattr(d, "offers", []):
         same = asks.still_open(state, title)
         if same:  # asked before and not answered yet: that card stands, no second one

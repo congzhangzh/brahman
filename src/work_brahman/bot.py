@@ -3,6 +3,8 @@
 import json
 import logging
 import os
+import secrets
+import socket
 import threading
 import time
 from collections import OrderedDict
@@ -14,6 +16,40 @@ from .channel import Channel, Incoming, Linked, post_all
 from .engine import Codex, Engine
 from .runs import Run, note_step, tail
 from .text import app, join, t, task, tn, workflow
+
+NAME = ""  # [buddy] name (cli sets it): which buddy answered, when two share a bot (the PO, 2026-11-19)
+
+
+def who(public: bool = False, state: Path | None = None) -> str:
+    """"<name> · <version>", for an error or not-paired reply: two buddies on one bot (Feishu gives
+    each message to one of them) tell themselves apart. The name is [buddy] name, else this machine's
+    short hostname. public (a reply to someone not paired, who may be anyone) shows neither: a random
+    id made once and kept in the state folder (buddy_id), so nobody can guess it from a host name
+    (review, 2026-11-19), and the same across restarts."""
+    from . import changes
+    name = f"id {buddy_id(state)}" if public else (NAME or socket.gethostname().split(".")[0])
+    return f"{name} · {changes.version()}"
+
+
+def buddy_id(state: Path | None) -> str:
+    """This buddy's random public id (6 hex), made once in state/buddy-id (chmod 600)."""
+    if state is None:
+        return "?"
+    p = Path(state) / "buddy-id"
+    try:
+        got = p.read_text().strip()
+        if len(got) == 6 and all(c in "0123456789abcdef" for c in got):
+            return got
+    except OSError:
+        pass
+    got = secrets.token_hex(3)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(got + "\n")
+        p.chmod(0o600)
+    except OSError:
+        pass
+    return got
 
 log = logging.getLogger("buddy")
 
@@ -107,7 +143,7 @@ class Bot:
             # 2026-11-12): tell the sender how to pair. Someone is: a stranger gets silence.
             if not pings.paired_here(self.allowed, msg.sender):
                 self.pool.submit(ch.reply, msg,
-                                 t("bot.not_paired", sender=msg.sender,
+                                 t("bot.not_paired", sender=msg.sender, who=who(public=True, state=self.state),
                                    chat="" if msg.chat == msg.sender else f" --chat {msg.chat}"))
             return
         # One line per message, never its text: after an outage the journal shows what came in (alive.py)
@@ -257,14 +293,14 @@ class Bot:
             self._mirror(ch, msg, text, r.text, topic, failed=not r.ok, note=note)
         except Exception as e:
             log.exception("turn failed")
-            ch.reply(msg, t("bot.error", e=e))
+            ch.reply(msg, t("bot.error", e=e, who=who()))
 
     def _safe(self, fn, ch: Channel, msg: Incoming) -> None:
         try:
             fn(ch, msg)
         except Exception as e:
             log.exception("%s failed", fn.__name__)
-            ch.reply(msg, t("bot.error", e=e))
+            ch.reply(msg, t("bot.error", e=e, who=who()))
 
     def _press(self, ch: Channel, msg: Incoming) -> None:
         """A button: ■ Stop, ▶ Resume, or an answer to an ask."""

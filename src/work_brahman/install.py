@@ -405,7 +405,8 @@ def codex_server() -> tuple:
     waits for the session's own `check`, silently. So doctor says how it is."""
     from . import codexd
     try:
-        p = subprocess.run(["codex", "app-server", "daemon", "version"], capture_output=True, text=True, timeout=15)
+        from . import portable
+        p = subprocess.run(portable.argv(["codex", "app-server", "daemon", "version"]), capture_output=True, text=True, timeout=15)
         v = json.loads(p.stdout or "{}")
     except (OSError, subprocess.TimeoutExpired, ValueError):
         v = {}
@@ -598,6 +599,25 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
             f"web push: notify = {wp}, {len(browsers)} browser(s) subscribed · {used.get('webpush', 0)} pushes this month"
             + (" (off: nothing is sent)" if wp == "off" else ""),
             "" if browsers or wp == "off" else "🔔 in the workbench subscribes this browser (buddy push test sends one)")
+    port = (cfg.get("web") or {}).get("port")  # both loopbacks (web.LoopbackServer): one process on each?
+    if port:
+        v4, v6 = loopback_health(int(port))
+        if v4 is not None and v6 != "no ipv6":
+            if v4.get("warn") == "loopback6_taken" or v6 == "other" or (
+                    isinstance(v6, dict) and v6.get("instance") != v4.get("instance")):
+                row(False, f"another program holds [::1]:{port}: http://localhost:{port} may reach it, not the buddy",
+                    f"see who: ss -ltnp 'sport = :{port}'; until it is gone, open http://127.0.0.1:{port}")
+            elif isinstance(v6, dict) and "instance" in v4:  # no warn: the buddy bound [::1] itself, so no
+                # other program can hold it; the instance match is a hint only (any program can copy it)
+                row(True, f"workbench on 127.0.0.1:{port} and [::1]:{port}: the buddy holds both itself", "")
+            else:
+                row(None, f"nothing on [::1]:{port}: the running buddy binds 127.0.0.1 only",
+                    "a restart brings both loopbacks (systemctl --user restart buddy)")
+    from . import events  # the event stream for other apps (events.py): off by default
+    ev, devices = events.mode(cfg), events.tokens(state)
+    if ev != "off" or devices:
+        row(True, f"event stream (GET /api/events): notify = {ev}, {len(devices)} device token(s)"
+            + (" (off: nothing is written)" if ev == "off" else ""), "")
     for r in wrote[:5]:  # wrote, refused, not paired since
         row(None, f"wrote but not paired: {r['sender']} on {r['channel']} ({r['times']}×, last {r['last']})",
             f"if that is you: {r['allow']}, then restart the buddy")
@@ -820,3 +840,35 @@ def service(args) -> int:
         print(f"start it: systemctl --user enable --now {unit.name}")
     print('keep it running after you log out: loginctl enable-linger "$USER"')
     return 0
+
+
+def loopback_health(port: int, timeout: float = 2.0):
+    """GET /api/health on 127.0.0.1 and on [::1]: (v4, v6). v4: its JSON or None (not running);
+    v6: its JSON, "no ipv6", "refused" (nothing there), or "other" (an answer that isn't the buddy's)."""
+    import json as _json
+    import socket as _socket
+    import urllib.error
+    import urllib.request
+
+    def get(host):
+        req = urllib.request.Request(f"http://{host}:{port}/api/health")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return _json.loads(r.read())
+        except urllib.error.HTTPError as e:  # 503: it works badly, still an answer
+            try:
+                return _json.loads(e.read())
+            except ValueError:
+                return "other"
+        except ValueError:
+            return "other"
+        except OSError:
+            return None
+    v4 = get("127.0.0.1")
+    try:  # a machine without ::1: localhost is 127.0.0.1 only, nothing to check
+        with _socket.socket(_socket.AF_INET6) as probe:
+            probe.bind(("::1", 0))
+    except OSError:
+        return v4 if isinstance(v4, dict) else None, "no ipv6"
+    v6 = get("[::1]")
+    return v4 if isinstance(v4, dict) else None, v6 if v6 is not None else "refused"

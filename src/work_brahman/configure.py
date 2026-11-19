@@ -34,7 +34,7 @@ FIELDS = ["language", "workspace", "telegram", "lark", "feishu", "paired", "port
 
 # What [notify] means when it says nothing: such a value is not written into buddy.toml.
 DEFAULTS = {("notify", "feishu"): '"off"', ("notify", "lark"): '"off"',
-            ("notify", "webpush"): '"off"', ("notify", "telegram"): '"off"', ("notify", "web"): '"off"',
+            ("notify", "webpush"): '"off"', ("notify", "events"): '"off"', ("notify", "telegram"): '"off"', ("notify", "web"): '"off"',
             ("web", "hosts"): "[]"}
 
 
@@ -61,6 +61,7 @@ def load(path: Path) -> dict:
             "notify_feishu": str(cfg.get("notify", {}).get("feishu", "off")),
             "notify_lark": str(cfg.get("notify", {}).get("lark", "off")),
             "notify_webpush": str(cfg.get("notify", {}).get("webpush", "off")),  # web push (webpush.py)
+            "notify_events": str(cfg.get("notify", {}).get("events", "off")),  # the event stream (events.py)
             "notify_telegram": str(cfg.get("notify", {}).get("telegram", "off")),  # every app, off by default
             "notify_web": str(cfg.get("notify", {}).get("web", "off")),
             # who may use the workbench (webauth.py): a token in .env, extra hosts in [web]
@@ -150,7 +151,7 @@ def save(path: Path, s: dict, before: dict) -> list[str]:
                ("me", "chats", "[" + ", ".join(_q(c) for c in s["chats"]) + "]")]
     if "web_hosts" in s:
         changes.append(("web", "hosts", "[" + ", ".join(_q(h) for h in s["web_hosts"]) + "]"))
-    changes += [("notify", app, _q(s[f"notify_{app}"])) for app in ("feishu", "lark", "telegram", "web", "webpush")
+    changes += [("notify", app, _q(s[f"notify_{app}"])) for app in ("feishu", "lark", "telegram", "web", "webpush", "events")
                 if f"notify_{app}" in s]
     old = tomllib.loads(toml)
     for section, key, literal in changes:

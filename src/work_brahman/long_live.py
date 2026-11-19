@@ -11,8 +11,9 @@ One writer at a time. Who holds a session (holder()):
 
 The live unit is `buddy-live-<n>` in buddy-long.slice (procs.py's umbrella, so a restart of
 the buddy kills none and ■ STOP stops it), running longexec.py on the folder
-<state>/long_stories/live/<n>/: `in` a FIFO the launcher holds open, `out` the event stream,
-`rc` when it ended. `buddy serve` reads `out` from the offset kept in the story (pump), so a
+<state>/long_stories/live/<n>/: `in` a FIFO the launcher holds open (Windows, which has no
+FIFOs: a plain file the launcher tails from its start, `ready` written once it reads; see put()),
+`out` the event stream, `rc` when it ended. `buddy serve` reads `out` from the offset kept in the story (pump), so a
 restart loses no event; a permission the session needs becomes ✅ Allow / ⛔ Deny, and the
 press goes back as a control_response line (answer).
 """
@@ -23,6 +24,7 @@ import logging
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -73,7 +75,7 @@ def holders(session_id: str) -> list[int]:
     """The pids of live processes that have this session open, as Claude Code itself lists
     them (`claude agents --json`: interactive, background and -p sessions alike)."""
     try:
-        p = subprocess.run(["claude", "agents", "--json"], capture_output=True, text=True, timeout=20)
+        p = subprocess.run(portable.argv(["claude", "agents", "--json"]), capture_output=True, text=True, timeout=20)
         rows = json.loads(p.stdout or "[]")
     except (OSError, subprocess.TimeoutExpired, ValueError):
         return []
@@ -111,11 +113,14 @@ def start(state: Path, channels: list, number: int, engine, prompt: str = "", *,
     d = folder(state, number)
     shutil.rmtree(d, ignore_errors=True)  # the last run's stream: read to its end already (drain)
     d.mkdir(parents=True)
-    os.mkfifo(d / "in", 0o600)
+    if hasattr(os, "mkfifo"):
+        os.mkfifo(d / "in", 0o600)
+    else:  # Windows: a file the launcher tails (os.mkfifo is POSIX only: "buddy long new" failed there)
+        (d / "in").touch()
     (d / "out").touch()
     fd = os.open(d / "spec.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)  # the env may carry tokens
     with os.fdopen(fd, "w") as f:
-        json.dump({"cmd": cmd, "cwd": story["cwd"], "env": env}, f)
+        json.dump({"cmd": portable.argv(cmd), "cwd": story["cwd"], "env": env}, f)  # Windows: claude.cmd's exe
     try:
         pid, unit = _launch(d, number)
     except OSError as e:
@@ -162,17 +167,21 @@ def _launch(d: Path, number: int) -> tuple[int, str]:
                 return pid, unit
             time.sleep(0.1)
         raise OSError(f"{unit} has no process")
+    group = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if portable.WINDOWS  # no Ctrl-C from the buddy's console
+             else {"start_new_session": True})
     with open(d / "out", "ab") as out, open(d / "err", "ab") as err:
-        p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=out, stderr=err, start_new_session=True)
+        p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=out, stderr=err, **group)
     return p.pid, ""
 
 
 def put(state: Path, number: int, obj: dict) -> bool:
     """One JSON line into the live session's FIFO; False when no launcher reads it."""
-    import fcntl  # POSIX only, like the FIFO itself
     path = folder(state, number) / "in"
     data = (json.dumps(obj, ensure_ascii=False) + "\n").encode()
     end = time.monotonic() + READER_WAIT
+    if path.exists() and not stat.S_ISFIFO(path.stat().st_mode):
+        return _put_file(path, data, end)
+    import fcntl  # POSIX only, like the FIFO itself
     with _lock(number):  # one line at a time: a long one must not interleave with another
         while True:
             try:
@@ -191,6 +200,34 @@ def put(state: Path, number: int, obj: dict) -> bool:
             return False
         finally:
             os.close(fd)
+    return True
+
+
+def _put_file(path: Path, data: bytes, end: float) -> bool:
+    """Windows: append the line to `in`, which the launcher tails. The same contract as the FIFO:
+    False when no launcher reads it, i.e. none said `ready` within READER_WAIT, or it ended (rc),
+    or its process is gone. One whole line per write, under a file lock, so two writers (serve and
+    a buddy-long command) never interleave. The file grows by each message for as long as the
+    session lives (what was said to it, a few KB in a day's use) and is removed when it ends
+    (_forget_inbox). It sits in the state folder, which the user profile's ACL keeps to the owner
+    (SYSTEM and Administrators aside, as for any file in the profile)."""
+    d = path.parent
+    while not (d / "ready").exists():
+        if (d / "rc").exists() or time.monotonic() > end:
+            return False
+        time.sleep(0.2)
+    try:
+        pid = int((d / "ready").read_text().strip() or 0)
+    except (OSError, ValueError):
+        pid = 0
+    if (d / "rc").exists() or not (pid and portable.alive(pid)):
+        return False
+    try:
+        with portable.locked(d / ".in.lock"), open(path, "ab") as f:
+            f.write(data)
+            f.flush()
+    except OSError:
+        return False
     return True
 
 
@@ -316,9 +353,28 @@ def _request(state: Path, channels: list, number: int, e: dict) -> None:
                 then={"allow": ["long", "perm", number, req, "allow"], "deny": ["long", "perm", number, req, "deny"]})
 
 
+def _forget_inbox(d: Path) -> None:
+    """Windows: the messages sent to a live session were lines in a plain file (_put_file). Once its
+    launcher is gone (rc written, or stopped) nothing reads them: removed, with the reader's marks.
+    A FIFO (POSIX) holds nothing and stays for the next start to clear."""
+    p = d / "in"
+    try:
+        if p.exists() and not stat.S_ISFIFO(p.stat().st_mode):
+            p.unlink()
+    except OSError:
+        pass
+    for name in ("ready", "ready.tmp", ".in.lock"):
+        try:
+            (d / name).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def _ended(state: Path, channels: list, number: int) -> None:
     story = L.load(state, number)
     live = story.get("live") or {}
+    if live.get("dir"):
+        _forget_inbox(Path(live["dir"]))  # the launcher is gone, so the file is closed (Windows can delete it)
     try:
         rc = (Path(live.get("dir", "")) / "rc").read_text().strip()
     except OSError:

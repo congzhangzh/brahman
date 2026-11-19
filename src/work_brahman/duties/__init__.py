@@ -6,6 +6,7 @@ duty's schedule); its chat commands are added to the bot.
 """
 
 from .code_review import CodeReview
+from .stale_stories import StaleStories
 from .threads import Threads
 
-DUTIES = {d.name: d for d in (CodeReview, Threads)}
+DUTIES = {d.name: d for d in (CodeReview, Threads, StaleStories)}

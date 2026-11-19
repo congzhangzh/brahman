@@ -29,9 +29,10 @@ FIELDS = [  # key, label, kind
     ("notify_feishu", "Feishu on its own", "notify"), ("notify_lark", "Lark on its own", "notify"),
     ("notify_telegram", "Telegram on its own", "notify"), ("notify_web", "the web chat on its own", "notify"),
     ("notify_webpush", "web push to your browsers (with the tab closed)", "notify"),
+    ("notify_events", "the event stream for other apps (GET /api/events)", "notify"),
     ("web_token", "web token (LAN access through a forward; empty: off)", "secret"),
     ("web_hosts", "web: extra addresses allowed (only with the token)", "list")]
-DEFAULT_OF = {"notify_webpush": "off"}
+DEFAULT_OF = {"notify_webpush": "off", "notify_events": "off"}
 NOTIFY = ("off", "ends", "all")  # notify.MODES: what Feishu/Lark get without being asked
 RESTART = "the buddy reads this when it starts: restart it to use it (systemctl --user restart buddy)"
 NOW = "applies now: the running buddy follows [notify], the web token and [web] hosts without a restart"

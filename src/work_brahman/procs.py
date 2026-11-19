@@ -247,7 +247,7 @@ def clean(keep_days: float = 7) -> int:
 def _run_group(cmd, *, input=None, timeout=None, **kw) -> subprocess.CompletedProcess:
     group = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
              else {"start_new_session": True})
-    p = subprocess.Popen(cmd, stdin=subprocess.PIPE if input is not None else None,
+    p = subprocess.Popen(portable.argv(cmd), stdin=subprocess.PIPE if input is not None else None,
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **group, **kw)
     with _lock:
         _live.add(p)

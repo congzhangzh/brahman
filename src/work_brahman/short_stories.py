@@ -575,14 +575,23 @@ def note(state: Path, channels: list[Channel], number: int, text: str) -> dict |
 
 
 def finish(state: Path, channels: list[Channel], number: int, *, failed: bool = False,
-           note: str = "") -> dict | None:
+           note: str = "", only_if=None) -> dict | None:
+    """End the story. only_if(story): checked inside the story's lock; False leaves it as it is
+    and returns None (a sweeper's judgement must still hold when it acts: stale-stories)."""
+    skipped = []
+
     def end(s):
+        if only_if is not None and not only_if(s):
+            skipped.append(1)
+            return False
         running = [c for c in children(s) if (x := load(state, c)) and x["status"] == "running"]
         if running and not failed:  # a parent waits for its children; --failed stops them
             raise ValueError(t("short.child.running", n=s["id"], children=join([f"#{c}" for c in running])))
         s["status"], s["ended"] = ("failed" if failed else "done"), _now()
         _event(s, _noted(t("short.ev.failed" if failed else "short.ev.done"), note))
     s = _change(state, channels, number, end)
+    if skipped:
+        return None
     for c in children(s) if s and failed else []:
         ask_stop(state, channels, c, where="parent", who=f"#{number}")
     return s
@@ -1058,7 +1067,8 @@ def _questions(story: dict) -> list[str]:
 def _show(channels: list[Channel], chats: list[str], story: dict) -> None:
     """Post the card where it is not yet, change it where it is. Called under the story's
     lock, so two sessions marking at once cannot leave the older state on the card."""
-    for chat in chats:
+    from .events import with_stream  # a story from before the event stream reaches it too
+    for chat in with_stream(chats):
         ch = next((c for c in channels if c.owns(chat)), None)
         if ch is None or not hasattr(ch, "track"):
             continue

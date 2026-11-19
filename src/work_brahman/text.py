@@ -222,9 +222,9 @@ Anything else goes to Claude Code, in the same session as your last message in t
                          "💡 这条消息进了主对话。要继续 {story}，请在它的话题里回复。"),
     "bot.ping_old": ("🏓 That ping card is an old one: send a new ping from the Setup tab.",
                      "🏓 这是旧的 ping 卡片：请从设置页重新发送 ping。"),
-    "bot.not_paired": ("Not paired. On the buddy's machine run this, then restart the buddy:\n"
+    "bot.not_paired": ("Not paired ({who}). On the buddy's machine run this, then restart the buddy:\n"
                        "buddy allow {sender}{chat}",
-                       "尚未配对。在运行 buddy 的机器上执行下面这行，然后重启 buddy：\n"
+                       "尚未配对（{who}）。在运行 buddy 的机器上执行下面这行，然后重启 buddy：\n"
                        "buddy allow {sender}{chat}"),
     "bot.text_only": ("Only text messages for now.", "目前只支持文字消息。"),
     "alive.was_down": ("⚠️ I was down from {since} to {until} ({took}). If you sent me something then "
@@ -238,7 +238,7 @@ Anything else goes to Claude Code, in the same session as your last message in t
     "bot.working": ("⏳ Working…", "⏳ 处理中…"),
     "bot.queued": ("⏳ Queued behind the running turn.", "⏳ 排在正在进行的一轮之后。"),
     "bot.new": ("New session: the next message starts fresh.", "新会话：下一条消息将重新开始。"),
-    "bot.error": ("⚠️ buddy error: {e}", "⚠️ buddy 出错：{e}"),
+    "bot.error": ("⚠️ buddy error ({who}): {e}", "⚠️ buddy 出错（{who}）：{e}"),
     "bot.then": ("{kind} **{name}**: {said}", "{kind} **{name}**：{said}"),
     "bot.answered_on": ("answered on {where}", "在{where}上回答"),
     "bot.mirror": ("↔ from {where}", "↔ 来自{where}"),
@@ -712,6 +712,10 @@ Anything else goes to Claude Code, in the same session as your last message in t
     # Duty: threads
     "th.help": ("the GitHub threads I'm in: latest first, then the ones I talk in most",
                 "我参与的 GitHub 讨论：最新的在前，然后是我发言最多的"),
+    "stale.closed": ("🧹 Closed {n} stories you asked to stop: quiet for {h} h, their session gone "
+                     "(failed, \"stopped by the owner; the session was gone\").",
+                     "🧹 关闭了 {n} 个你要求停止的故事：已静默 {h} 小时，会话已不在"
+                     "（记为失败，“stopped by the owner; the session was gone”）。"),
     "th.note": ("/threads shows them all", "/threads 显示全部"),
     "th.first": ("Now following {n} GitHub threads; {k} are your turn.\n\n",
                  "现在跟踪 {n} 个 GitHub 讨论，其中 {k} 个轮到你。\n\n"),
@@ -976,6 +980,11 @@ Anything else goes to Claude Code, in the same session as your last message in t
     "page.setup.f.notify_telegram": ('Telegram on its own', 'Telegram 主动发送'),
     "page.setup.f.notify_web": ('the web chat on its own', '网页聊天主动发送'),
     "page.setup.f.notify_webpush": ('web push to your browsers (the tab closed)', '网页推送到你的浏览器（标签页关闭也能收到）'),
+    "web.loopback6_taken": ("⚠️ Another program holds [::1]:{port}, so http://localhost:{port} may reach it instead of "
+                            "the buddy. Open http://127.0.0.1:{port} until it is gone; `buddy doctor` shows it.",
+                            "⚠️ 另一个程序占用了 [::1]:{port}，http://localhost:{port} 可能连到它而不是 buddy。"
+                            "在它消失之前请用 http://127.0.0.1:{port}；`buddy doctor` 会显示。"),
+    "page.setup.f.notify_events": ('the event stream for other apps', '给其他应用的事件流'),
     "page.bell_title": ('system notifications from this tab', '这个标签页的系统通知'),
     "page.bell_on": ('notifications on: a question, a story ending or failing, while this tab is not in front (click to turn off)', '通知已开：有提问、故事结束或失败时，若此标签页不在前台就提醒（点击关闭）'),
     "page.bell_off": ('notifications off: click, and allow them once', '通知已关：点一下，允许一次即可'),

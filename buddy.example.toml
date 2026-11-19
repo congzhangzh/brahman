@@ -9,6 +9,9 @@ domain = "feishu"       # "feishu" (open.feishu.cn) or "lark" (open.larksuite.co
 # starts: restart to change it. The page also has its own EN / 中文 switch.
 [buddy]
 language = "zh-CN"
+# name = "air"   # which buddy answered, in its error replies to you (default: this machine's short
+                 # name), so two buddies on one bot can be told apart. A "Not paired" reply, which may
+                 # reach anyone, shows neither: a random id of this install (state/buddy-id) instead.
 
 [claude]
 # Headless Claude Code cannot ask for approval: anything not listed here is

@@ -15,9 +15,17 @@ reads the same on both:
   Linux reads /proc/net/tcp(6): the client socket's line names its owner. None elsewhere.
 - parent(pid): (parent pid, program name). Linux reads /proc; macOS has none, so it asks
   ps; Windows: None (long stories follow a terminal there through screen, which it lacks).
+- argv(cmd): the command as the system can start it. POSIX: as it is. Windows: CreateProcess
+  finds only an .exe on PATH, and npm installs claude and codex as .cmd shims, so ["claude", ...]
+  was "file not found" there (2026-11-18, the VM). The shim's own target is used when it names an
+  .exe (`"%dp0%/.../claude.exe" %*`, with backslashes): no cmd.exe in between, which would cut a multi-line
+  argument (--append-system-prompt) at its first newline and read & | < > in it. Else the shim
+  itself (cmd.exe runs it), else the name unchanged.
 """
 
 import os
+import re
+import shutil
 import signal
 import subprocess
 import time
@@ -159,3 +167,35 @@ def kill_tree(p: subprocess.Popen) -> None:
             os.killpg(p.pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
         pass
+
+
+_SHIM_EXE = re.compile(r'"%(?:~?dp0)%\\?([^"%]+\.exe)"', re.I)  # npm's shim: "%dp0%\node_modules\...\x.exe" %*
+
+
+def _which(name: str) -> str:
+    """shutil.which without Windows' current-folder-first search (review, 2026-11-19: a claude.cmd
+    planted in a story's folder would run as the owner): NoDefaultCurrentDirectoryInExePath, which
+    which() honours since Python 3.12 and CreateProcess too; and only an absolute result."""
+    os.environ.setdefault("NoDefaultCurrentDirectoryInExePath", "1")
+    found = shutil.which(name)
+    return found if found and os.path.isabs(found) else ""
+
+
+def argv(cmd: list[str]) -> list[str]:
+    """cmd with its program resolved where the system needs it (Windows; see the module's notes).
+    Never from the current folder (_which)."""
+    if not WINDOWS or not cmd:
+        return list(cmd)
+    found = _which(cmd[0])
+    if not found:
+        return list(cmd)
+    if found.lower().endswith((".cmd", ".bat")):
+        try:
+            m = _SHIM_EXE.search(Path(found).read_text(errors="replace"))
+        except OSError:
+            m = None
+        if m:
+            exe = Path(found).parent.joinpath(*[x for x in re.split(r"[\\/]+", m[1]) if x])
+            if exe.is_file():
+                return [str(exe), *cmd[1:]]
+    return [found, *cmd[1:]]

@@ -194,10 +194,11 @@ def unsubscribe(state: Path, endpoint: str) -> bool:
     return len(left) != len(rows)
 
 
-def send(state: Path, title: str, text: str, link: str = "", tag: str = "", post=None) -> dict:
-    """One event to every subscribed browser: {sent, failed, dropped}. A 404/410 drops it."""
-    payload = json.dumps({"title": title[:200], "body": text[:1500], "link": link, "tag": tag},
-                         ensure_ascii=False).encode()
+def send(state: Path, title: str, text: str, link: str = "", tag: str = "", post=None, id: int | None = None) -> dict:
+    """One event to every subscribed browser: {sent, failed, dropped}. A 404/410 drops it. id: the
+    event stream's (events.py), so a client that gets both can drop the second."""
+    payload = json.dumps({"title": title[:200], "body": text[:1500], "link": link, "tag": tag}
+                         | ({"id": id} if id is not None else {}), ensure_ascii=False).encode()
     post = post or _post
     out = {"sent": 0, "failed": 0, "dropped": 0}
     for s in subs(state):
@@ -234,7 +235,8 @@ class WebPush:
     mirrors = False
 
     def __init__(self, state: Path, web: str = "http://127.0.0.1:8787/", post=None):
-        self.state, self.web, self.post = state, web, post
+        self.state, self.web = state, web
+        self._http = post  # the HTTP sender (tests give one); not self.post, which is the channel's post()
         self.n = 0
 
     def owns(self, chat: str) -> bool:
@@ -244,26 +246,33 @@ class WebPush:
         while True:
             time.sleep(3600)
 
-    def _event(self, title: str, text: str) -> bool:
-        m = re.search(r"#(\d+)", title)
-        link = self.web + (f"#story={m[1]}" if m else "")
-        r = send(self.state, title, re.sub(r"[*_`]", "", text), link, tag=f"story-{m[1]}" if m else "", post=self.post)
+    def _event(self, kind: str, title: str, text: str) -> bool:
+        """What notifies, decided once for both deliveries (here and events.EventStream)."""
+        ref, link, tag = where(kind, title)
+        return self.deliver(kind, title, re.sub(r"[*_`]", "", text), link, tag, ref)
+
+    def deliver(self, kind: str, title: str, body: str, link: str, tag: str, ref: str) -> bool:
+        """To every subscribed browser, with the stream's id for the same event when it carried it."""
+        from . import events
+        r = send(self.state, title, body, self.web + link, tag=tag, post=self._http,
+                 id=events.recent(self.state, kind, title, body))
         return r["failed"] == 0
 
     def track(self, chat, markdown, *, title, handle=None, failed=False, done=False, buttons=()) -> str | None:
-        self._event(title, markdown.split("\n", 1)[0] if not (done or failed) else markdown.splitlines()[-1] if markdown else "")
+        self._event("story" if re.search(r"#\d+", title) else "team", title,
+                    markdown.split("\n", 1)[0] if not (done or failed) else markdown.splitlines()[-1] if markdown else "")
         if handle:
             return handle
         self.n += 1
         return f"webpush-{self.n}"
 
     def ask(self, chat, markdown, *, title, options=(), ask_id="", failed=False, note="", stop=True) -> str | None:
-        self._event("❓ " + title, markdown)
+        self._event("ask", "❓ " + title, markdown)
         self.n += 1
         return f"webpush-{self.n}"
 
     def post(self, chat, markdown, *, title, subtitle="", failed=False, note="", thread="") -> bool:
-        return self._event(("⚠️ " if failed else "") + title, markdown)
+        return self._event("post", ("⚠️ " if failed else "") + title, markdown)
 
     def settle(self, chat, handle, markdown, **kw) -> bool:
         return True
@@ -285,6 +294,22 @@ class WebPush:
 
     def answer(self, msg, handle, markdown, **kw) -> None:
         pass
+
+
+def where(kind: str, title: str) -> tuple[str, str, str]:
+    """(ref, link, tag) of an event: a long story's titles start "[<engine>] #3" (text.py long.label),
+    any other "#12" in the title is short story 12 (its card, or a question or post about it); a team
+    card's title is "👥 <Team> <kit>" in every language (text.py team.title)."""
+    m = re.match(r"(?:[❓⚠️]+\s*)?\[[^\]]+\] #(\d+)\b", title)
+    if m:
+        return f"long-story:{m[1]}", f"#session={m[1]}", f"long-{m[1]}"
+    m = re.search(r"#(\d+)", title)
+    if m:
+        return f"short-story:{m[1]}", f"#story={m[1]}", f"story-{m[1]}"
+    t = re.match(r"👥 \S+ (\S.*)$", title) if kind == "team" else None
+    if t:
+        return f"team:{t[1]}", "#team=" + urllib.parse.quote(t[1], safe=""), f"team-{t[1]}"
+    return "", "", ""
 
 
 def mode(cfg: dict) -> str:
