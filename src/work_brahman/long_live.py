@@ -12,7 +12,7 @@ One writer at a time. Who holds a session (holder()):
 The live unit is `buddy-live-<n>` in buddy-long.slice (procs.py's umbrella, so a restart of
 the buddy kills none and ■ STOP stops it), running longexec.py on the folder
 <state>/long_stories/live/<n>/: `in` a FIFO the launcher holds open (Windows, which has no
-FIFOs: a plain file the launcher tails from its start, `ready` written once it reads; see put()),
+FIFOs: a named pipe the launcher listens on, its address and key in `pipe.json`; see _put_pipe()),
 `out` the event stream, `rc` when it ended. `buddy serve` reads `out` from the offset kept in the story (pump), so a
 restart loses no event; a permission the session needs becomes ✅ Allow / ⛔ Deny, and the
 press goes back as a control_response line (answer).
@@ -23,8 +23,8 @@ import json
 import logging
 import os
 import shutil
+import secrets
 import signal
-import stat
 import subprocess
 import sys
 import threading
@@ -113,14 +113,16 @@ def start(state: Path, channels: list, number: int, engine, prompt: str = "", *,
     d = folder(state, number)
     shutil.rmtree(d, ignore_errors=True)  # the last run's stream: read to its end already (drain)
     d.mkdir(parents=True)
-    if hasattr(os, "mkfifo"):
+    pipe = None
+    if hasattr(os, "mkfifo") and not PIPE:
         os.mkfifo(d / "in", 0o600)
-    else:  # Windows: a file the launcher tails (os.mkfifo is POSIX only: "buddy long new" failed there)
-        (d / "in").touch()
+    else:  # Windows (no FIFOs: "buddy long new" failed there): a named pipe, nothing on disk but its key
+        pipe = _pipe(d, number)
     (d / "out").touch()
     fd = os.open(d / "spec.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)  # the env may carry tokens
     with os.fdopen(fd, "w") as f:
-        json.dump({"cmd": portable.argv(cmd), "cwd": story["cwd"], "env": env}, f)  # Windows: claude.cmd's exe
+        json.dump({"cmd": portable.argv(cmd), "cwd": story["cwd"], "env": env}  # Windows: claude.cmd's exe
+                  | ({"pipe": pipe} if pipe else {}), f)
     try:
         pid, unit = _launch(d, number)
     except OSError as e:
@@ -179,8 +181,10 @@ def put(state: Path, number: int, obj: dict) -> bool:
     path = folder(state, number) / "in"
     data = (json.dumps(obj, ensure_ascii=False) + "\n").encode()
     end = time.monotonic() + READER_WAIT
-    if path.exists() and not stat.S_ISFIFO(path.stat().st_mode):
-        return _put_file(path, data, end)
+    if (path.parent / "pipe.json").exists():
+        return _put_pipe(state, number, data, end)
+    if not hasattr(os, "mkfifo"):  # Windows with no pipe: a session left by 20261118.1's file inbox
+        return False  # nobody reads it any more: the story offers a resume, as for any gone session
     import fcntl  # POSIX only, like the FIFO itself
     with _lock(number):  # one line at a time: a long one must not interleave with another
         while True:
@@ -203,32 +207,69 @@ def put(state: Path, number: int, obj: dict) -> bool:
     return True
 
 
-def _put_file(path: Path, data: bytes, end: float) -> bool:
-    """Windows: append the line to `in`, which the launcher tails. The same contract as the FIFO:
-    False when no launcher reads it, i.e. none said `ready` within READER_WAIT, or it ended (rc),
-    or its process is gone. One whole line per write, under a file lock, so two writers (serve and
-    a buddy-long command) never interleave. The file grows by each message for as long as the
-    session lives (what was said to it, a few KB in a day's use) and is removed when it ends
-    (_forget_inbox). It sits in the state folder, which the user profile's ACL keeps to the owner
-    (SYSTEM and Administrators aside, as for any file in the profile)."""
-    d = path.parent
-    while not (d / "ready").exists():
-        if (d / "rc").exists() or time.monotonic() > end:
-            return False
-        time.sleep(0.2)
+PIPE = False  # True: the named-pipe inbox on POSIX too (tests), over a Unix socket
+PIPE_WAIT = 10.0  # seconds each step of a send waits for the launcher's answer
+
+
+def _pipe(d: Path, number: int) -> dict:
+    """A new inbox for the launcher (Windows): a named pipe with a random name and a random 32-byte
+    key. The launcher listens with multiprocessing.connection and the key answers its HMAC challenge,
+    so a client without it is refused (a pipe's default DACL lets others open it). The key goes in
+    the launcher's spec (read, then deleted) and in pipe.json here (0600, removed at the end): the
+    buddy needs it for every message. Never logged."""
+    if portable.WINDOWS:
+        address, family = rf"\\.\pipe\brahman-long-{number}-{secrets.token_hex(8)}", "AF_PIPE"
+    else:
+        address, family = str(d / "in.sock"), "AF_UNIX"
+    pipe = {"address": address, "family": family, "authkey": secrets.token_hex(32)}
+    fd = os.open(d / "pipe.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(pipe, f)
+    return pipe
+
+
+def _put_pipe(state: Path, number: int, data: bytes, end: float) -> bool:
+    """One message to the launcher's named pipe (Windows), the FIFO's contract: False when no launcher
+    reads, i.e. none listens within READER_WAIT (it just started), or it ended (rc), or its process is
+    gone; one whole message per send. Both sides prove the key (longexec._serve_one), each read with a
+    deadline; True only once the launcher said "ok", so the next message never overtakes this one."""
+    import hashlib
+    import hmac
+    from multiprocessing.connection import Client
+    d = folder(state, number)
     try:
-        pid = int((d / "ready").read_text().strip() or 0)
-    except (OSError, ValueError):
-        pid = 0
-    if (d / "rc").exists() or not (pid and portable.alive(pid)):
+        pipe = json.loads((d / "pipe.json").read_text())
+        key = bytes.fromhex(pipe["authkey"])
+    except (OSError, ValueError, KeyError):
         return False
-    try:
-        with portable.locked(d / ".in.lock"), open(path, "ab") as f:
-            f.write(data)
-            f.flush()
-    except OSError:
-        return False
-    return True
+    proof = lambda who, nonce: hmac.new(key, who + nonce, hashlib.sha256).digest()  # noqa: E731
+    pid = ((L.load(state, number) or {}).get("live") or {}).get("pid")
+    with _lock(number):
+        while True:
+            if (d / "rc").exists() or (pid and not portable.alive(pid)):
+                return False
+            try:
+                c = Client(pipe["address"], family=pipe["family"])
+            except OSError:  # not listening yet
+                if time.monotonic() > end:
+                    return False
+                time.sleep(0.2)
+                continue
+            try:
+                with c:
+                    if not c.poll(PIPE_WAIT):
+                        return False
+                    hello = c.recv_bytes(256)
+                    if not hello.startswith(b"brahman-long-pipe 1") or len(hello) != 19 + 32:
+                        return False
+                    mine = os.urandom(32)
+                    c.send_bytes(proof(b"client", hello[19:]) + mine)
+                    if not c.poll(PIPE_WAIT) or not hmac.compare_digest(c.recv_bytes(256), proof(b"server", mine)):
+                        return False  # not our launcher: it never gets the message
+                    c.send_bytes(data)
+                    return c.poll(PIPE_WAIT) and c.recv_bytes(16) == b"ok"
+            except (EOFError, OSError):
+                return False
 
 
 def send(state: Path, channels: list, number: int, text: str, *, where: str, who: str = "") -> str:
@@ -354,16 +395,9 @@ def _request(state: Path, channels: list, number: int, e: dict) -> None:
 
 
 def _forget_inbox(d: Path) -> None:
-    """Windows: the messages sent to a live session were lines in a plain file (_put_file). Once its
-    launcher is gone (rc written, or stopped) nothing reads them: removed, with the reader's marks.
-    A FIFO (POSIX) holds nothing and stays for the next start to clear."""
-    p = d / "in"
-    try:
-        if p.exists() and not stat.S_ISFIFO(p.stat().st_mode):
-            p.unlink()
-    except OSError:
-        pass
-    for name in ("ready", "ready.tmp", ".in.lock"):
+    """Windows: the named pipe's key (pipe.json). Once its launcher is gone (rc written, or stopped)
+    nobody listens: removed. A FIFO (POSIX) holds nothing and stays for the next start to clear."""
+    for name in ("pipe.json", "in.sock"):
         try:
             (d / name).unlink(missing_ok=True)
         except OSError:

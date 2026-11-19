@@ -5,6 +5,20 @@ once, at the first start of a new version (following `[notify]`).
 
 ## Unreleased
 
+## 20261119.1
+
+- **Windows: a long story's messages never touch the disk**: they go to its live session through a
+  named pipe with a random key made for that story, in place of the file 20261118.2 used. Both ends
+  prove they hold the key, so another program is refused, and a local program that connects and
+  stalls can't hold the story up. A live session still running from 20261118.2 no longer takes
+  messages: resume it. Linux and macOS are unchanged (a FIFO, as before).
+- **Windows: `codex` starts without `cmd.exe`**: the buddy runs node with codex's own script, as its
+  npm shim would, so a folder or an argument with `&` or a line break reaches it whole. It reads only the
+  shim's own launch line, so an npm install that keeps node next to its shims works too. A shim it
+  can't read still runs through `cmd.exe`, and `buddy.log` says so.
+- **Windows, still not tested**: stopping a live session with ■ Stop, and handing a live session to a
+  terminal.
+
 ## 20261118.2
 
 - **Windows: `claude` and `codex` are never taken from the current folder**: Windows' program lookup

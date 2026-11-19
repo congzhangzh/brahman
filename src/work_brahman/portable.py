@@ -169,7 +169,7 @@ def kill_tree(p: subprocess.Popen) -> None:
         pass
 
 
-_SHIM_EXE = re.compile(r'"%(?:~?dp0)%\\?([^"%]+\.exe)"', re.I)  # npm's shim: "%dp0%\node_modules\...\x.exe" %*
+_SHIM_TARGET = re.compile(r'"%(?:~?dp0)%\\?([^"%]+\.(exe|js))"', re.I)  # "%dp0%\node_modules\...\x.exe|js"
 
 
 def _which(name: str) -> str:
@@ -183,7 +183,12 @@ def _which(name: str) -> str:
 
 def argv(cmd: list[str]) -> list[str]:
     """cmd with its program resolved where the system needs it (Windows; see the module's notes).
-    Never from the current folder (_which)."""
+    Never from the current folder (_which). An npm shim is read on its last line, the one that runs
+    `... %*` (a guard like codex.cmd's `IF EXIST "%dp0%\\node.exe" (` is never taken for it):
+    `"%dp0%\\...\\x.exe" %*` gives that exe (claude); `"%_prog%" "%dp0%\\...\\x.js" %*` gives node
+    and that script (codex; node.exe beside the shim when there is one, as the shim itself prefers,
+    else node from PATH). Neither goes through cmd.exe, which splits an argument at & | (a folder
+    named R&D) and cuts it at a newline. Else the shim itself."""
     if not WINDOWS or not cmd:
         return list(cmd)
     found = _which(cmd[0])
@@ -191,11 +196,20 @@ def argv(cmd: list[str]) -> list[str]:
         return list(cmd)
     if found.lower().endswith((".cmd", ".bat")):
         try:
-            m = _SHIM_EXE.search(Path(found).read_text(errors="replace"))
+            runs = [ln for ln in Path(found).read_text(errors="replace").splitlines() if ln.rstrip().endswith("%*")]
         except OSError:
-            m = None
+            runs = []
+        m = _SHIM_TARGET.search(runs[-1]) if runs else None
         if m:
-            exe = Path(found).parent.joinpath(*[x for x in re.split(r"[\\/]+", m[1]) if x])
-            if exe.is_file():
-                return [str(exe), *cmd[1:]]
+            base = Path(found).parent
+            target = base.joinpath(*[x for x in re.split(r"[\\/]+", m[1]) if x])
+            if target.is_file() and m[2].lower() == "exe":
+                return [str(target), *cmd[1:]]
+            if target.is_file() and "%_prog%" in runs[-1]:
+                node = base / "node.exe"
+                node = str(node) if node.is_file() else _which("node")
+                if node:
+                    return [node, str(target), *cmd[1:]]
+        import logging  # a shim whose form we don't know: visible in buddy.log (review, 2026-11-19)
+        logging.getLogger("buddy.portable").info("running %s through cmd.exe (its form is not known)", found)
     return [found, *cmd[1:]]
