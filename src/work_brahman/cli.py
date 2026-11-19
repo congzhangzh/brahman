@@ -988,6 +988,9 @@ def main() -> int:
                 log.info("was down: %s", said)
         except Exception:  # noqa: BLE001 - the heartbeat never stops the buddy
             log.exception("alive: the heartbeat failed to start")
+        from . import others  # another buddy on the same Feishu/Lark bot: looked for once, said once
+        others.tell = lambda md: post_all(channels, list(linked.chats), md, title="buddy")
+        others.check_start(channels, list(linked.chats))
         adopted = procs.adopt(bot.adopted)  # what the last instance left running: delivered when it ends
         if adopted:
             log.info("adopted %d runs from the last instance: %s", len(adopted), ", ".join(adopted))

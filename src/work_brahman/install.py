@@ -613,6 +613,14 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
             else:
                 row(None, f"nothing on [::1]:{port}: the running buddy binds 127.0.0.1 only",
                     "a restart brings both loopbacks (systemctl --user restart buddy)")
+    from . import others  # another buddy on the same Feishu/Lark bot (others.py)
+    for ok, what, how in others.doctor_rows():
+        row(ok, what, how)
+    from . import changes as _ch  # an older buddy than one it knows of (no network call): the Air's case
+    for where, newer in _ch.newer_known(state):
+        row(None, f"this buddy is {_ch.version()}, older than {newer} ({where})",
+            "run the newer one (uv tool upgrade brahman-buddy, then restart the buddy), or stop this copy; "
+            "ignore it if you went back on purpose")
     from . import events  # the event stream for other apps (events.py): off by default
     ev, devices = events.mode(cfg), events.tokens(state)
     if ev != "off" or devices:

@@ -222,6 +222,13 @@ Anything else goes to Claude Code, in the same session as your last message in t
                          "💡 这条消息进了主对话。要继续 {story}，请在它的话题里回复。"),
     "bot.ping_old": ("🏓 That ping card is an old one: send a new ping from the Setup tab.",
                      "🏓 这是旧的 ping 卡片：请从设置页重新发送 ping。"),
+    "others.found": ("⚠️ Another buddy (or another program with this bot's credentials) is also using this {app} bot "
+                     "({how}). Feishu gives each message to only one "
+                     "of them, so answers come from either: stop the other one, or give it its own bot. `buddy doctor` shows it.",
+                     "⚠️ 另一个 buddy（或另一个拿着这个机器人凭据的程序）也在用这个 {app} 机器人（{how}）。飞书每条消息只交给其中一个，所以回答可能来自任何一个："
+                     "停掉另一个，或者给它单独的机器人。`buddy doctor` 会显示。"),
+    "others.how_reply": ("a message from it at {at}", "{at} 它发过一条消息"),
+    "others.how_press": ("a press on a card this buddy never sent", "有人按了一张本 buddy 没发过的卡片"),
     "bot.not_paired": ("Not paired ({who}). On the buddy's machine run this, then restart the buddy:\n"
                        "buddy allow {sender}{chat}",
                        "尚未配对（{who}）。在运行 buddy 的机器上执行下面这行，然后重启 buddy：\n"

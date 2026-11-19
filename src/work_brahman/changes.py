@@ -11,6 +11,7 @@ A checkout (version 0.1.0, not a release) never announces.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -76,13 +77,17 @@ def announce_once(state: Path, channels: list, chats: list[str], ver: str | None
         return ""
     p = _seen_path(state)
     try:
-        seen = json.loads(p.read_text()).get("version", "")
+        d = json.loads(p.read_text())
+        seen, newest = d.get("version", ""), d.get("newest", "") or d.get("version", "")
     except (OSError, ValueError):
-        seen = ""
+        seen = newest = ""
     if seen == ver:
         return ""
+    older = key(ver) is not None and key(newest) is not None and key(ver) < key(newest)  # releases only
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"version": ver}))
+    p.write_text(json.dumps({"version": ver, "newest": newest if older or key(ver) is None else ver}))
+    if older:  # an older copy started with this state: never its old notes as "what's new" (doctor says it)
+        return "older"
     sec = next(((h, b) for h, b in sections() if h == ver), None)
     if not seen or sec is None or not chats:  # a first install: nothing to announce; or no notes for it
         return "remembered"
@@ -92,3 +97,47 @@ def announce_once(state: Path, channels: list, chats: list[str], ver: str | None
     post_all(channels, chats, body + "\n\n(the workbench's What's new tab has it all)",
              title=f"brahman-buddy {ver} · what's new")
     return "posted"
+
+
+_KEY = re.compile(r"(\d{8})\.(\d+)(?:\.dev(\d+))?$")
+
+
+def key(v: str) -> tuple | None:
+    """A release's order: 20261118.2 > 20261118.2.dev4 > 20261118.1; None for anything else (a checkout's 0.1.0)."""
+    m = _KEY.match(v or "")
+    return (int(m[1]), int(m[2]), 0 if m[3] else 1, int(m[3] or 0)) if m else None
+
+
+def installs() -> list[tuple[str, str]]:
+    """(where, version) of each brahman-buddy installed on this machine that we can see without the
+    network: uv tool's and pipx's environments (their dist-info folders)."""
+    roots = [os.environ.get("UV_TOOL_DIR", ""), os.path.join(os.environ.get("APPDATA", ""), "uv", "tools"),
+             os.path.expanduser("~/.local/share/uv/tools"), os.path.expanduser("~/.local/share/pipx/venvs"),
+             os.path.expanduser("~/.local/pipx/venvs")]
+    out = []
+    for r in dict.fromkeys(x for x in roots if x):
+        base = Path(r) / "brahman-buddy"
+        if not base.is_dir():
+            continue
+        for info in sorted(base.glob("**/site-packages/brahman_buddy-*.dist-info")):
+            v = info.name[len("brahman_buddy-"):-len(".dist-info")]
+            out.append((str(base), v))
+    return out
+
+
+def newer_known(state: Path, mine: str | None = None) -> list[tuple[str, str]]:
+    """Newer versions this buddy knows of, with no network call: one that already ran with this state
+    folder, and newer installs on this machine. [] for a checkout (its version is 0.1.0)."""
+    mine = mine or version()
+    k = key(mine)
+    if k is None:
+        return []
+    out = []
+    try:
+        newest = json.loads(_seen_path(state).read_text()).get("newest", "")
+    except (OSError, ValueError):
+        newest = ""
+    if key(newest) and key(newest) > k:
+        out.append(("a buddy that already ran with this state folder", newest))
+    out += [(where, v) for where, v in installs() if key(v) and key(v) > k]
+    return out

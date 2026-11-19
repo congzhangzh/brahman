@@ -5,6 +5,18 @@ once, at the first start of a new version (following `[notify]`).
 
 ## Unreleased
 
+## 20261119.2
+
+- **Another buddy on the same bot is noticed**: when two buddies use one Feishu or Lark bot, Feishu gives
+  each message to only one of them, so answers seem to come and go. The buddy now looks once at start
+  (one call per linked chat: what its bot sent that it didn't) and on any press of a card it never sent,
+  then tells you once in chat, and `buddy doctor` shows it until a clean start. No timer, so the
+  monthly message quota is spared; if the app may not list messages, the doctor names the scope.
+  While the app's monthly quota is used up, the start check is refused and the doctor shows it as ⚠️.
+- **`buddy doctor` says when this buddy is older** than one it knows of without asking the network: a
+  newer buddy that already ran with the same state folder, or a newer install (uv tool, pipx) on this
+  machine. An older copy starting no longer posts its old notes as "what's new".
+
 ## 20261119.1
 
 - **Windows: a long story's messages never touch the disk**: they go to its live session through a

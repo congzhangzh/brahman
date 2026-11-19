@@ -30,6 +30,7 @@ from lark_oapi.core.log import handler as _sdk_stdout, logger as _sdk_log
 # `buddy short start` prints) came after a quota error. Ours goes to stderr, once.
 _sdk_log.removeHandler(_sdk_stdout)
 
+from . import others
 from .channel import Incoming
 from .text import t
 
@@ -143,6 +144,8 @@ class Feishu:
             got = self._reply(message_id, msg_type, content, False)
             if got is not None:
                 threads_refused(self.app_id, self.name, code)
+        if got:
+            others.remember(self.app_id, got)  # what we sent: a message of this app we didn't is another buddy's
         return got
 
     def _send(self, chat_id: str, msg_type: str, content: str) -> str | None:
@@ -150,7 +153,32 @@ class Feishu:
                 .content(content).build())
         req = CreateMessageRequest.builder().receive_id_type("chat_id").request_body(body).build()
         self._counted()
-        return _check(self.api.im.v1.message.create(req))
+        got = _check(self.api.im.v1.message.create(req))
+        if got:
+            others.remember(self.app_id, got)
+        return got
+
+    def recent(self, chat: str, n: int) -> list[dict] | tuple:
+        """The chat's last n messages, newest first, as {id, time, sender_type, sender_id}: ids, times
+        and senders only, never a message's text (others.py). (code, why) when refused. One message
+        call, counted against the quota."""
+        from lark_oapi.api.im.v1 import ListMessageRequest
+        req = (ListMessageRequest.builder().container_id_type("chat").container_id(chat.removeprefix(self.prefix))
+               .sort_type("ByCreateTimeDesc").page_size(n).build())
+        self._counted()
+        try:
+            resp = self.api.im.v1.message.list(req)
+        except Exception as e:  # noqa: BLE001 - the network: nothing to say
+            return (None, str(e))
+        if not resp.success():
+            return (resp.code, str(resp.msg))
+        out = []
+        for m in getattr(resp.data, "items", None) or []:
+            s = m.sender
+            out.append({"id": m.message_id, "time": int(m.create_time or 0),
+                        "sender_type": getattr(s, "sender_type", ""),
+                        "sender_id": getattr(s, "id", "") if (getattr(s, "id_type", None) or "app_id") == "app_id" else ""})
+        return out
 
     def owns(self, chat: str) -> bool:
         return chat.startswith(self.prefix + "oc_")
@@ -170,6 +198,9 @@ class Feishu:
             e = data.event
             action = (e.action.value or {}).get("action", "") if e.action else ""
             typed = ((e.action.form_value or {}).get(REPLY_FIELD) or "").strip() if e.action else ""
+            mid = getattr(e.context, "open_message_id", "") if e.context else ""
+            if mid:  # a card this buddy never made: another buddy on this bot (others.py), off the ack's path
+                threading.Thread(target=others.pressed, args=(self.app_id, self.name, mid), daemon=True).start()
             if action:  # the token is unique per press: Lark's retries are de-duplicated
                 on_message(Incoming(self.prefix + e.context.open_chat_id, f"press:{e.token}",
                                     self.prefix + e.operator.open_id, typed or None, action))
