@@ -379,6 +379,7 @@ Anything else goes to Claude Code, in the same session as your last message in t
     "team.ev.join": ("{who} joined ({kind})", "{who} 加入（{kind}）"),
     "team.ev.leave": ("{who} left this team", "{who} 离开本团队"),
     "team.ev.handover": ("{old} (g{gen}) → {new} · book {book}", "{old}（g{gen}）→ {new} · 交接手册 {book}"),
+    "team.ev.rename": ("{old} → {new} (g{gen}, the same generation)", "{old} → {new}（g{gen}，同一代）"),
     "team.ev.retire": ("{who} (g{gen}) retired, the role ends", "{who}（g{gen}）退休，角色结束"),
     "team.years": ("{n}y", "{n}年"),
     "team.part": ("(part)", "（子故事）"),

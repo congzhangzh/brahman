@@ -168,6 +168,9 @@ def _team(args, state: Path, channels: list, chats: list[str], opts: dict) -> in
     elif a == "handover":
         out = teams.handover(state, channels, args.role, args.old, args.new, note=args.note, opts=opts)
         print(f"{args.role}: {args.old} → {args.new} on {', '.join(x['team'] for x in out) or 'no team'}")
+    elif a == "rename":
+        out = teams.rename(state, channels, args.role, args.old, args.new, opts=opts)
+        print(f"{args.role}: {args.old} → {args.new} (same generation) on {', '.join(x['team'] for x in out) or 'no team'}")
     elif a == "retire":
         out = teams.retire(state, channels, args.role, args.name, note=args.note, opts=opts)
         print(f"{args.role}: {args.name} retired; off {', '.join(x['team'] for x in out) or 'no team'}")
@@ -498,7 +501,7 @@ def main() -> int:
     t = psub.add_parser("log", help="the peer log: received, refused, sent, checks")
     t.add_argument("--last", type=int, default=50)
     psub.add_parser("doctor", help="check the secret, where serve listens, and every peer (a signed ping both ways)")
-    t = psub.add_parser("setup", help="the peers as a block in the global instructions (CLAUDE.md, AGENTS.md): off by default")
+    t = psub.add_parser("setup", help="the peers as instructions: ~/.claude/rules/brahman-peers.md (and a block in Codex's AGENTS.md): off by default")
     g = t.add_mutually_exclusive_group(required=True)
     g.add_argument("--instructions", action="store_true", help="turn it on: peers.toml (never the secret) as instructions")
     g.add_argument("--off", action="store_true", help="turn it off: the block is taken out")
@@ -649,6 +652,11 @@ def main() -> int:
     t.add_argument("old")
     t.add_argument("new")
     t.add_argument("--note", default="")
+    t = msub.add_parser("rename", help="the live generation's new name, the same generation (names put the "
+                                       "context first: <context>-<role>-g<N>); no alias for the old one")
+    t.add_argument("role")
+    t.add_argument("old")
+    t.add_argument("new")
     t = msub.add_parser("retire", help="the role ends, no successor: off every team (not an RM's role)")
     t.add_argument("role")
     t.add_argument("name")

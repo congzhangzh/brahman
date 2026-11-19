@@ -68,7 +68,7 @@ which last weeks: a short story lasts minutes to hours.
   Codex terminal holds it (its daemon has the thread loaded and a terminal runs in its folder):
   with none, Codex would run the turn unattended. Sessions behind the gate are not woken.
 - **The window's title names its stories** (pys), short, `<name> [<job>] <state>` (the owner's
-  rule, 2026-11-11, about 24 characters: `rel-rdp-g1 #253 #249 busy`): `start` and `attach` put
+  rule, 2026-11-11, about 24 characters: `rdp-rel-g1 #253 #249 busy`): `start` and `attach` put
   the story numbers after the name, newest first, then the session's work words, then `busy`;
   the work words and older numbers are left out when it would grow too long; `done` takes a
   number out again, and `done --free` makes it `<name> free` once none is left. Only numbers: the card has the titles. It is written with `pys title --owner

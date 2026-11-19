@@ -5,6 +5,19 @@ once, at the first start of a new version (following `[notify]`).
 
 ## Unreleased
 
+## 20261119.5
+
+- **The short-story rule `buddy setup` installs says more of what a session needs**: `--who`, forks and
+  loops, `attach` and the line the buddy types into the window, private chats only, no story from a
+  subagent, one story across sessions and child stories. And the rules no longer claim a line in your
+  `CLAUDE.md` wins: Claude Code combines the two, so to change a rule, edit it or leave it out.
+- **The peers as instructions go into their own rules file**, `~/.claude/rules/brahman-peers.md`, no
+  longer a block in `~/.claude/CLAUDE.md` (`buddy peer setup --instructions`; `--off` removes it). No
+  part of the buddy edits a `CLAUDE.md` any more. Codex keeps its block in `AGENTS.md`.
+- **Team names put the context first**: `<context>-<role>-g<N>` (`rdp-po-g2`, `shadow-comp-g4`), so window
+  lists, pys groups and a restore sort by project. `buddy-team rename <role> <old> <new>` renames a live
+  member on its card and keeps its generation; there is no alias for the old name.
+
 ## 20261119.4
 
 - **The buddy's own settings (`.env`: the chat apps' secrets, the web token) no longer reach a pys window

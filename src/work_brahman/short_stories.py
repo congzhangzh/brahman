@@ -277,7 +277,7 @@ STATES = ("busy", "free")  # the title's last word (the owner's rule, 2026-11-11
 
 def window_title(state: Path, window: dict, name: str, free: bool = False) -> str:
     """The title of a pys window, `<name> [<job>] <state>` (the owner's rule, 2026-11-11:
-    `rel-rdp-g1 #333 busy`, `comp-shadow-g3 #331 keys busy`, `rev-freerdp-g2 free`; at most
+    `rdp-rel-g1 #333 busy`, `shadow-comp-g3 #331 keys busy`, `freerdp-rev-g2 free`; at most
     about 24 characters, each tab in pys's status line shows its whole title). The name is the
     session's first word; the job is the numbers of the running stories held in this window,
     newest first, then the session's own work words; the state is last. Only numbers: the card

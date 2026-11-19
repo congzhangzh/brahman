@@ -12,7 +12,9 @@ brings what is ours up to date and leaves alone what is the user's.
   what to do to have ours.
 - rules: the working rules as drop-ins in ~/.claude/rules/brahman-*.md, which Claude Code loads
   for every session. A file the user changed is theirs from then on; `--without <name>` leaves
-  one out (and keeps it out). The user's own CLAUDE.md is read after them, so a line there wins.
+  one out (and keeps it out). Claude Code loads them together with the user's own CLAUDE.md:
+  combined, not ranked (its memory docs: on a conflict Claude may follow either), so a user who
+  wants a rule different edits that file or leaves it out, rather than contradicting it.
 - pys: the terminal multiplexer, its own package (py-screen) with its own install and its own
   `pys setup`. buddy setup never installs, moves or sets it up (2026-11-10: it may be a work in
   progress the user runs from a checkout): it says whether pys is there, and when it

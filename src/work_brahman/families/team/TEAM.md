@@ -22,26 +22,27 @@ The owner's words: "prefer reuse session, like a team, we work together for a lo
 other, have professional parts, a stable relationship, and dynamic by release manager".
 
 - **Members** are long-lived sessions, one per area. **Names (the owner, 2026-11-11):**
-  `<role>-<context>-g<N>`: the context is usually the project, an area only when a project has several members (FreeRDP: `shadow`, `freerdp` for review), short but clear across all of the owner's projects (`rdp`, not
+  `<context>-<role>-g<N>`: the context is usually the project, an area only when a project has several members (FreeRDP: `shadow`, `freerdp` for review), short but clear across all of the owner's projects (`rdp`, not
   `kit`: there are many kits; `shadow`, not `server`: xrdp is a server too); clear beats short; the role is
   one of:
 
   | Prefix | Role | Examples |
   |---|---|---|
-  | `po` | product owner (priorities, the private plan) | `po-rdp-g2` |
-  | `rel` | release manager, one per kit | `rel-rdp-g1`, `rel-avm-g1`, `rel-samvada-g1` |
-  | `rev` | review: upstream PRs, the MR loop | `rev-freerdp-g2` |
-  | `comp` | component developer (the owner, 2026-11-17: "for the role, member is not a good word; I prefer component developer"; "member" stays the word for any long-lived team session) | `comp-shadow-g3` (FreeRDP's shadow server, encoders, sesman, the hosts), `comp-freerdp-web-g9`, `comp-xrdp-g2`, `comp-avm-g1` |
-  | `dbg` | tricky debugging across components: the root cause with evidence (A/B, bisect, logs), the fix on its own local branch, handed to the area's owner (never a commit to another member's branch) | `dbg-rdp-g1` |
-  | `edu` | teaching: teaches the owner from the real work in the tutor style (diagnose the gap, the why, one check question, the next step), keeps the lessons and the project's book (the chronicle); read-only on code, never in another member's branch. Like the buddy, not bound to one group (the owner, 2026-11-14: "for edu roles it's like the brahman, no need to restrict to the group; sometimes one all-in-one edu is acceptable too"): one project, several or all; the context names the scope, and an all-projects edu's pys window goes in the reserved group `shared` (`pys group shared`; every group's team shows it as "(shared)") | `edu-rdp-g1`, `edu-all-g1` |
+  | `po` | product owner (priorities, the private plan) | `rdp-po-g2` |
+  | `rel` | release manager, one per kit | `rdp-rel-g1`, `avm-rel-g1`, `samvada-rel-g1` |
+  | `rev` | review: upstream PRs, the MR loop | `freerdp-rev-g2` |
+  | `comp` | component developer (the owner, 2026-11-17: "for the role, member is not a good word; I prefer component developer"; "member" stays the word for any long-lived team session) | `shadow-comp-g3` (FreeRDP's shadow server, encoders, sesman, the hosts), `freerdp-web-comp-g9`, `xrdp-comp-g2`, `avm-comp-g1` |
+  | `dbg` | tricky debugging across components: the root cause with evidence (A/B, bisect, logs), the fix on its own local branch, handed to the area's owner (never a commit to another member's branch) | `rdp-dbg-g1` |
+  | `edu` | teaching: teaches the owner from the real work in the tutor style (diagnose the gap, the why, one check question, the next step), keeps the lessons and the project's book (the chronicle); read-only on code, never in another member's branch. Like the buddy, not bound to one group (the owner, 2026-11-14: "for edu roles it's like the brahman, no need to restrict to the group; sometimes one all-in-one edu is acceptable too"): one project, several or all; the context names the scope, and an all-projects edu's pys window goes in the reserved group `shared` (`pys group shared`; every group's team shows it as "(shared)") | `rdp-edu-g1`, `all-edu-g1` |
 
-  Short context words, so `<name> [<job>] <state>` (e.g. `comp-shadow-g3 #331 keys busy`) fits a pys title (~24 characters; when a clear name is longer, the work part shrinks) (the
+  Short context words, so `<name> [<job>] <state>` (e.g. `shadow-comp-g3 #331 keys busy`) fits a pys title (~24 characters; when a clear name is longer, the work part shrinks) (the
   team block, "Window titles"). All the area's work goes to its member, whatever the topic.
   **No heavy role** (the owner, 2026-11-11): heavy work (an integration's build and ctest, containers)
   belongs to the member whose area it is, handed to its own subagent; the machine's one heavy
-  job at a time still holds. **Renaming:** a live member keeps its old name (e.g.
-  `freerdp-server-g3`) to the end of its generation; its successor and every new member take the
-  new form.
+  job at a time still holds. **Renaming** (the owner, 2026-11-19: the context first): a live
+  member's window title takes the new form at once, its Claude session's name at its next resume
+  (`claude --name <new>`), and the RM renames it on the card with `buddy-team rename <role> <old> <new>`,
+  which keeps its generation and its history. No alias for an old name.
 - **The release manager (RM)** is a role too, one per kit (`app-release-kit`, `lib-release-kit`,
   `tool-release-kit` …). It assigns work by area, picks releases, pins, runs the rounds, and
   owns the integration branch (see git-flow.md, "The release kit coordinates a release bump").
@@ -87,7 +88,7 @@ because a successor needs his go to start and a retiree his ok to close. **Where
 Claude Code's status line shows `ctx N% of <window>` at the bottom of each session's pane (the
 template's statusline.sh); the RM reads a member's with `pys capture <wid>` (the line with `ctx`).
 
-Names show the generation: `<role>-<context>-g<N>` (e.g. `comp-xrdp-g2`). The RM ages and hands over the same
+Names show the generation: `<context>-<role>-g<N>` (e.g. `xrdp-comp-g2`). The RM ages and hands over the same
 way; its book is the kit's project memory.
 
 ## Where each role lives
@@ -143,7 +144,7 @@ Ask the owner first, per member: the project, the name, the brief, the permissio
 
 ```bash
 cd ~/projects/<repo> && pys new -- bash                  # a window in that repo; prints its wid
-pys send <wid> --enter "claude --name <role>-<context>-g<N> --permission-mode auto 'Read ~/.cache/rm/briefs/<date>-<name>.v<N>.md and start. You were started by the release manager <rm name> on the owner'\''s go.'"
+pys send <wid> --enter "claude --name <context>-<role>-g<N> --permission-mode auto 'Read ~/.cache/rm/briefs/<date>-<name>.v<N>.md and start. You were started by the release manager <rm name> on the owner'\''s go.'"
 ```
 
 - The window is a shell first, so it stays when Claude exits, like his other windows.

@@ -158,7 +158,7 @@ def _check_name(what: str, name: str) -> None:
 def _taken(state: Path, name: str) -> str | None:
     """The role a generation name already belongs to: a name is never reused."""
     for r in all_roles(state):
-        if any(g["name"] == name for g in r["generations"]):
+        if any(g["name"] == name or name in g.get("renamed_from", []) for g in r["generations"]):
             return r["role"]
     return None
 
@@ -248,6 +248,26 @@ def handover(state: Path, channels: list[Channel], role_name: str, old: str, new
         return _redraw_role(state, channels, role_name, opts, "handover", t(
             "team.ev.handover", old=old, gen=g["gen"], new=new_name, book=r.get("book", "")),
             role=role_name, old=old, new=new_name, book=r.get("book", ""))
+
+
+def rename(state: Path, channels: list[Channel], role_name: str, old: str, new_name: str, *,
+           opts: dict | None = None) -> list[dict]:
+    """The live generation's new name, the same generation (the owner, 2026-11-19: names put the context
+    first, `<context>-<role>-g<N>`). Its history keeps the old one in `renamed_from`; no alias: the old
+    name no longer finds it. Every team naming the role is redrawn."""
+    with _locked(state):
+        r = _role(state, role_name)
+        g = live(r)
+        if g is None or g["name"] != old:
+            raise ValueError(f"{role_name} is carried by {g['name'] if g else 'nobody'}, not {old}")
+        _check_name("session", new_name)
+        if (other := _taken(state, new_name)):
+            raise ValueError(f"{new_name} is a generation of {other} already: a name is never reused")
+        g["name"] = new_name
+        g.setdefault("renamed_from", []).append(old)
+        _write(_dir(state) / "roles" / f"{role_name}.json", r)
+        return _redraw_role(state, channels, role_name, opts, "rename",
+                            t("team.ev.rename", old=old, new=new_name, gen=g["gen"]), role=role_name, old=old, new=new_name)
 
 
 def retire(state: Path, channels: list[Channel], role_name: str, name: str, *, note: str = "",

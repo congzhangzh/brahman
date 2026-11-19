@@ -727,7 +727,7 @@ def save(cfg: dict, env=os.environ) -> Path:
              f"allow = {_q(cfg.get('allow', 'local'))}  # who may connect: local (127.0.0.1, tunnels) | private (LAN, VPN) | public"]
     lines += [f"bind = {_q(cfg['bind'])}"] if cfg.get("bind") else []
     lines += [f"port = {int(cfg['port'])}",
-              f"instructions = {'true' if cfg.get('instructions') else 'false'}  # this file as a block in ~/.claude/CLAUDE.md (and Codex's AGENTS.md)",
+              f"instructions = {'true' if cfg.get('instructions') else 'false'}  # this file as ~/.claude/rules/brahman-peers.md (and a block in Codex's AGENTS.md)",
               f"fingerprint = {_q(fingerprint())}  # the machine this was written on (a hash): doctor warns if copied", ""]
     for k in sorted(cfg["points"]):
         v = cfg["points"][k]

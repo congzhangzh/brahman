@@ -273,7 +273,7 @@ class Model:
 
     def toggle_instructions(self) -> str:
         self.pcfg = {**self.pcfg, "instructions": not self.pcfg.get("instructions")}
-        return ("the peers block goes into CLAUDE.md (and AGENTS.md) when written" if self.pcfg["instructions"]
+        return ("the peers go into ~/.claude/rules/brahman-peers.md (and AGENTS.md) when written" if self.pcfg["instructions"]
                 else "the peers block comes out when written") + ": w writes it"
 
     def check_res(self, name: str) -> str:

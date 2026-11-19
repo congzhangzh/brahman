@@ -1,8 +1,10 @@
 # Git branches by role (from brahman-buddy; `buddy setup` keeps it current)
 
 Installed by `buddy setup` into `~/.claude/rules/`. Edit it freely: once you change it, setup
-leaves it alone for good. `buddy setup --without brahman-git-roles` never installs it, and a line
-in your own `CLAUDE.md` wins over anything here.
+leaves it alone for good; `buddy setup --without brahman-git-roles` never installs it.
+Claude Code loads this file together with your own `CLAUDE.md`: they are combined, not ranked,
+so where the two disagree Claude may follow either. To change what this says, edit this file
+or leave it out, rather than contradicting it elsewhere.
 
 ## Say where you are first
 
