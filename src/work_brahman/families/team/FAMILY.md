@@ -23,12 +23,12 @@ Roles" and claude_md/global/team.md).
 
 | # | Stage | Leads | Executes | Where | Done when |
 |---|---|---|---|---|---|
-| 1 | **New**: a kit's team and its RM | RM | `buddy-team new KIT --rm ROLE SESSION [--area --project --book]` | chat: a new card | the card is in the owner's chats |
-| 2 | **Join**: a role joins (after the owner's go to start it) | RM | `buddy-team join KIT SESSION --role ROLE [--kind member\|po] …`; a role another team has: `join KIT --role ROLE --kind po` | the card(s) | its row shows |
+| 1 | **New**: a kit's team and its RM | RM | `buddy-team new KIT --rel NAME [--area --project --book]` | chat: a new card | the card is in the owner's chats |
+| 2 | **Join**: a member joins (after the owner's go to start it), keyed by its lineage (NAME without `-g<N>`) | RM | `buddy-team join KIT NAME --role po\|comp\|rev\|dbg\|edu --area AREA …` (one po per team, a comp per area); a member another team has: its live NAME | the card(s) | its row shows |
 | 3 | **Look**: the card follows what it observes | `buddy serve` | every 60 s: sessions, pys windows, ctx, years, books, running short stories | the card, only when the banded facts change | — |
 | 4 | **Reply**: the owner asks the RM something | the owner | 💬 Reply under the card, quoting it, or `/team KIT <text>` | the RM's window gets one fixed line | `buddy-team check KIT` prints it once |
-| 5 | **Hand over**: a generation is old (the owner decides) | RM | `buddy-team handover ROLE OLD NEW`: the same for an RM or a PO | every card naming the role: the new row, the line `OLD (gN) → NEW · book …` | — |
-| 6 | **Leave / retire** | RM | `buddy-team leave KIT ROLE` (off one roster) · `buddy-team retire ROLE SESSION [--note]` (the role ends, off every roster; not an RM's role) | the card(s) | — |
+| 5 | **Hand over**: a generation is old (the owner decides) | RM | `buddy-team handover OLD NEW`: the same for an RM or a PO; `rename OLD NEW` keeps the generation; `set NAME --role --area` corrects | every card naming the member: the new row, the line `OLD (gN) → NEW · book …` | — |
+| 6 | **Retire** | RM | `buddy-team retire KIT NAME [--note]`: off this card, the record kept; on no team any more, its generation retires and its lineage may return as `-g<N+1>` (not a team's RM: hand it over) | the card(s) | — |
 | 7 | **Read** | anyone | `buddy-team show KIT` (exact ctx, now), `buddy-team list`, `/team`, `/team KIT` | terminal, chat | — |
 
 ## Rules

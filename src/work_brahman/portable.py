@@ -254,7 +254,7 @@ def _win_parent(pid: int) -> tuple[int, str] | None:
 # The buddy's own secrets never reach a program that may outlive it (the review's VM run, 2026-11-19: when
 # no pys server runs, the buddy's `pys new` starts one, and the server and every window it opens inherit
 # the buddy's environment, its .env included).
-ENV_FILE: Path | None = None  # the .env beside buddy.toml (install.load_env sets it)
+ENV_FILE: Path | None = None  # buddy.env beside buddy.toml (install.load_env sets it)
 SECRETS = ("TELEGRAM_BOT_TOKEN", "FEISHU_APP_ID", "FEISHU_APP_SECRET", "LARK_APP_ID", "LARK_APP_SECRET",
            "BUDDY_ALLOWED_IDS", "BUDDY_ALLOWED_OPEN_IDS", "BUDDY_WEB_TOKEN", "BUDDY_PEER_SECRET")  # engine.SECRETS too
 

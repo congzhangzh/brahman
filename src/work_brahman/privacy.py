@@ -123,6 +123,20 @@ def is_private(story: dict | None) -> bool:
     return story is None or story.get("private", True) is not False
 
 
+def private_ref(state: Path, ref: str) -> bool | None:
+    """A story's or a team's ref ("short-story:12", "long-story:3", "team:kit") is private (one that
+    isn't found too: fail closed); None: not one of those (a duty's run, a chat). The page, the event
+    stream and web push all judge by it."""
+    from . import long_stories, short_stories, teams
+    kind, _, n = ref.partition(":")
+    if kind == "team":
+        return is_private(teams.load(state, n))
+    if kind not in ("short-story", "long-story"):
+        return None
+    mod = short_stories if kind == "short-story" else long_stories
+    return is_private(mod.load(state, int(n)) if n.isdigit() else None)
+
+
 # ---- the page's public view: a cookie per browser, at most VIEW_HOURS --------------------------
 
 VIEW_COOKIE = "buddy_view"

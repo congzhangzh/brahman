@@ -1,23 +1,27 @@
 """Teams (specs/team.md): one live card per kit, one row per long-lived member, linked to its
-short stories. A team has no steps and no end, so it is not a story: roles join, age, hand over
+short stories. A team has no steps and no end, so it is not a story: members join, age, hand over
 and retire, and the team goes on.
 
-    buddy team new app-release-kit --rm app-rm app-release-kit-1 --book role-release-manager.md
-    buddy team join app-release-kit server-a1 --role server --area "the server, its daemon" --project ~/projects/server
-    buddy team join web-release-kit --role po --kind po          a role already on another team
-    buddy team handover server server-a1 server-g2                    the same for an RM or a PO
-    buddy team leave web-release-kit po | retire server server-g2 | show NAME | check NAME | list
+    buddy team new app-release-kit --rel app-rel-g1 --book role-release-manager.md
+    buddy team join app-release-kit app-comp-audio-g1 --role comp --area audio --project ~/projects/app
+    buddy team join web-release-kit app-po-g2 --role po          a member another team has already
+    buddy team handover app-comp-audio-g1 app-comp-audio-g2   the same for a rel or a po
+    buddy team rename app-release-kit-cf app-rel-g1 | set NAME --area A | retire TEAM NAME
+    buddy team show TEAM | check TEAM | list
 
+A member is keyed by its **lineage**, its name without `-g<N>` (`app-comp-audio`), unique across
+every team; its generations hang under it. Its role (rel, po, comp, rev, dbg, edu) and area are
+fields: one rel and one po per team, any number of the others, a comp per area (the PO, 2026-11-20).
 Only what can't be observed is kept, written by `buddy team` alone (the RM runs it): a file per
-role (roles/<role>.json: its generations, so a role in two teams has one history) and one per
-team (<team>.json: its roster of {role, kind}, its card, the owner's replies). Everything else
+member (members/<lineage>.json: role, area, book, generations, so a member on two teams has one
+history) and one per team (<team>.json: its roster, its card, the owner's replies). Everything else
 is looked at each time the card is drawn: the session (~/.claude/sessions/<pid>.json, by its
 name), its pys window (`pys ls --json`, agent_owner), its ctx (the status line, `pys capture`),
 its years (compactions in its transcript), its book, and its running short stories. A source
 that can't be read draws as "-": it never fails the card.
 
 The team only records; it never starts, stops or messages a session (the RM does, with the
-owner's go). The card changes on an event (join, handover, retire, leave, a reply) and when the
+owner's go). The card changes on an event (join, handover, rename, retire, a reply) and when the
 banded facts change: a story started or ended, age across age_warn, a compaction, a session
 gone or back. Never on a timer: the Lark quota (specs/team.md). The exact ctx is as of the last
 edit; `buddy team show` gives it live.
@@ -37,7 +41,8 @@ from . import portable, short_stories as shorts
 from .channel import Channel
 from .text import t
 
-KINDS = ("rm", "po", "member")
+KINDS = ("rel", "po", "comp", "rev", "dbg", "edu")  # the card's order (the PO, 2026-11-20)
+ONE_PER_TEAM = ("rel", "po")  # any number of the others: a comp per area
 ORDER = {k: i for i, k in enumerate(KINDS)}
 AGE_WARN = 60  # % ctx: the owner's threshold (2026-11-07); years are shown, never flagged
 LOOK_EVERY = 60  # seconds between looks in `buddy serve`
@@ -60,16 +65,23 @@ def settings(cfg: dict | None) -> dict:
 # ── the store ────────────────────────────────────────────────────────────────────────────────
 
 def _dir(state: Path) -> Path:
-    d = state / "teams" / "roles"
-    d.mkdir(parents=True, exist_ok=True)
-    return d.parent
+    """teams/: a file per team (<team>.json) and members/, a file per member (<lineage>.json). The
+    records of before 2026-11-20 (roles/, keyed by a role word) are converted once, here."""
+    d = state / "teams"
+    if (d / "roles").is_dir() or not (d / "members").is_dir():  # roles/ goes last: until then, not done
+        d.mkdir(parents=True, exist_ok=True)
+        with portable.locked(d / ".lock"):
+            if (d / "roles").is_dir() or not (d / "members").is_dir():
+                _convert(d)
+    return d
 
 
 @contextmanager
 def _locked(state: Path):
-    """One lock for every team and role: a handover changes a role and redraws each team that
+    """One lock for every team and member: a handover changes a member and redraws each team that
     names it, so finer locks would only buy deadlocks. Changes are rare."""
-    with portable.locked(_dir(state) / ".lock"):
+    d = _dir(state)
+    with portable.locked(d / ".lock"):
         yield
 
 
@@ -87,67 +99,153 @@ def _write(p: Path, data: dict) -> None:
     tmp.replace(p)
 
 
+def lineage(name: str) -> str:
+    """A member's key: its name without the generation (`app-comp-audio-g2` → `app-comp-audio`).
+    A name of the old kind (`app-live-8f`) has no generation in it; see _key."""
+    return re.sub(r"-g\d+$", "", name)
+
+
+def _has_gen(name: str) -> bool:
+    return lineage(name) != name
+
+
+def _key(name: str, now: str) -> str:
+    """The lineage a member is filed under when its live name is `name` and it is filed under `now`:
+    a name in the new form says it; an old-kind name keeps the key it has, or is its own key when that
+    key is a bare role word (`comp`, `rel`: they are what broke, one team couldn't hold two comps)."""
+    if _has_gen(name):
+        return lineage(name)
+    return name if not now or now in KINDS or now in ("rm", "member") else now
+
+
+def _guess(name: str) -> str:
+    """An old "member" row's role, from its name's words; never po or rel, which only the old
+    rosters' rm and po say. `buddy team set NAME --role R` corrects a wrong one."""
+    words = set(name.split("-"))
+    return "rev" if words & {"rev", "review"} else "dbg" if "dbg" in words else "edu" if "edu" in words else "comp"
+
+
+def _convert(d: Path) -> None:
+    """Once (2026-11-20): roles/<role>.json, keyed by a word the RM chose and global across teams,
+    becomes members/<lineage>.json with the role a field (an old rm → rel, po → po, a member's from
+    its name); every roster follows. The generations, names, dates, books and events are kept as
+    they were, and roles/ stays beside it as roles.pre-lineage/ (results are never deleted)."""
+    old, tmp, done = d / "roles", d / "members.tmp", d / "members"
+    rosters = {p: json.loads(p.read_text(encoding="utf-8")) for p in sorted(d.glob("*.json"))}
+    if not done.is_dir():  # 1. the records, into members.tmp/, then renamed whole (the rosters still old)
+        tmp.mkdir(exist_ok=True)
+        kinds = {x["role"]: x.get("kind", "member") for tm in rosters.values() for x in tm.get("roster", []) if "role" in x}
+        for p in sorted(old.glob("*.json")) if old.is_dir() else []:
+            r = json.loads(p.read_text(encoding="utf-8"))
+            was, gens = p.stem, r.get("generations") or []
+            r.pop("role", None)
+            name = (live(r) or (gens[-1] if gens else {"name": was}))["name"]
+            key = _key(name, was)
+            if not NAME.match(key) or (key != was and (tmp / f"{key}.json").exists()):
+                key = was  # two old roles with one lineage (not in the data of 2026-11-20): it keeps its old key
+            role_ = {"rm": "rel", "po": "po"}.get(kinds.get(was, "member")) or _guess(name)
+            _write(tmp / f"{key}.json", {"lineage": key, "role": role_, **r, "converted_from": was})
+        tmp.rename(done)
+    moved = {r["converted_from"]: r["lineage"] for r in
+             (json.loads(p.read_text(encoding="utf-8")) for p in done.glob("*.json")) if r.get("converted_from")}
+    for p, tm in rosters.items():  # 2. the rosters (each entry once: a converted one is left alone)
+        if any("role" in x for x in tm.get("roster", [])):
+            tm["roster"] = [{"member": moved.get(x["role"], x["role"]), "joined": x.get("joined", "")}
+                            if "role" in x else x for x in tm["roster"]]
+            _write(p, tm)
+    if old.is_dir():  # 3. last: kept beside, never deleted (a second one, e.g. an old buddy's, numbered)
+        keep, n = d / "roles.pre-lineage", 2
+        while keep.exists():
+            keep, n = d / f"roles.pre-lineage.{n}", n + 1
+        old.rename(keep)
+
+
 def load(state: Path, team: str) -> dict | None:
     return _read(_dir(state) / f"{team}.json") if NAME.match(team) else None
 
 
-def role(state: Path, name: str) -> dict | None:
-    return _read(_dir(state) / "roles" / f"{name}.json") if NAME.match(name) else None
+def record(state: Path, key: str) -> dict | None:
+    """A member's record by its lineage: its role, area, project, book and generations."""
+    return _read(_dir(state) / "members" / f"{key}.json") if NAME.match(key) else None
 
 
 def all_teams(state: Path) -> list[dict]:
     return [json.loads(p.read_text(encoding="utf-8")) for p in sorted(_dir(state).glob("*.json"))]
 
 
-def all_roles(state: Path) -> list[dict]:
-    return [json.loads(p.read_text(encoding="utf-8")) for p in sorted((_dir(state) / "roles").glob("*.json"))]
+def all_members(state: Path) -> list[dict]:
+    return [json.loads(p.read_text(encoding="utf-8")) for p in sorted((_dir(state) / "members").glob("*.json"))]
 
 
 def live(r: dict) -> dict | None:
-    """The generation carrying the role now, or None once it retired."""
+    """The generation carrying the member now, or None once it retired."""
     g = r["generations"][-1] if r.get("generations") else None
     return g if g and not g.get("retired") else None
 
 
-def sessions_to_roles(state: Path) -> dict[str, str]:
-    """Every session that ever carried a role (each generation's name) -> that role. A session
-    named in two roles maps to the last one read (not in the data as of 2026-11-10: 13 sessions,
-    13 names); the team view's rows still list its stories under both."""
-    return {g["name"]: r["role"] for r in all_roles(state) for g in r.get("generations", [])}
+def carrying(state: Path, name: str) -> dict | None:
+    """The member whose live generation is called `name`."""
+    return next((r for r in all_members(state) if (g := live(r)) and g["name"] == name), None)
+
+
+def sessions_to_members(state: Path) -> dict[str, str]:
+    """Every session that ever carried a member (each generation's name) -> its lineage."""
+    return {g["name"]: r["lineage"] for r in all_members(state) for g in r.get("generations", [])}
 
 
 def member(story: dict, index: dict[str, str], team_of: dict[str, list[str]]) -> dict | None:
-    """The team member a short story belongs to, from its `who` (a session's name): its role
-    and the team to show it in. The team the story recorded first, then the role's only team;
-    a role on several teams with none recorded gives them all ("teams"), for the page to ask."""
-    role_name = index.get(story.get("who") or "")
-    if not role_name:
+    """The team member a short story belongs to, from its `who` (a session's name): its lineage
+    (`role` here: the page's links name it so) and the team to show it in. The team the story
+    recorded first, then the member's only team; one on several teams with none recorded gives
+    them all ("teams"), for the page to ask."""
+    key = index.get(story.get("who") or "")
+    if not key:
         return None
-    teams = team_of.get(role_name, [])
+    teams = team_of.get(key, [])
     if story.get("team") in teams:
-        return {"role": role_name, "team": story["team"]}
+        return {"role": key, "team": story["team"]}
     if len(teams) == 1:
-        return {"role": role_name, "team": teams[0]}
-    return {"role": role_name, "team": "", "teams": teams} if teams else None
+        return {"role": key, "team": teams[0]}
+    return {"role": key, "team": "", "teams": teams} if teams else None
 
 
 def team_index(state: Path) -> dict[str, list[str]]:
-    """role -> the teams whose roster has it."""
+    """lineage -> the teams whose roster has it."""
     out: dict[str, list[str]] = {}
     for tm in all_teams(state):
         for x in tm["roster"]:
-            out.setdefault(x["role"], []).append(tm["team"])
+            out.setdefault(x["member"], []).append(tm["team"])
     return out
 
 
-def teams_of(state: Path, role_name: str) -> list[str]:
-    return [tm["team"] for tm in all_teams(state) if any(x["role"] == role_name for x in tm["roster"])]
+def teams_of(state: Path, key: str) -> list[str]:
+    return [tm["team"] for tm in all_teams(state) if any(x["member"] == key for x in tm["roster"])]
 
 
 def of_session(state: Path, name: str) -> list[str]:
-    """The teams whose roster has a role carried now by the session called `name`."""
-    carried = {r["role"] for r in all_roles(state) if (g := live(r)) and g["name"] == name}
-    return [tm["team"] for tm in all_teams(state) if any(x["role"] in carried for x in tm["roster"])]
+    """The teams whose roster has the member carried now by the session called `name`."""
+    r = carrying(state, name)
+    return teams_of(state, r["lineage"]) if r else []
+
+
+def roster(state: Path, tm: dict) -> list[tuple[dict, dict]]:
+    """The team's (roster entry, member record) pairs in the card's order: by role (rel, po, comp,
+    rev, dbg, edu), then area, then name. A record that is missing draws as a comp with no name."""
+    out = []
+    for x in tm["roster"]:
+        r = record(state, x["member"]) or {"lineage": x["member"], "role": "comp", "generations": []}
+        out.append((x, r))
+    return sorted(out, key=lambda p: (ORDER.get(p[1].get("role"), 9), p[1].get("area", ""), _who_r(p[1])))
+
+
+def _who_r(r: dict) -> str:
+    g = live(r) or (r["generations"][-1] if r.get("generations") else None)
+    return g["name"] if g else r["lineage"]
+
+
+def _rel(state: Path, tm: dict) -> str:
+    """The lineage of the team's rel (its RM), or ""."""
+    return next((r["lineage"] for _, r in roster(state, tm) if r.get("role") == "rel"), "")
 
 
 def _check_name(what: str, name: str) -> None:
@@ -155,12 +253,34 @@ def _check_name(what: str, name: str) -> None:
         raise ValueError(f"{what} {name!r}: lower case letters, digits, '.', '_' and '-' only")
 
 
-def _taken(state: Path, name: str) -> str | None:
-    """The role a generation name already belongs to: a name is never reused."""
-    for r in all_roles(state):
-        if any(g["name"] == name or name in g.get("renamed_from", []) for g in r["generations"]):
-            return r["role"]
+def _names(gens: list[dict]) -> set[str]:
+    return {n for g in gens for n in (g["name"], *g.get("renamed_from", []))}
+
+
+def _taken(state: Path, name: str, own: str = "") -> str | None:
+    """The lineage a generation name already belongs to: a name is never reused. A name held only
+    in the merged history of `own` (a duplicate of the same member, merge()) is its own to take."""
+    for r in all_members(state):
+        if name in _names(r["generations"]):
+            return r["lineage"]
+        if r["lineage"] != own and any(name in _names(m["record"].get("generations", [])) for m in r.get("merged", [])):
+            return r["lineage"]
     return None
+
+
+def _carried(state: Path, name: str) -> dict:
+    r = carrying(state, name)
+    if r is None:
+        raise ValueError(f"no member is carried by {name!r} now" + (
+            f" ({name} was a generation of {k})" if (k := _taken(state, name)) else ""))
+    return r
+
+
+def _one_per_team(state: Path, tm: dict, role_: str, key: str) -> None:
+    if role_ in ONE_PER_TEAM:
+        for _, r in roster(state, tm):
+            if r["lineage"] != key and r.get("role") == role_:
+                raise ValueError(f"team {tm['team']} has its {role_} already ({_who_r(r)}): one per team")
 
 
 def _event(team: dict, text: str, **keys) -> None:
@@ -168,163 +288,221 @@ def _event(team: dict, text: str, **keys) -> None:
     team["events"] = team["events"][-50:]
 
 
-def new(state: Path, channels: list[Channel], chats: list[str], team: str, rm_role: str,
-        rm_name: str = "", *, area: str = "", project: str = "", book: str = "",
-        opts: dict | None = None) -> dict:
-    """A team, its RM's role (new, or one that exists already), and its card."""
+def new(state: Path, channels: list[Channel], chats: list[str], team: str, rel: str, *, area: str = "",
+        project: str = "", book: str = "", opts: dict | None = None) -> dict:
+    """A team, its rel (the RM: a new member, or one carried now on another team), and its card."""
     _check_name("team", team)
     with _locked(state):
         if load(state, team):
             raise ValueError(f"team {team} exists already")
         tm = {"team": team, "started": _now(), "chats": chats, "copies": {}, "roster": [],
               "asks": [], "events": []}
-        _enrol(state, tm, rm_role, rm_name, "rm", area, project, book)
-        _event(tm, t("team.ev.new", rm=_who(state, rm_role)))
+        _enrol(state, tm, rel, "rel", area, project, book)
+        _event(tm, t("team.ev.new", rm=rel))
         _save(state, tm)
         return _draw(state, channels, tm, opts, force=True)
 
 
-def join(state: Path, channels: list[Channel], team: str, role_name: str, name: str = "", *,
-         kind: str = "member", area: str = "", project: str = "", book: str = "",
-         opts: dict | None = None) -> dict:
-    """A role joins the team's roster: a new role with its first generation `name`, or a role
-    another team has already (no name, or its live one's)."""
+def join(state: Path, channels: list[Channel], team: str, name: str, *, role: str = "comp", area: str = "",
+         project: str = "", book: str = "", opts: dict | None = None) -> dict:
+    """A member joins the team: the session `name` carries it. A new lineage starts at its first
+    generation; a retired one gets its next; one carried now by `name` on another team is the same
+    member there too. One rel and one po per team, any number of the others (a comp per area)."""
     with _locked(state):
         tm = _team(state, team)
-        if any(x["role"] == role_name for x in tm["roster"]):
-            raise ValueError(f"{role_name} is on team {team} already")
-        _enrol(state, tm, role_name, name, kind, area, project, book)
-        _event(tm, t("team.ev.join", who=_who(state, role_name), kind=t(f"team.kindname.{kind}")))
+        _enrol(state, tm, name, role, area, project, book)
+        _event(tm, t("team.ev.join", who=name, kind=t(f"team.kindname.{role}")))
         _save(state, tm)
         out = _draw(state, channels, tm, opts, force=True)
-        _others(state, channels, role_name, team, opts)
+        _others(state, channels, lineage_of(state, name), team, opts)
         return out
 
 
-def _enrol(state: Path, tm: dict, role_name: str, name: str, kind: str, area: str, project: str,
-           book: str) -> None:
-    _check_name("role", role_name)
-    if kind not in KINDS:
-        raise ValueError(f"kind {kind!r}: one of {', '.join(KINDS)}")
-    if kind in ("rm", "po") and any(x["kind"] == kind for x in tm["roster"]):
-        raise ValueError(f"team {tm['team']} has its {kind} already: one per team")
-    r = role(state, role_name)
+def lineage_of(state: Path, name: str) -> str:
+    r = carrying(state, name)
+    return r["lineage"] if r else ""
+
+
+def _enrol(state: Path, tm: dict, name: str, role_: str, area: str, project: str, book: str) -> None:
+    _check_name("name", name)
+    if role_ not in KINDS:
+        raise ValueError(f"role {role_!r}: one of {', '.join(KINDS)}")
+    r = carrying(state, name)
     if r is None:
-        _check_name("session", name)
         if (other := _taken(state, name)):
             raise ValueError(f"{name} is a generation of {other} already: a name is never reused")
-        r = {"role": role_name, "area": area, "project": project, "book": book or f"role-{role_name}.md",
-             "started": _now(), "generations": [{"name": name, "gen": 1, "joined": _now(), "retired": None}]}
-    else:
-        g = live(r)
-        if g is None:
-            raise ValueError(f"role {role_name} has retired")
-        if name and name != g["name"]:
-            raise ValueError(f"role {role_name} is carried by {g['name']}, not {name}: "
-                             f"use handover for a new generation")
-        for k, v in (("area", area), ("project", project), ("book", book)):
-            if v:
-                r[k] = v
-    _write(_dir(state) / "roles" / f"{role_name}.json", r)
-    tm["roster"].append({"role": role_name, "kind": kind, "joined": _now()})
+        key = lineage(name)
+        r = record(state, key)
+        if r and (g := live(r)):
+            raise ValueError(f"{key} is carried by {g['name']}, not {name}: use handover for a new generation")
+        if r:  # a retired lineage: its next generation
+            last = r["generations"][-1]
+            r["generations"].append({"name": name, "gen": last["gen"] + 1, "joined": _now(), "retired": None,
+                                     "after": last["name"]})
+            r["role"] = role_
+        else:
+            r = {"lineage": key, "role": role_, "area": area, "project": project, "book": book or f"role-{key}.md",
+                 "started": _now(), "generations": [{"name": name, "gen": 1, "joined": _now(), "retired": None}]}
+    elif r.get("role") != role_:
+        raise ValueError(f"{name} is a {r.get('role')} already: `buddy team set {name} --role {role_}` changes it")
+    key = r["lineage"]
+    if any(x["member"] == key for x in tm["roster"]):
+        raise ValueError(f"{name} is on team {tm['team']} already")
+    _one_per_team(state, tm, role_, key)
+    for k, v in (("area", area), ("project", project), ("book", book)):
+        if v:
+            r[k] = v
+    _write(_dir(state) / "members" / f"{key}.json", r)
+    tm["roster"].append({"member": key, "joined": _now()})
 
 
-def handover(state: Path, channels: list[Channel], role_name: str, old: str, new_name: str, *,
-             note: str = "", opts: dict | None = None) -> list[dict]:
-    """The old generation retires, the new one carries the role: the same for an RM, a PO or an
-    area member, and the teams' files don't change. Every team naming the role is redrawn."""
+def _target(state: Path, r: dict, name: str) -> str:
+    """The lineage the member is filed under once `name` carries it; refused when another has it."""
+    key = _key(name, r["lineage"])
+    if key != r["lineage"] and record(state, key):
+        raise ValueError(f"lineage {key} exists already (another member): pick another name")
+    return key
+
+
+def _move(state: Path, r: dict, key: str) -> None:
+    """Write the record under `key`, and every roster naming its old lineage with it."""
+    was = r["lineage"]
+    if key != was:
+        r["lineage"] = key
+        r.setdefault("lineages_before", []).append(was)
+    _write(_dir(state) / "members" / f"{key}.json", r)  # the record first: a roster never names a missing one
+    if key != was:
+        for tm in all_teams(state):
+            if any(x["member"] == was for x in tm["roster"]):
+                tm["roster"] = [{**x, "member": key} if x["member"] == was else x for x in tm["roster"]]
+                _save(state, tm)
+        (_dir(state) / "members" / f"{was}.json").unlink(missing_ok=True)
+
+
+def handover(state: Path, channels: list[Channel], old: str, new_name: str, *, note: str = "",
+             opts: dict | None = None) -> list[dict]:
+    """The old generation retires, the new one carries the member: the same for a rel, a po or a
+    comp. Every team naming it is redrawn."""
     with _locked(state):
-        r = _role(state, role_name)
-        g = live(r)
-        if g is None or g["name"] != old:
-            raise ValueError(f"{role_name} is carried by {g['name'] if g else 'nobody'}, not {old}")
-        _check_name("session", new_name)
+        r = _carried(state, old)
+        _check_name("name", new_name)
         if (other := _taken(state, new_name)):
             raise ValueError(f"{new_name} is a generation of {other} already: a name is never reused")
+        key = _target(state, r, new_name)
+        g = live(r)
         g["retired"] = _now()
         r["generations"].append({"name": new_name, "gen": g["gen"] + 1, "joined": _now(), "retired": None,
                                  "after": old, **({"note": note} if note else {})})
-        _write(_dir(state) / "roles" / f"{role_name}.json", r)
-        return _redraw_role(state, channels, role_name, opts, "handover", t(
+        _move(state, r, key)
+        return _redraw(state, channels, key, opts, "handover", t(
             "team.ev.handover", old=old, gen=g["gen"], new=new_name, book=r.get("book", "")),
-            role=role_name, old=old, new=new_name, book=r.get("book", ""))
+            role=key, old=old, new=new_name, book=r.get("book", ""))
 
 
-def rename(state: Path, channels: list[Channel], role_name: str, old: str, new_name: str, *,
+def rename(state: Path, channels: list[Channel], old: str, new_name: str, *,
            opts: dict | None = None) -> list[dict]:
     """The live generation's new name, the same generation (the owner, 2026-11-19: names put the context
-    first, `<context>-<role>-g<N>`). Its history keeps the old one in `renamed_from`; no alias: the old
-    name no longer finds it. Every team naming the role is redrawn."""
+    first, `<context>-<role>-g<N>`), found by its name on whichever team it is. Its history keeps the
+    old one in `renamed_from`; no alias: the old name no longer finds it, and is never taken again."""
     with _locked(state):
-        r = _role(state, role_name)
-        g = live(r)
-        if g is None or g["name"] != old:
-            raise ValueError(f"{role_name} is carried by {g['name'] if g else 'nobody'}, not {old}")
-        _check_name("session", new_name)
-        if (other := _taken(state, new_name)):
+        r = _carried(state, old)
+        _check_name("name", new_name)
+        if (other := _taken(state, new_name, own=r["lineage"])):
             raise ValueError(f"{new_name} is a generation of {other} already: a name is never reused")
+        key = _target(state, r, new_name)
+        g = live(r)
         g["name"] = new_name
         g.setdefault("renamed_from", []).append(old)
-        _write(_dir(state) / "roles" / f"{role_name}.json", r)
-        return _redraw_role(state, channels, role_name, opts, "rename",
-                            t("team.ev.rename", old=old, new=new_name, gen=g["gen"]), role=role_name, old=old, new=new_name)
+        _move(state, r, key)
+        return _redraw(state, channels, key, opts, "rename",
+                       t("team.ev.rename", old=old, new=new_name, gen=g["gen"]), role=key, old=old, new=new_name)
 
 
-def retire(state: Path, channels: list[Channel], role_name: str, name: str, *, note: str = "",
-           opts: dict | None = None) -> list[dict]:
-    """The role ends, no successor: off every roster. An RM's role can't: a team needs its RM,
-    so it is handed over instead."""
-    with _locked(state):
-        r = _role(state, role_name)
-        g = live(r)
-        if g is None or g["name"] != name:
-            raise ValueError(f"{role_name} is carried by {g['name'] if g else 'nobody'}, not {name}")
-        rms = [tm["team"] for tm in all_teams(state)
-               if any(x["role"] == role_name and x["kind"] == "rm" for x in tm["roster"])]
-        if rms:
-            raise ValueError(f"{role_name} is the RM of {', '.join(rms)}: a team needs its RM, hand it over")
-        g["retired"] = _now()
-        if note:
-            g["note"] = note
-        _write(_dir(state) / "roles" / f"{role_name}.json", r)
-        out = []
-        for team in teams_of(state, role_name):
-            tm = load(state, team)
-            tm["roster"] = [x for x in tm["roster"] if x["role"] != role_name]
-            _event(tm, _noted(t("team.ev.retire", who=name, gen=g["gen"]), note), kind="retire", role=role_name)
-            _save(state, tm)
-            out.append(_draw(state, channels, tm, opts, force=True))
-        return out
-
-
-def leave(state: Path, channels: list[Channel], team: str, role_name: str, *,
-          opts: dict | None = None) -> dict:
-    """Off this team's roster; the role goes on elsewhere (or nowhere, still not retired)."""
+def retire(state: Path, channels: list[Channel], team: str, name: str, *, note: str = "",
+           opts: dict | None = None) -> dict:
+    """The member leaves the team's card; its record stays (history, books). On no team any more,
+    its generation retires, and its lineage may get a new generation later (join). A team's rel
+    can't: a team needs its RM, so it is handed over instead."""
     with _locked(state):
         tm = _team(state, team)
-        x = next((x for x in tm["roster"] if x["role"] == role_name), None)
-        if x is None:
-            raise ValueError(f"{role_name} is not on team {team}")
-        if x["kind"] == "rm":
-            raise ValueError(f"{role_name} is the RM of {team}: a team needs its RM, hand it over")
-        tm["roster"].remove(x)
-        _event(tm, t("team.ev.leave", who=_who(state, role_name)))
+        r = _carried(state, name)
+        key = r["lineage"]
+        if not any(x["member"] == key for x in tm["roster"]):
+            raise ValueError(f"{name} is not on team {team}")
+        if r.get("role") == "rel":
+            raise ValueError(f"{name} is the RM of {team}: a team needs its RM, hand it over")
+        tm["roster"] = [x for x in tm["roster"] if x["member"] != key]
+        still = [n for n in teams_of(state, key) if n != team]
+        if not still:
+            g = live(r)
+            g["retired"] = _now()
+            if note:
+                g["note"] = note
+            _write(_dir(state) / "members" / f"{key}.json", r)
+        _event(tm, _noted(t("team.ev.leave" if still else "team.ev.retire", who=name), note),
+               kind="retire", role=key)
         _save(state, tm)
         out = _draw(state, channels, tm, opts, force=True)
-        _others(state, channels, role_name, team, opts)
+        _others(state, channels, key, team, opts)
         return out
 
 
-def _others(state: Path, channels: list[Channel], role_name: str, team: str, opts: dict | None) -> None:
-    """The other teams naming the role: their "also" changed, so their banded facts did."""
-    for name in teams_of(state, role_name):
+def merge(state: Path, channels: list[Channel], dup: str, into: str, *, opts: dict | None = None) -> list[dict]:
+    """A duplicate record of the same member (2026-11-20: the conversion left one member twice,
+    `app-shadow-comp` and `comp-shadow`) folds into the live member `into`: the duplicate must be
+    retired and on no team; its whole record is kept inside the member's (`merged`), and a copy of its
+    file in teams/merged/. After it, the member may take a name held only in that history (rename)."""
+    with _locked(state):
+        r = _carried(state, into)
+        d = record(state, dup)
+        if d is None:
+            raise ValueError(f"no member with the lineage {dup!r}")
+        if d["lineage"] == r["lineage"]:
+            raise ValueError(f"{dup} is {into}'s own lineage")
+        if live(d) or teams_of(state, dup):
+            raise ValueError(f"{dup} is still live or on a team: retire it from every team first")
+        keep = _dir(state) / "merged"
+        keep.mkdir(exist_ok=True)
+        _write(keep / f"{dup}.{time.strftime('%Y%m%d-%H%M%S')}.json", d)
+        r.setdefault("merged", []).append({"lineage": dup, "at": _now(), "record": d})
+        _write(_dir(state) / "members" / f"{r['lineage']}.json", r)
+        (_dir(state) / "members" / f"{dup}.json").unlink()
+        return _redraw(state, channels, r["lineage"], opts, "merge", t("team.ev.merge", dup=dup, who=into),
+                       role=r["lineage"], dup=dup)
+
+
+def set_(state: Path, channels: list[Channel], name: str, *, role: str = "", area: str = "", project: str = "",
+         book: str = "", opts: dict | None = None) -> list[dict]:
+    """Correct a member's role, area, project or book (a role the conversion guessed, a comp's area);
+    one rel and one po per team still holds. Every team naming it is redrawn."""
+    with _locked(state):
+        r = _carried(state, name)
+        key = r["lineage"]
+        if role:
+            if role not in KINDS:
+                raise ValueError(f"role {role!r}: one of {', '.join(KINDS)}")
+            if r.get("role") == "rel" and role != "rel" and (rm := [n for n in teams_of(state, key)]):
+                raise ValueError(f"{name} is the RM of {', '.join(rm)}: a team needs its RM, hand it over")
+            for n in teams_of(state, key):
+                _one_per_team(state, load(state, n), role, key)
+        for k, v in (("role", role), ("area", area), ("project", project), ("book", book)):
+            if v:
+                r[k] = v
+        _write(_dir(state) / "members" / f"{key}.json", r)
+        what = ", ".join(f"{k} {v}" for k, v in (("role", role), ("area", area), ("project", project), ("book", book)) if v)
+        return _redraw(state, channels, key, opts, "set", t("team.ev.set", who=name, what=what or "-"), role=key)
+
+
+def _others(state: Path, channels: list[Channel], key: str, team: str, opts: dict | None) -> None:
+    """The other teams naming the member: their "also" changed, so their banded facts did."""
+    for name in teams_of(state, key):
         if name != team:
             _draw(state, channels, load(state, name), opts)
 
 
-def _redraw_role(state, channels, role_name, opts, kind, text, **keys) -> list[dict]:
+def _redraw(state, channels, key, opts, kind, text, **keys) -> list[dict]:
     out = []
-    for name in teams_of(state, role_name):
+    for name in teams_of(state, key):
         tm = load(state, name)
         _event(tm, text, kind=kind, **keys)
         _save(state, tm)
@@ -339,21 +517,13 @@ def _team(state: Path, team: str) -> dict:
     return tm
 
 
-def _role(state: Path, name: str) -> dict:
-    r = role(state, name)
-    if r is None:
-        raise ValueError(f"no role {name!r}")
-    return r
-
-
 def _save(state: Path, tm: dict) -> None:
     _write(_dir(state) / f"{tm['team']}.json", tm)
 
 
-def _who(state: Path, role_name: str) -> str:
-    r = role(state, role_name) or {}
-    g = live(r) if r else None
-    return g["name"] if g else role_name
+def _who(state: Path, key: str) -> str:
+    r = record(state, key)
+    return _who_r(r) if r else key
 
 
 def _kind(kind: str) -> str:
@@ -505,20 +675,20 @@ def _book(project: str, book: str) -> float | None:
 
 
 def observe(state: Path, tm: dict) -> list[dict]:
-    """The card's rows, RM first, then the PO, then the members, as they are right now."""
+    """The card's rows in roster() order (rel, po, comp, rev, dbg, edu; then area), as they are
+    right now. `kind` is the member's role, `role` its lineage (the page's links name it so)."""
     sessions, windows = _sessions(), _pys_windows()
     stories = [s for s in shorts.all_stories(state) if s["status"] == "running"]
     rows = []
-    for x in sorted(tm["roster"], key=lambda x: ORDER.get(x["kind"], 9)):
-        r = role(state, x["role"]) or {"role": x["role"], "generations": []}
-        g = live(r) or (r["generations"][-1] if r["generations"] else {"name": x["role"], "gen": 0})
+    for x, r in roster(state, tm):
+        g = live(r) or (r["generations"][-1] if r["generations"] else {"name": x["member"], "gen": 0})
         s = sessions.get(g["name"])
         pid = s["pid"] if s else None
         wid = windows.get(pid) if pid else None
         ctx = _ctx(wid) if wid is not None else None
         mine = [st for st in stories if (pid and (st.get("window") or {}).get("pid") == pid)
                 or (st.get("who") and st["who"] == g["name"])]
-        rows.append({"kind": x["kind"], "role": x["role"], "area": r.get("area", ""), "name": g["name"],
+        rows.append({"kind": r.get("role", "comp"), "role": r["lineage"], "area": r.get("area", ""), "name": g["name"],
                      "gen": g["gen"], "live": bool(s), "pid": pid, "wid": wid,
                      "started": s["started"] if s else "",
                      "ctx": ctx[0] if ctx else None, "csize": ctx[1] if ctx else "",
@@ -527,7 +697,7 @@ def observe(state: Path, tm: dict) -> list[dict]:
                      "stories": [{"id": st["id"], "part": bool(st.get("parent")),
                                   "step": (shorts._here(st) or {}).get("name", "")}
                                  for st in sorted(mine, key=lambda st: -st["id"])],
-                     "also": [n for n in teams_of(state, x["role"]) if n != tm["team"]]})
+                     "also": [n for n in teams_of(state, r["lineage"]) if n != tm["team"]]})
     return rows
 
 
@@ -540,7 +710,8 @@ def title(tm: dict) -> str:
 def markdown(tm: dict, rows: list[dict], age_warn: int = AGE_WARN) -> str:
     lines = []
     for r in rows:
-        head = f"**{_kind(r['kind'])}** {r['name']} (g{r['gen']})" + (f" · {r['area']}" if r["area"] else "")
+        gen = "" if _has_gen(r["name"]) else f" (g{r['gen']})"  # a name in the new form says it
+        head = f"**{_kind(r['kind'])}** {r['name']}{gen}" + (f" · {r['area']}" if r["area"] else "")
         win = f"w{r['wid']}" if r["wid"] is not None else (t("team.no_window") if r["live"] else t("team.gone"))
         age = (t("team.years", n=r["years"]) if r["years"] is not None else "-") + " · " \
             + (f"{r['ctx']}%" + (" ⚠️" if r["ctx"] >= age_warn else "") if r["ctx"] is not None else "-")
@@ -624,7 +795,7 @@ def board(state: Path) -> str:
     """Every team, one line each, for /team and `buddy team list`."""
     out = []
     for tm in all_teams(state):
-        rm = next((x["role"] for x in tm["roster"] if x["kind"] == "rm"), "")
+        rm = _rel(state, tm)
         out.append(t("team.board_line", team=tm["team"], rm=_who(state, rm) if rm else "-",
                      n=len(tm["roster"])))
     return "\n".join(out) or t("team.none")
@@ -634,8 +805,8 @@ def board(state: Path) -> str:
 
 def _rm_window(state: Path, tm: dict) -> dict | None:
     """Where the RM can be woken: its claude in a pys window, as short_stories.hold records it."""
-    rm = next((x["role"] for x in tm["roster"] if x["kind"] == "rm"), None)
-    r = role(state, rm) if rm else None
+    rm = _rel(state, tm)
+    r = record(state, rm) if rm else None
     g = live(r) if r else None
     s = _sessions().get(g["name"]) if g else None
     wid = _pys_windows().get(s["pid"]) if s else None

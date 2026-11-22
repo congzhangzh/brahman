@@ -49,19 +49,18 @@ class Team:
         there."""
         stories = shorts.all_stories(self.state_dir)
         rows = []
-        for x in sorted(tm["roster"], key=lambda x: teams.ORDER.get(x["kind"], 9)):
-            r = teams.role(self.state_dir, x["role"]) or {"generations": []}
+        for x, r in teams.roster(self.state_dir, tm):
             names = {g["name"] for g in r.get("generations", [])}
             mine = [s for s in stories if s.get("who") in names and s.get("team", tm["team"]) == tm["team"]]
             mine.sort(key=lambda s: (s["status"] != "running", -s["id"]))
-            rows.append({"kind": x["kind"], "role": x["role"], "area": r.get("area", ""),
-                         "name": teams._who(self.state_dir, x["role"]),
+            rows.append({"kind": r.get("role", "comp"), "role": r["lineage"], "area": r.get("area", ""),
+                         "name": teams._who_r(r),
                          "stories": [{"n": s["id"], "title": s["title"], "status": s["status"],
                                       "started": s["started"]} for s in mine]})
         return rows
 
     def _run(self, tm: dict) -> dict:
-        rm = next((x["role"] for x in tm["roster"] if x["kind"] == "rm"), "")
+        rm = teams._rel(self.state_dir, tm)
         events = tm.get("events", [])
         return {
             "id": f"{self.name}:{tm['team']}", "kind": "family", "name": self.name,
@@ -71,7 +70,7 @@ class Team:
             "steps": [{"step": e["text"], "status": "done", "at": e["at"]} for e in events[-30:]],
             "result": events[-1]["text"] if events else "",
             "fitness": {},
-            "team": {"name": tm["team"], "rm": rm, "roles": len(tm["roster"])}}
+            "team": {"name": tm["team"], "rm": rm, "members": len(tm["roster"])}}
 
     def markdown(self, arg: str = "") -> str:
         name, _, text = arg.strip().partition(" ")

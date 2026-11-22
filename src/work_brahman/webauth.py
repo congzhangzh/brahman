@@ -20,6 +20,16 @@ Host check alone stops a browser, not a person who sets the header. Hence:
 
 Plain HTTP: on the LAN the token and the pages can be read by anyone on that network (doctor
 says so). An SSH client on the device itself (`-L` to 127.0.0.1) needs none of this.
+
+**The owner secret** (the owner, 2026-11-21: "one secret", "it should all be localhost", "owner.secret
+is enough"): when `~/.config/brahman/owner.secret` exists, it is checked first, everywhere (the
+workbench, the event stream, the login page, ?token=), and the buddy is loopback only ([web] hosts not
+honoured). The file holds only the SHA-256 hex of the secret (`buddy auth new` prints the secret once;
+the devices keep it): a request's secret is hashed and compared in constant time, so the hash itself
+is no credential. Its cookie is an HMAC of that hash under a random key kept in the buddy's state
+(0600), so the hash file alone forges no cookie, and a new secret ends every old cookie. BUDDY_WEB_TOKEN
+and the device tokens still work after it (nothing breaks while devices move over); doctor lists them.
+Without the file, everything is as before.
 """
 
 from __future__ import annotations
@@ -44,7 +54,7 @@ _env_cache: dict = {"path": None, "mtime": None, "checked": 0.0, "token": None}
 
 def token(env=None) -> str:
     """BUDDY_WEB_TOKEN, followed live (the owner, 2026-11-12: "make the allowlist work without a
-    restart"): the .env beside the watched buddy.toml is read again when it changes, at most once
+    restart"): buddy.env beside the watched buddy.toml is read again when it changes, at most once
     a second; without a watched buddy.toml (tests, other commands) the environment says it."""
     if env is not None:
         return (env.get(ENV) or "").strip()
@@ -52,7 +62,8 @@ def token(env=None) -> str:
     cfg_path = notify._watch.get("path")
     if cfg_path is None:
         return (os.environ.get(ENV) or "").strip()
-    p = Path(cfg_path).parent / ".env"
+    from . import install
+    p = install.env_file(Path(cfg_path))
     now = time.time()
     if _env_cache["path"] != p or now - _env_cache["checked"] >= 1.0:
         _env_cache.update(path=p, checked=now)
@@ -66,8 +77,111 @@ def token(env=None) -> str:
     return _env_cache["token"] or ""
 
 
+OWNER_FILE = "owner.secret"
+OWNER_COOKIE = "buddy_owner"
+
+
+def owner_path() -> Path:
+    from . import install
+    return install.config_dir() / OWNER_FILE
+
+
+def owner_on() -> bool:
+    """The owner secret is set up (the file exists): checked first, loopback only."""
+    return owner_path().exists()
+
+
+def owner_hash() -> str:
+    """The stored SHA-256 hex, or "" (no file, unreadable, or not 64 hex digits: nobody gets in by it)."""
+    try:
+        h = owner_path().read_text(encoding="utf-8").strip().lower()
+    except OSError:
+        return ""
+    return h if len(h) == 64 and all(c in "0123456789abcdef" for c in h) else ""
+
+
+def owner_ok(given: str) -> bool:
+    """The secret itself (never its hash): SHA-256 of it equals the stored hash, in constant time."""
+    h = owner_hash()
+    return bool(h and given) and hmac.compare_digest(hashlib.sha256(given.strip().encode()).hexdigest().encode(), h.encode())
+
+
+def _cookie_key() -> bytes:
+    """A random key in the buddy's state (0600), made once: the owner cookie's HMAC key."""
+    import secrets
+    d = Path(os.environ.get("XDG_STATE_HOME") or "~/.local/state").expanduser() / "work_brahman"
+    p = d / "owner-cookie.key"
+    try:
+        return bytes.fromhex(p.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        d.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(secrets.token_hex(32), encoding="utf-8")
+        tmp.chmod(0o600)
+        tmp.replace(p)
+        return bytes.fromhex(p.read_text(encoding="utf-8").strip())
+
+
+def owner_cookie_value() -> str:
+    h = owner_hash()
+    return hmac.new(_cookie_key(), b"brahman owner cookie v1 " + h.encode(), hashlib.sha256).hexdigest() if h else ""
+
+
+def required() -> bool:
+    """Does a request need a secret? The owner secret set up, or a web token set."""
+    return owner_on() or bool(token())
+
+
+def ok(headers) -> bool:
+    """Nothing required: yes. Else the owner first (its cookie, or Bearer <secret>), then the web token."""
+    if not required():
+        return True
+    if owner_on():
+        want = owner_cookie_value()
+        for part in (headers.get("Cookie") or "").split(";"):
+            k, _, v = part.strip().partition("=")
+            if want and k == OWNER_COOKIE and hmac.compare_digest(v.strip().encode(), want.encode()):
+                return True
+        auth = headers.get("Authorization") or ""
+        if auth.startswith("Bearer ") and owner_ok(auth[7:]):
+            return True
+    tok = token()
+    return bool(tok) and authed(headers, tok)
+
+
+def login(given: str) -> str | None:
+    """A secret typed or put in the URL: the Set-Cookie for it (the owner's first, then the web token's),
+    or None after a second's wait (no fast guessing)."""
+    if owner_on() and owner_ok(given):
+        return f"{OWNER_COOKIE}={owner_cookie_value()}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000"
+    tok = token()
+    if tok and hmac.compare_digest(given.strip().encode(), tok.encode()):
+        return set_cookie(tok)
+    time.sleep(1)
+    return None
+
+
+def new_owner_secret() -> tuple[str, Path, Path | None]:
+    """A new owner secret: 256 random bits; only its SHA-256 hex is written (0600). Returns the secret
+    (shown once), the file, and where an old file was kept (or None)."""
+    import secrets
+    from . import install
+    secret = "bos_" + secrets.token_urlsafe(32)
+    p = owner_path()
+    install._folder(p.parent)
+    kept = install._keep(p) if p.exists() else None
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(hashlib.sha256(secret.encode()).hexdigest() + "\n", encoding="utf-8")
+    tmp.chmod(0o600)
+    tmp.replace(p)
+    return secret, p, kept
+
+
 def hosts(start_cfg: dict) -> list[str]:
-    """[web] hosts, followed live (notify.config: buddy.toml read again when it changes)."""
+    """[web] hosts, followed live (notify.config: buddy.toml read again when it changes). None while the
+    owner secret is set up: then the buddy is loopback only."""
+    if owner_on():
+        return []
     from . import notify
     cfg = notify.config() or start_cfg
     return [str(h) for h in (cfg.get("web") or {}).get("hosts") or []]
@@ -87,11 +201,11 @@ def host_of(header: str) -> str:
 
 def host_ok(header: str, hosts: list[str], tok: str) -> bool:
     """May a browser that used this Host reach the workbench? Loopback always; an allowlisted
-    name, address or network only while a token is set."""
+    name, address or network only while a token is set, and never while the owner secret is."""
     h = host_of(header)
     if h in LOOPBACK:
         return True
-    if not tok:
+    if not tok or owner_on():
         return False
     bare = h.strip("[]")
     for entry in hosts or []:
@@ -145,7 +259,7 @@ LOGIN = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name
 <title>brahman · token</title><style>body{font:16px system-ui,sans-serif;background:#1f1b16;color:#eee;display:grid;place-items:center;min-height:100vh;margin:0}
 form{display:grid;gap:10px;padding:24px;border:1px solid #444;border-radius:12px;max-width:320px}input,button{font:inherit;padding:8px;border-radius:8px;border:1px solid #666}
 button{background:#c9a227;color:#1f1b16;border:0}p{margin:0;color:#aaa;font-size:13px}</style></head><body>
-<form method="post" action="/login"><b>brahman workbench</b><p>This buddy asks for its web token (BUDDY_WEB_TOKEN in its .env).</p>
+<form method="post" action="/login"><b>brahman workbench</b><p>This buddy asks for its secret: the owner secret, or its web token.</p>
 <input name="token" type="password" autocomplete="current-password" autofocus placeholder="token"><input type="hidden" name="next" value="{next}">
 <button>Open</button>{bad}</form>
 <script>const n = document.querySelector("[name=next]"); if (location.hash && !n.value.includes("#")) n.value += location.hash;</script>

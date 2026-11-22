@@ -22,7 +22,7 @@ The owner's words: "prefer reuse session, like a team, we work together for a lo
 other, have professional parts, a stable relationship, and dynamic by release manager".
 
 - **Members** are long-lived sessions, one per area. **Names (the owner, 2026-11-11):**
-  `<context>-<role>-g<N>`: the context is usually the project, an area only when a project has several members (FreeRDP: `shadow`, `freerdp` for review), short but clear across all of the owner's projects (`rdp`, not
+  `<context>-<role>[-<area>]-g<N>` (the owner, 2026-11-23: "context-role-morecontext-gN": the area after the role, so a project's members sort by role; names given before keep their form until their next generation): the context is usually the project, an area only when a project has several members (FreeRDP: `shadow`, `freerdp` for review), short but clear across all of the owner's projects (`rdp`, not
   `kit`: there are many kits; `shadow`, not `server`: xrdp is a server too); clear beats short; the role is
   one of:
 
@@ -41,8 +41,18 @@ other, have professional parts, a stable relationship, and dynamic by release ma
   belongs to the member whose area it is, handed to its own subagent; the machine's one heavy
   job at a time still holds. **Renaming** (the owner, 2026-11-19: the context first): a live
   member's window title takes the new form at once, its Claude session's name at its next resume
-  (`claude --name <new>`), and the RM renames it on the card with `buddy-team rename <role> <old> <new>`,
+  (`claude --name <new>`), and the RM renames it on the card with `buddy-team rename <old> <new>`,
   which keeps its generation and its history. No alias for an old name.
+- **Many comps per team, one per area** (the PO, 2026-11-20: the RDP kit holds shadow, audio, web,
+  SDL …): a team has one po and one rel, and any number of comp members, one per area
+  (`<context>-comp-<area>-g<N>`, e.g. `ghostty-comp-win-g1`; before 2026-11-23 the area came first: `freerdp-audio-comp-g1`), plus dbg, edu or rev as needed. **No
+  main comp**: coordination stays with the RM and the PO. On the card a member is keyed by its
+  **lineage**, its name without `-g<N>` (`freerdp-audio-comp`), unique across every team; its role
+  and area are fields. A member that left is retired from the card (`buddy-team retire <kit> <name>`):
+  its book and record stay, and its lineage may come back as the next generation.
+- **Review inline** (the owner, 2026-11-20: "multiple roles waste token too much"): a member reviews
+  its own change inline (reads the diff for correctness and security, runs the tests, reports what it
+  checked); a reviewer session (`rev`) only when the owner asks.
 - **The release manager (RM)** is a role too, one per kit (`app-release-kit`, `lib-release-kit`,
   `tool-release-kit` …). It assigns work by area, picks releases, pins, runs the rounds, and
   owns the integration branch (see git-flow.md, "The release kit coordinates a release bump").
@@ -88,7 +98,7 @@ because a successor needs his go to start and a retiree his ok to close. **Where
 Claude Code's status line shows `ctx N% of <window>` at the bottom of each session's pane (the
 template's statusline.sh); the RM reads a member's with `pys capture <wid>` (the line with `ctx`).
 
-Names show the generation: `<context>-<role>-g<N>` (e.g. `xrdp-comp-g2`). The RM ages and hands over the same
+Names show the generation: `<context>-<role>[-<area>]-g<N>` (e.g. `xrdp-comp-g2`, `ghostty-comp-win-g1`). The RM ages and hands over the same
 way; its book is the kit's project memory.
 
 ## Where each role lives
@@ -109,7 +119,7 @@ remembers and with whom it shares memory.
 
 ## The book
 
-`role-<role>.md` in that project's memory folder (`~/.claude/projects/<project>/memory/`), with
+`role-<lineage>.md` (the default; `--book` names another) in that project's memory folder (`~/.claude/projects/<project>/memory/`), with
 a pointer line in its MEMORY.md, so any session in that repo loads the pointer. It holds: what the
 role owns; the owner's standing rules for it; open items with SHAs; its harnesses and where their
 evidence lives; the traps it fell into. The member keeps it current all its life. The successor
@@ -118,21 +128,33 @@ reads it first and checks in with the RM before working.
 ## The team card (`buddy-team`)
 
 One live card per kit in the owner's chats (Telegram and web while Lark is over its quota), one row per
-role: kind (RM, PO, member), the generation, its pys window, its age (years = compactions, and
-ctx now, ⚠️ from 60 %), its book, its running short stories, and the last handovers. It only
-records; it never starts or stops a session. **Only the RM writes it**; a role in several teams
-(a PO across kits) has one history, and its handover is run by the RM of the team it joined
-first, the other RMs told by SendMessage. Role ids are global, so prefix them per kit (`rdp-rm`).
+member, by role (RM, PO, comp, rev, dbg, edu), then area: the name, its area, its pys window, its age
+(years = compactions, and ctx now, ⚠️ from 60 %), its book, its running short stories, and the last
+handovers. It only records; it never starts or stops a session. **Only the RM writes it**. A member
+is found by its name (its live generation's); a member on several teams (a PO across kits) has one
+history, and its handover is run by the RM of the team it joined first, the other RMs told by
+SendMessage.
 
 ```bash
-buddy-team new <kit> --rm <role> <session> --project <kit folder> [--book role-release-manager.md]
-buddy-team join <kit> <session> --role <role> [--kind po] --area "<what it owns>" --project <repo>
-buddy-team join <kit> --role <role> --kind po          # a role another kit has already
-buddy-team handover <role> <old> <new>                 # the same for the RM's own role
-buddy-team retire <role> <session> --note "<why>"      # the role ends; leave <kit> <role>: off one roster
+buddy-team new <kit> --rel <name> --project <kit folder> [--book role-release-manager.md]
+buddy-team join <kit> <name> --role comp --area "<what it owns>" --project <repo>   # po, comp, rev, dbg, edu
+buddy-team join <kit> <name> --role po                 # a member another kit has already: its live name
+buddy-team handover <old> <new>                        # the next generation; the same for the RM itself
+buddy-team rename <old> <new>                          # the same generation, a new name, on whichever team
+buddy-team set <name> --role <role> --area "<area>"    # correct a role or an area
+buddy-team merge <dup lineage> <name>                  # a retired duplicate of the same member folds into
+                                                       # it, history kept; then rename may take its name
+buddy-team retire <kit> <name> --note "<why>"          # off the card, its record kept; on no team any
+                                                       # more, its generation retires (a later join of
+                                                       # <lineage>-g<N+1> is its next generation)
 buddy-team show <kit>                                  # exact ctx, now; list: every team
 buddy-team check <kit>                                 # the owner's replies on the card, each once
 ```
+
+The records of before 2026-11-20 (keyed by a role word: `comp`, `rel`, global across teams, so one
+team couldn't hold two comps) were converted once when the buddy first loaded them: each became
+`members/<lineage>.json` with its role (an old RM → rel; an old member's guessed from its name: check
+it with `buddy-team show`, correct it with `set`), and the old files stay in `roles.pre-lineage/`.
 
 When the owner replies on the card (💬 Reply, quoting it, `/team <kit> <text>`), the RM's window gets
 `team <kit> has news from the owner: run buddy-team check <kit>`. A reply is a request: starting,
@@ -144,15 +166,15 @@ Ask the owner first, per member: the project, the name, the brief, the permissio
 
 ```bash
 cd ~/projects/<repo> && pys new -- bash                  # a window in that repo; prints its wid
-pys send <wid> --enter "claude --name <context>-<role>-g<N> --permission-mode auto 'Read ~/.cache/rm/briefs/<date>-<name>.v<N>.md and start. You were started by the release manager <rm name> on the owner'\''s go.'"
+pys send <wid> --enter "claude --name <context>-<role>[-<area>]-g<N> --permission-mode auto 'Read ~/.cache/rm/briefs/<date>-<name>.v<N>.md and start. You were started by the release manager <rm name> on the owner'\''s go.'"
 ```
 
 - The window is a shell first, so it stays when Claude exits, like his other windows.
 - The brief is a versioned file in `~/.cache/rm/briefs/` (goal, base and branch, done-criteria,
   who to report to, the rules), never a long shell argument. For a successor, the brief points
   at the role's book.
-- Once it runs, the RM records it: `buddy-team join <kit> <name> --role <role> …`; at a
-  handover, `buddy-team handover <role> <old> <new>` (the card's handover line names the book).
+- Once it runs, the RM records it: `buddy-team join <kit> <name> --role <role> --area <area> …`; at a
+  handover, `buddy-team handover <old> <new>` (the card's handover line names the book).
 - Members report to the RM with SendMessage, set their pys title (`pys title --agent "<title>"`),
   never pick a release or push an integration branch, and need the owner's go to publish as usual.
 - First member started this way: `xrdp-cq` (2026-11-07, pys window 12, auto mode).

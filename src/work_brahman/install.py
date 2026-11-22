@@ -7,9 +7,10 @@
     buddy service install      a systemd user unit that keeps `buddy serve` running (Linux)
     buddy                      on its own: where things stand (problems, stories, the page)
 
-The config lives in the user's config dir, $XDG_CONFIG_HOME/work_brahman/ (buddy.toml, and
-.env for the secrets, chmod 600). A buddy.toml in the current folder still wins, so a checkout
-that has one (the live buddy) runs as it always did. Nothing here writes over a file: an
+The config lives in one folder, $XDG_CONFIG_HOME/brahman/ (default ~/.config/brahman/, 0700): buddy.toml,
+and buddy.env for the secrets (chmod 600), beside the other parts' own files (effects.json,
+assistant.toml, …). It is the only place looked at; `-c` names another (tests, a second buddy),
+its buddy.env beside it. Nothing here writes over a file: an
 existing one is kept as a dated backup with --force, or the command refuses and says where
 it is.
 """
@@ -26,7 +27,28 @@ import tomllib
 import urllib.request
 from pathlib import Path
 
-CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", "~/.config")).expanduser() / "work_brahman"
+ENV_NAME = "buddy.env"  # the secrets, beside buddy.toml, 0600 (the owner, 2026-11-21: one folder, a file per part)
+
+
+def config_dir(env=os.environ) -> Path:
+    """$XDG_CONFIG_HOME/brahman (default ~/.config/brahman): the one place of brahman's config, a file
+    per part (buddy.toml, buddy.env, effects.json, assistant.toml, …), each part reading only its own."""
+    base = env.get("XDG_CONFIG_HOME") or ""
+    root = Path(base) if base and Path(base).is_absolute() else Path.home() / ".config"  # XDG: a relative one is ignored
+    return root / "brahman"
+
+
+def env_file(config: Path) -> Path:
+    """The buddy's secrets: buddy.env beside its buddy.toml."""
+    return Path(config).parent / ENV_NAME
+
+
+def _folder(d: Path) -> None:
+    """The config folder, made 0700 when it is new (it holds secrets); an existing one is left as it is."""
+    if not d.exists():
+        d.mkdir(parents=True, mode=0o700)
+        if not WINDOWS:
+            d.chmod(0o700)  # mkdir's mode is cut by the umask
 HERE = Path(__file__).resolve().parent
 START = """start here, on a new machine:
   buddy init                      language, workspace, your chats: the token from @BotFather
@@ -118,16 +140,14 @@ port = {port}
 
 
 def config_path(arg: str | None) -> Path:
-    """-c, else a buddy.toml here (a checkout), else the user's config dir."""
-    if arg:
-        return Path(arg).expanduser()
-    return Path("buddy.toml") if Path("buddy.toml").exists() else CONFIG_DIR / "buddy.toml"
+    """-c (tests, a second buddy), else config_dir()/buddy.toml: one fixed place, no other is looked at."""
+    return Path(arg).expanduser() if arg else config_dir() / "buddy.toml"
 
 
 def load_env(config: Path) -> None:
-    """The .env next to the config, for what the environment doesn't set already (a systemd
+    """buddy.env next to the config, for what the environment doesn't set already (a systemd
     unit's EnvironmentFile, the shell): it never overrides."""
-    env = config.parent / ".env"
+    env = env_file(config)
     from . import portable
     portable.ENV_FILE = env  # its keys never reach pys and its windows (portable.child_env)
     if not env.exists():
@@ -167,8 +187,8 @@ def _ask(prompt: str, default: str = "", secret: bool = False) -> str:
 
 
 def init(args) -> int:
-    path = Path(args.config).expanduser() if args.config else CONFIG_DIR / "buddy.toml"
-    env = path.parent / ".env"
+    path = config_path(args.config)
+    env = env_file(path)
     if (path.exists() or env.exists()) and not args.force:
         print(f"already set up: {path} (and {env}). `buddy doctor` checks it; "
               "--force starts over and keeps the old files as backups", file=sys.stderr)
@@ -221,15 +241,12 @@ def init(args) -> int:
     # chats a scan linked (hello): the first app's as they are, the second's as lark:...
     scan_chats = [c for c in (linked_by_scan.get("feishu" if feishu_id else "lark", ""),
                               ("lark:" + linked_by_scan["lark"]) if feishu_id and linked_by_scan.get("lark") else "") if c]
-    if not token and not lark_id and not feishu_id:
-        print("no chat set: give a Telegram token (--telegram-token), a Lark app (--lark-app-id, "
-              "--lark-app-secret) or a Feishu app (--feishu-app-id, --feishu-app-secret)", file=sys.stderr)
-        return 2
+    web_only = not token and not lark_id and not feishu_id  # every chat app is optional (the owner, 2026-11-22)
     # One Lark-type app is FEISHU_APP_ID on its domain, ids as they are; with both, Feishu is
     # that one and Lark is LARK_APP_ID, whose ids read lark:oc_... (feishu.py).
-    domain = "feishu" if feishu_id else "lark"
+    domain = "lark" if lark_id and not feishu_id else "feishu"
     first, second = ((feishu_id, feishu_secret), (lark_id, lark_secret)) if feishu_id else ((lark_id, lark_secret), (None, ""))
-    path.parent.mkdir(parents=True, exist_ok=True)
+    _folder(path.parent)
     kept = [str(_keep(p)) for p in (path, env) if p.exists()]
     toml = TOML.format(date=time.strftime("%Y-%m-%d"), workspace=workspace, domain=domain,
                        language=language, port=args.port)
@@ -249,6 +266,10 @@ def init(args) -> int:
     skills = install_skills()
     print(f"wrote {path}\nwrote {env} (chmod 600)" + "".join(f"\nkept {k}" for k in kept)
           + "".join(f"\nskill {s}" for s in skills))
+    if web_only:
+        print(f"no chat app: web only. next: buddy service install (or: buddy serve), then open "
+              f"http://127.0.0.1:{args.port}/; a chat can join later: buddy config (or the Setup tab)")
+        return 0
     print("next: buddy service install (or: buddy serve), then write to your bot; it answers "
           "with your id, and `buddy allow <that id>` pairs you")
     return 0
@@ -300,7 +321,7 @@ def scan_app(brand: str) -> dict:
 def allow(args) -> int:
     """Pair an id: it may use the bot (.env), and its chat is one of yours (buddy.toml)."""
     path = config_path(args.config)
-    env = path.parent / ".env"
+    env = env_file(path)
     if not path.exists() or not env.exists():
         print(f"not set up: {path} is missing; run `buddy init` first", file=sys.stderr)
         return 2
@@ -462,7 +483,7 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
         rows.append((ok, what, how))
 
     row(path.exists() or False, f"config {path}", "" if path.exists() else "buddy init")
-    env = path.parent / ".env"
+    env = env_file(path)
     if env.exists() and WINDOWS:  # no chmod there: the file sits in the user's own profile
         row(True, f"secrets {env}")
     elif env.exists():
@@ -473,9 +494,17 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
     first = os.environ.get("FEISHU_APP_ID") and ("Feishu" if domain == "feishu" else "Lark")
     second = os.environ.get("LARK_APP_ID") and "Lark (lark: ids)"
     chats = [c for c in ("Telegram" if tg else "", first, second) if c]
-    row(bool(chats) or False, "a chat: " + ", ".join(chats) if chats else "a chat",
-        "" if chats else "buddy config (or buddy init) with a token or app from: "
-        + "; ".join(GET.values()))
+    cfg_port = ((tomllib.loads(path.read_text(encoding="utf-8")).get("web") or {}).get("port")
+                if path.exists() else None)
+    if chats:
+        row(True, "a chat: " + ", ".join(chats))
+    elif cfg_port:  # every chat app is optional (the owner, 2026-11-22): the workbench alone is a normal setup
+        row(True, f"no chat app: web only (the workbench, http://127.0.0.1:{cfg_port}/)",
+            "")
+    else:
+        row(False, "no chat app and no [web] port: nothing reaches you",
+            "set [web] port in buddy.toml, or add a chat: buddy config with a token or app from: "
+            + "; ".join(GET.values()))
     if first == "Lark" and second:
         row(False, "two Lark apps: FEISHU_APP_ID is on domain = \"lark\" and LARK_APP_ID is set",
             'set domain = "feishu" in buddy.toml if FEISHU_APP_ID is a Feishu (China) app')
@@ -497,8 +526,9 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
     if not offline and os.environ.get("LARK_APP_ID"):
         _app_rows(row, "Lark", os.environ["LARK_APP_ID"], os.environ.get("LARK_APP_SECRET", ""), "lark", cfg)
     allowed = [x for x in os.environ.get("BUDDY_ALLOWED_IDS", "").split(",") if x.strip()]
-    row(True if allowed else None, f"paired: {', '.join(allowed)}" if allowed else "not paired yet",
-        "" if allowed else "write to your bot; it answers with your id: buddy allow <id>")
+    if chats or allowed:  # pairing is a chat app's: web only has nothing to pair
+        row(True if allowed else None, f"paired: {', '.join(allowed)}" if allowed else "not paired yet",
+            "" if allowed else "write to your bot; it answers with your id: buddy allow <id>")
     # Each app set up (its id and token) needs someone paired there, and a chat linked there for
     # cards and asks: a Feishu added beside a paired Lark and Telegram was silent (2026-11-12).
     linked = list(cfg.get("me", {}).get("chats", []))
@@ -587,7 +617,18 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
         + "; plus Claude Code's own endpoint (ANTHROPIC_BASE_URL or its default)", "")
     from . import webauth  # who may use the workbench (webauth.py)
     tok, hosts = webauth.token(), list(cfg.get("web", {}).get("hosts") or [])
-    if tok:
+    if webauth.owner_on():  # the owner secret first, loopback only
+        from . import events as _ev
+        old = [x for x, on in (("BUDDY_WEB_TOKEN", tok), (f"{len(_ev.tokens(state))} device token(s)", _ev.tokens(state))) if on]
+        good = bool(webauth.owner_hash())
+        row(True if good else False,
+            f"auth: owner secret {webauth.owner_path()}: one secret for web, events, terminal, Browser, assistant; "
+            "loopback only" + (f" ([web] hosts {', '.join(hosts)} not honoured)" if hosts else "")
+            + (f"; still set too: {', '.join(old)}" if old else ""),
+            ("a leaked secret: buddy auth new --force, then the new one in every device's profile"
+             + (f"; delete {', '.join(old)} once every device uses the owner secret" if old else ""))
+            if good else f"{webauth.owner_path()} is not one SHA-256 hex line: buddy auth new --force")
+    elif tok:
         row(None if hosts else True, "workbench: a web token is set" + (f"; also reachable as {', '.join(hosts)}" if hosts else ""),
             "plain HTTP: on that network the token and the pages can be read; an SSH client on the device "
             "(-L to 127.0.0.1) needs no token" if hosts else "")
@@ -649,7 +690,7 @@ def unit_text(config: Path) -> str:
     buddy = _buddy()
     dirs = [os.path.dirname(p) for p in map(shutil.which, ["claude", "codex", "gh", "uv"]) if p]
     path = ":".join(dict.fromkeys([*dirs, os.path.dirname(buddy), "/usr/local/bin", "/usr/bin", "/bin"]))
-    env = config.parent / ".env"
+    env = env_file(config)
     return f"""[Unit]
 Description=work_brahman buddy (chat, scheduler, duties)
 After=network-online.target

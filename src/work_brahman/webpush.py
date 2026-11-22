@@ -247,15 +247,25 @@ class WebPush:
             time.sleep(3600)
 
     def _event(self, kind: str, title: str, text: str) -> bool:
-        """What notifies, decided once for both deliveries (here and events.EventStream)."""
+        """What notifies, decided once for both deliveries (here and events.EventStream). A private
+        story or team (privacy.private_ref; one not found, or a story or team card whose title names
+        none, too: fail closed) keeps its kind, ref and tag, but its title is a fixed line and its body
+        and link are empty: a device token is a bearer token, and a phone's lock screen is seen by
+        anyone (the PO, 2026-11-21, on the owner's "check the private stories in notifications")."""
+        from . import privacy
+        from .text import t
         ref, link, tag = where(kind, title)
+        private = privacy.private_ref(self.state, ref) if ref else (kind in ("story", "team") or None)
+        if private:
+            team = ref.startswith("team:") or (not ref and kind == "team")
+            return self.deliver(kind, t("notify.private_team" if team else "notify.private_story"), "", "", tag, ref)
         return self.deliver(kind, title, re.sub(r"[*_`]", "", text), link, tag, ref)
 
     def deliver(self, kind: str, title: str, body: str, link: str, tag: str, ref: str) -> bool:
         """To every subscribed browser, with the stream's id for the same event when it carried it."""
         from . import events
         r = send(self.state, title, body, self.web + link, tag=tag, post=self._http,
-                 id=events.recent(self.state, kind, title, body))
+                 id=events.recent(self.state, kind, title, body, ref=ref))
         return r["failed"] == 0
 
     def track(self, chat, markdown, *, title, handle=None, failed=False, done=False, buttons=()) -> str | None:

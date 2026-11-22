@@ -109,11 +109,11 @@ def main(argv: list[str] | None = None) -> int:
 
 def live_app_ids() -> set[str]:
     """The Lark/Feishu App IDs a buddy on this machine uses: this environment's, and those in the
-    .env files it reads, the config folder's, a checkout's beside buddy.toml, and the service's
+    secrets files it reads, the config folder's buddy.env and the service's
     EnvironmentFile (systemd). The live ids are rarely in a shell's environment: the service reads
     them from its .env (2026-11-10 review: the guard never fired from a terminal)."""
     from . import install
-    files = {install.CONFIG_DIR / ".env", Path("buddy.toml").resolve().parent / ".env"}
+    files = {install.env_file(install.config_path(None))}
     try:
         unit = install.service_file("buddy").read_text(encoding="utf-8")
         files |= {Path(m.strip().lstrip("-").strip("'\"")) for m in re.findall(r"^EnvironmentFile=(.+)$", unit, re.M)}

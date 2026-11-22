@@ -1,8 +1,8 @@
 """`buddy config`: a menu in the terminal that changes the setup `buddy init` wrote, so
-nobody has to edit buddy.toml and .env by hand for the everyday settings: the language, the
+nobody has to edit buddy.toml and buddy.env by hand for the everyday settings: the language, the
 workspace, the chats (Telegram, Lark, Feishu), who is paired, the web port.
 
-    buddy config · ~/.config/work_brahman/buddy.toml
+    buddy config · ~/.config/brahman/buddy.toml
       1  language    zh-CN
       3  Telegram    ✅ token …a9F2
       ...
@@ -45,7 +45,7 @@ def _show(secret: str) -> str:
 def load(path: Path) -> dict:
     """The settings, as the menu sees them (Lark and Feishu by platform, not by variable)."""
     cfg = tomllib.loads(path.read_text(encoding="utf-8"))
-    env = _env(path.parent / ".env")
+    env = _env(install.env_file(path))
     first = (env.get("FEISHU_APP_ID", ""), env.get("FEISHU_APP_SECRET", ""))
     second = (env.get("LARK_APP_ID", ""), env.get("LARK_APP_SECRET", ""))
     on_feishu = cfg.get("domain", "feishu") == "feishu"
@@ -142,7 +142,7 @@ def _q(value: str) -> str:
 def save(path: Path, s: dict, before: dict) -> list[str]:
     """Write what changed; returns what was kept (backups) and what was left for the hand.
     Raises ValueError, writing nothing, when the result wouldn't read back as meant."""
-    env_path = path.parent / ".env"
+    env_path = install.env_file(path)
     toml, notes = path.read_text(encoding="utf-8"), []
     on_feishu = bool(s["feishu"][0])
     first, second = (s["feishu"], s["lark"]) if on_feishu else (s["lark"], ["", ""])
@@ -286,9 +286,6 @@ def config(args) -> int:
             if s == before:
                 print("nothing changed")
                 return 0
-            if not (s["telegram"] or s["lark"][0] or s["feishu"][0]):
-                print("no chat left: keep at least one of Telegram, Lark, Feishu")
-                continue
             try:
                 notes = save(path, s, before)
             except ValueError as e:

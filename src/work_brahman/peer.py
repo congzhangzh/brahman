@@ -614,11 +614,11 @@ def check_resource(r: dict, timeout: float = 8.0) -> tuple[bool | None, str]:
 
 
 # The points: the peers this side sends to and checks, with this side's own name and port.
-# peers.toml beside buddy.toml; the secret stays in the environment (.env), never in this file.
+# peers.toml beside buddy.toml; the secret stays in the environment (buddy.env), never in this file.
 
 def config_path(env=os.environ) -> Path:
-    base = Path(env["XDG_CONFIG_HOME"]) if env.get("XDG_CONFIG_HOME") else Path.home() / ".config"
-    return base / "work_brahman" / "peers.toml"
+    from . import install
+    return install.config_dir(env) / "peers.toml"
 
 
 def load(env=os.environ) -> dict:

@@ -76,14 +76,17 @@ any ❌, `--json` for the rows, `--peers` to add the peer checks.
 **One buddy at a time.** `buddy serve` holds a lock in its state folder
 (`~/.local/state/work_brahman/serve.lock`, its pid beside it): a second one, typed by hand while
 `buddy.service` runs, stops at once with exit code 3 instead of fighting the first for the
-chats. From a checkout, `scripts/buddy` runs `buddy` from any directory with that checkout's
-`.env` and `buddy.toml`, as the service does (`ln -s "$PWD/scripts/buddy" ~/.local/bin/`).
+chats. From a checkout, `scripts/buddy` runs that checkout's `buddy` from any directory with
+`~/.config/brahman/buddy.toml` and `buddy.env`, as the service does (`ln -s "$PWD/scripts/buddy" ~/.local/bin/`).
 
 `buddy --help` ends with these steps; `buddy <command> --help` explains each option, and
 `/help` in the chat says what you can type there.
 
-The config is `~/.config/work_brahman/buddy.toml` (every setting: `buddy.example.toml`), the
-secrets `~/.config/work_brahman/.env` (chmod 600). Parts whose tool is missing stay off:
+The config is `~/.config/brahman/buddy.toml` (every setting: `buddy.example.toml`), the
+secrets `~/.config/brahman/buddy.env` (chmod 600), in one folder (`$XDG_CONFIG_HOME/brahman/`, 0700)
+beside the other parts' own files (`effects.json`, `peers.toml`, the assistant's `assistant.toml`);
+each part reads only its own file. `buddy doctor` names them and warns when the secrets file
+isn't 0600; `-c PATH` runs a buddy from another config (its `buddy.env` beside it). Parts whose tool is missing stay off:
 duties need `gh`, long stories need `screen` or `codex`. Any of Telegram, Lark (international)
 and Feishu (China) works, or all three at once: `buddy init` asks for each, and section 1
 below says how to create a Lark or Feishu app. With both, the Lark app's ids read
@@ -162,7 +165,7 @@ is found by itself. The QR code is drawn in the terminal, with the link under it
 instead. Check it afterwards with `buddy doctor`: whether every scope is granted at once and the
 events come on the long connection is the platform's to say. The steps below are the manual way.
 On a buddy that is set up already, **`buddy scan feishu`** (or `lark`) does the same in one step:
-the QR code, the app written into `.env` (with a backup), you paired and your chat linked (the new
+the QR code, the app written into `buddy.env` (with a backup), you paired and your chat linked (the new
 app writes to you first), doctor's rows for it, then the restart (asked, or `--restart`).
 Replacing an app that is there is asked first (`--yes` skips that). In `buddy tui`: Config → `S`.
 It asks first, as the official `lark-cli config init` does: a new app, the one the buddy uses now
@@ -193,9 +196,10 @@ Telegram is the quickest channel to try and to debug.
 ### 2. Configure
 
 ```bash
-cp .env.example .env && chmod 600 .env     # App ID / Secret, bot token: here, nowhere else (the buddy's own:
-                                           # none of it reaches claude; claude's settings stay in your shell)
-cp buddy.example.toml buddy.toml           # workspace, allowed tools, jobs
+mkdir -m 700 -p ~/.config/brahman        # the one config folder (buddy init makes it too)
+install -m 600 buddy.env.example ~/.config/brahman/buddy.env   # App ID / Secret, bot token: here, nowhere else
+                                           # (the buddy's own: none of it reaches claude; claude's settings stay in your shell)
+cp buddy.example.toml ~/.config/brahman/buddy.toml             # workspace, allowed tools, jobs
 scripts/link-skills.sh                     # make skills/ visible to Claude Code
 ```
 
@@ -224,7 +228,7 @@ settings still need one).
 
 **The workbench from another device on your LAN** (an SSH forward with a wildcard bind, e.g.
 `ssh -L 0.0.0.0:18787:127.0.0.1:8787 server` on a machine the phone can reach): set a long random
-`BUDDY_WEB_TOKEN` in `.env` (`python -c "import secrets; print(secrets.token_urlsafe(32))"`) and
+`BUDDY_WEB_TOKEN` in `buddy.env` (`python -c "import secrets; print(secrets.token_urlsafe(32))"`) and
 list the addresses the browser will use in `[web] hosts` (e.g. `["192.0.2.10"]` or
 `["192.0.2.0/24"]`), then restart. Every request then needs the token: open
 `http://192.0.2.10:18787/?token=…` once (it becomes a cookie and leaves the address bar), or type it
@@ -251,12 +255,12 @@ names them, with `/status` (who holds it). The workbench's long-story card has T
 ### 3. Run and pair
 
 ```bash
-uv run --env-file .env buddy serve
+uv run buddy serve                         # reads ~/.config/brahman/buddy.toml and buddy.env
 ```
 
 `serve` listens on every channel that has credentials in the environment. Send the bot
 any message. While `BUDDY_ALLOWED_IDS` is empty it refuses everyone and replies with the
-sender's id (`ou_…` on Lark, `tg:…` on Telegram); put yours in `.env` and restart. Only
+sender's id (`ou_…` on Lark, `tg:…` on Telegram); put yours in `buddy.env` and restart. Only
 listed users can drive the agent.
 
 A "⏳ Working…" message appears at once and is replaced by the answer, with the time
@@ -293,7 +297,7 @@ trigger, its steps with the agent session id, the result, and on failure the tai
 its output.
 
 ```bash
-uv run --env-file .env buddy job morning-prs      # try a job by hand
+uv run buddy job morning-prs      # try a job by hand
 deploy/install-units.sh                           # writes the systemd user unit
 systemctl --user enable --now buddy.service
 loginctl enable-linger "$USER"                    # keep running after logout
@@ -312,7 +316,7 @@ review comes in, when it needs a rebase, or when someone comments. `/update` che
 and shows the table; `/watch <url>` and `/unwatch <url>` change the list.
 
 ```bash
-uv run --env-file .env buddy duty code-review     # one check by hand
+uv run buddy duty code-review     # one check by hand
 ```
 
 ### 6. Families and stories
@@ -386,7 +390,7 @@ buddy-short done 12                    # or --failed --note why
 buddy-short list                       # the running stories; --all for every one
 ```
 
-`scripts/buddy-short` runs `buddy short` from any directory with the buddy's `.env` and
+`scripts/buddy-short` runs `buddy short` from any directory with the buddy's `buddy.env` and
 `buddy.toml` (link it into `~/.local/bin`). The board lives in
 `$XDG_STATE_HOME/work_brahman/short_stories/<number>.json`; the stages are in
 `src/work_brahman/families/short_story/FAMILY.md`.
@@ -426,13 +430,13 @@ and `git fetch <bundle> my-fix:from-peer`, and runs its own tests, as with any p
 context (a file share, GitHub) is named in the note. The full pairing (keys per peer, trust
 scopes, a gate) is still a design: `specs/multi-brahman.md`.
 
-The peers live in `~/.config/work_brahman/peers.toml` (this side's name, where serve listens,
+The peers live in `~/.config/brahman/peers.toml` (this side's name, where serve listens,
 each peer's address and a note; never the secret), changed in `buddy tui`'s **Peers** view or the
 workbench's **Setup** tab (nothing written until you write it, with a backup). Both run the same
 **doctor** as `buddy peer doctor` (and `buddy doctor --peers`): the secret, where serve listens,
 and a signed ping to every peer, answered signed, so it proves the same secret on both sides and
 shows how far apart the clocks are. For the workbench to check peers, put `BRAHMAN_PEER_SECRET`
-in the buddy's `.env`. `buddy peer send <peer name> …` takes a name from the file. `buddy peer
+in the buddy's `buddy.env`. `buddy peer send <peer name> …` takes a name from the file. `buddy peer
 log` (and the Log views) shows what came, what was refused and why, what was sent, and every
 check.
 
@@ -480,7 +484,7 @@ a job prompt. See `skills/pr-review/` for an example.
   end-to-end encrypted). Do not use the buddy on repositories whose content must not leave
   your machine.
 - The Telegram token is part of every Bot API URL, so the buddy never logs URLs.
-- Secrets come from the environment only; `.env` and `buddy.toml` are git-ignored.
+- Secrets come from the environment only; `buddy.env` and `buddy.toml` live in `~/.config/brahman/`, never in a checkout.
 - The web workbench binds `127.0.0.1` only and, on Linux, answers only connections owned by
   the buddy's own user; from another computer, use an `ssh -L` tunnel (see "Install as an
   app").

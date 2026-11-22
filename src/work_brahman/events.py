@@ -22,7 +22,9 @@ any client may read it; nothing in brahman depends on one.
   unique, ordered, and still ordered if the file is removed (a client's Last-Event-ID stays valid).
 - **The line**: `id: <id>` and one `data:` JSON line {id, kind, title, body, link, tag, ref, at};
   kind is story | team | ask | post. `ref` (short-story:12, long-story:3, team:kit) is what the page's privacy
-  rules judge. A comment `: keep-alive` every KEEPALIVE seconds keeps a tunnel from idling out.
+  rules judge. A private story or team (privacy.private_ref; one not found too: fail closed) is written
+  with a fixed title, "🔒 A private story changed", and no body or link, here and in web push alike
+  (webpush.WebPush._event): the owner's own view of the stream is a device token's, a bearer token. A comment `: keep-alive` every KEEPALIVE seconds keeps a tunnel from idling out.
 - **Resume**: Last-Event-ID (the header, or ?last= for a client that can't set it) replays what
   came after it from the ring; when one after it was already dropped → `event: gap` first. No Last-Event-ID:
   new events only (a client that connects for the first time is not shown the past).
@@ -114,14 +116,16 @@ def with_stream(chats: list[str]) -> list[str]:
     return chats[:i] + [CHAT] + chats[i:]
 
 
-def recent(state: Path, kind: str, title: str, body: str, within: float = 10.0, now: float | None = None) -> int | None:
+def recent(state: Path, kind: str, title: str, body: str, within: float = 10.0, now: float | None = None,
+           ref: str | None = None) -> int | None:
     """The id of the same event written to the stream in the last `within` seconds (its id is its time
-    in ms), for the browsers' push of it; None when the stream didn't carry it (off, or "ends")."""
+    in ms), for the browsers' push of it; None when the stream didn't carry it (off, or "ends"). With
+    `ref`, its ref must match too: two private stories' events read the same fixed line."""
     edge = int(((now or time.time()) - within) * 1000)
     for ev in reversed(read(state)):
         if ev["id"] < edge:
             return None
-        if (ev["kind"], ev["title"], ev["body"]) == (kind, title[:200], body[:1500]):
+        if (ev["kind"], ev["title"], ev["body"]) == (kind, title[:200], body[:1500]) and (ref is None or ev.get("ref") == ref):
             return ev["id"]
     return None
 

@@ -107,4 +107,4 @@ shown only behind ⚙ → "🐞 debug: arguments" in the workbench's detail pane
 
 - The board: `$XDG_STATE_HOME/work_brahman/short_stories/<number>.json` (`src/work_brahman/short_stories.py`).
 - From another directory or session: `scripts/buddy-short`, installed as `~/.local/bin/buddy-short`
-  (loads the buddy's `.env` and `buddy.toml`).
+  (loads the buddy's `buddy.env` and `buddy.toml` from `~/.config/brahman/`).

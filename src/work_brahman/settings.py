@@ -133,8 +133,6 @@ def write(path: Path, s: dict, before: dict) -> tuple[bool, list[str]]:
     """Write the changes with backups (configure.save). (written, notes)."""
     if s == before:
         return False, ["nothing changed"]
-    if not (s["telegram"] or s["lark"][0] or s["feishu"][0]):
-        return False, ["no chat left: keep at least one of Telegram, Lark, Feishu"]
     try:
         notes = configure.save(path, s, before)
     except ValueError as e:
@@ -153,7 +151,7 @@ def reload_env(path: Path, env=None) -> None:
     """After a write, in `buddy tui` only: its doctor checks the new tokens, as the buddy will
     after its restart. Never in the running buddy (its doctor checks what it runs with)."""
     env = os.environ if env is None else env
-    now = configure._env(path.parent / ".env")
+    now = configure._env(install.env_file(path))
     for k in ENV_KEYS:
         if now.get(k):
             env[k] = now[k]

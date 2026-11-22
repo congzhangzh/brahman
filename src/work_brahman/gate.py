@@ -105,7 +105,8 @@ def log(state: Path, kind: str, verdict: str, **fields) -> None:
 # folder and the engine's own folders writable, and only the short stories of the buddy's state.
 # It can't read a key it can't see, so even a key without a passphrase can't push.
 HIDE_DIRS = (".ssh", ".gnupg", ".config/gh", ".docker", ".local/share/keyrings", ".aws", ".kube",
-             ".password-store", ".config/hub", ".config/glab-cli")
+             ".password-store", ".config/hub", ".config/glab-cli",
+             ".config/brahman")  # brahman's one config folder: buddy.env, the assistant's and the shell's secrets
 HIDE_FILES = (".git-credentials", ".netrc", ".pypirc", ".npmrc")
 WRITE = (".claude", ".claude.json", ".codex", ".cache")  # the engines' own state, and caches
 

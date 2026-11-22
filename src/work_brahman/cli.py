@@ -8,7 +8,7 @@ Secrets come from the environment only: FEISHU_APP_ID + FEISHU_APP_SECRET for th
 buddy.toml's `domain`, LARK_APP_ID + LARK_APP_SECRET for a Lark app beside a Feishu one,
 TELEGRAM_BOT_TOKEN for Telegram (any of them, or all), BUDDY_ALLOWED_IDS; the .env
 next to buddy.toml fills in what the environment lacks. Everything else comes from buddy.toml:
--c, else ./buddy.toml (a checkout), else ~/.config/work_brahman/buddy.toml (install.py).
+-c, else ~/.config/brahman/buddy.toml ($XDG_CONFIG_HOME/brahman; install.py), the one place.
 """
 
 import argparse
@@ -155,28 +155,32 @@ def _session_name() -> str:
 
 
 def _team(args, state: Path, channels: list, chats: list[str], opts: dict) -> int:
-    """buddy team new|join|handover|retire|leave: record it, redraw the card(s)."""
+    """buddy team new|join|handover|rename|merge|set|retire: record it, redraw the card(s)."""
     a = args.action
     if a == "new":
-        tm = teams.new(state, channels, chats, args.team, args.rm[0], args.rm[1], area=args.area,
+        tm = teams.new(state, channels, chats, args.team, args.rel, area=args.area,
                        project=args.project, book=args.book, opts=opts)
-        print(f"team {tm['team']}: RM {args.rm[1]} ({args.rm[0]})")
+        print(f"team {tm['team']}: RM {args.rel}")
     elif a == "join":
-        teams.join(state, channels, args.team, args.role, args.name or "", kind=args.kind, area=args.area,
+        teams.join(state, channels, args.team, args.name, role=args.role, area=args.area,
                    project=args.project, book=args.book, opts=opts)
-        print(f"team {args.team}: {args.name or args.role} joined as {args.kind}")
+        print(f"team {args.team}: {args.name} joined as {args.role} ({teams.lineage_of(state, args.name)})")
     elif a == "handover":
-        out = teams.handover(state, channels, args.role, args.old, args.new, note=args.note, opts=opts)
-        print(f"{args.role}: {args.old} → {args.new} on {', '.join(x['team'] for x in out) or 'no team'}")
+        out = teams.handover(state, channels, args.old, args.new, note=args.note, opts=opts)
+        print(f"{args.old} → {args.new} on {', '.join(x['team'] for x in out) or 'no team'}")
     elif a == "rename":
-        out = teams.rename(state, channels, args.role, args.old, args.new, opts=opts)
-        print(f"{args.role}: {args.old} → {args.new} (same generation) on {', '.join(x['team'] for x in out) or 'no team'}")
+        out = teams.rename(state, channels, args.old, args.new, opts=opts)
+        print(f"{args.old} → {args.new} (same generation) on {', '.join(x['team'] for x in out) or 'no team'}")
+    elif a == "merge":
+        out = teams.merge(state, channels, args.dup, args.name, opts=opts)
+        print(f"{args.dup} merged into {args.name}; redrawn on {', '.join(x['team'] for x in out) or 'no team'}")
+    elif a == "set":
+        out = teams.set_(state, channels, args.name, role=args.role, area=args.area, project=args.project,
+                         book=args.book, opts=opts)
+        print(f"{args.name}: set; redrawn on {', '.join(x['team'] for x in out) or 'no team'}")
     elif a == "retire":
-        out = teams.retire(state, channels, args.role, args.name, note=args.note, opts=opts)
-        print(f"{args.role}: {args.name} retired; off {', '.join(x['team'] for x in out) or 'no team'}")
-    elif a == "leave":
-        teams.leave(state, channels, args.team, args.role, opts=opts)
-        print(f"team {args.team}: {args.role} left")
+        teams.retire(state, channels, args.team, args.name, note=args.note, opts=opts)
+        print(f"team {args.team}: {args.name} retired from the card")
     return 0
 
 
@@ -428,10 +432,10 @@ def main() -> int:
     ap = argparse.ArgumentParser(prog="buddy", epilog=install.START,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-c", "--config", default=None,
-                    help="default: ./buddy.toml if there is one, else ~/.config/work_brahman/buddy.toml")
+                    help="default: ~/.config/brahman/buddy.toml ($XDG_CONFIG_HOME/brahman), its secrets in buddy.env beside it")
     sub = ap.add_subparsers(dest="cmd", metavar="<command>")
     t = sub.add_parser("init", help="set the buddy up: language, a chat (Telegram and/or Lark), workspace",
-                       description="Write ~/.config/work_brahman/buddy.toml and .env (chmod 600). Asks for "
+                       description="Write ~/.config/brahman/buddy.toml and buddy.env (chmod 600). Asks for "
                        "what no flag gives, unless --yes. Never writes over a setup: --force keeps backups.")
     t.add_argument("--language", choices=["zh-CN", "en"], help="what the buddy says in the chats (default zh-CN)")
     t.add_argument("--workspace", help="the folder chat turns run in (default ~)")
@@ -457,6 +461,13 @@ def main() -> int:
     t.add_argument("--without", action="append", metavar="RULE", help="leave a rules file out, and keep it "
                    "out (e.g. brahman-git-roles); may be given more than once")
     t.add_argument("--no-pys", action="store_true", help="don't look for pys")
+    auth = sub.add_parser("auth", help="the owner secret: one secret for the workbench, the event stream, "
+                                       "the terminal, the Browser and the assistant (webauth.py)")
+    asub = auth.add_subparsers(dest="action", required=True)
+    t = asub.add_parser("new", help="make the owner secret: printed once, only its SHA-256 kept "
+                                    "(~/.config/brahman/owner.secret); put it in each device's profile")
+    t.add_argument("--force", action="store_true", help="replace one that exists (a leaked secret): every "
+                   "device's profile then needs the new one; the old file is kept as a dated copy")
     peer = sub.add_parser("peer", help="pass git bundles between two brahmans with one shared secret "
                                        "(BRAHMAN_PEER_SECRET); a restricted environment only (peer.py)")
     psub = peer.add_subparsers(dest="action", required=True)
@@ -631,39 +642,44 @@ def main() -> int:
     team = sub.add_parser("team", help="a team: one live card per kit, a row per long-lived member; "
                                        "the RM runs it (specs/team.md)")
     msub = team.add_subparsers(dest="action", required=True)
-    t = msub.add_parser("new", help="a team, its RM's role and generation, its card")
+    t = msub.add_parser("new", help="a team, its rel (the RM) and its card")
     t.add_argument("team")
-    t.add_argument("--rm", nargs=2, required=True, metavar=("ROLE", "SESSION"),
-                   help="the RM's role and the session carrying it (a role that exists: its live one)")
-    for name, helptext in (("join", "a role joins the team: new, with its first generation, or one "
-                                    "another team has already"),):
-        t = msub.add_parser(name, help=helptext)
-        t.add_argument("team")
-        t.add_argument("name", nargs="?", default="", help="the session carrying it (claude --name)")
-        t.add_argument("--role", required=True)
-        t.add_argument("--kind", default="member", choices=teams.KINDS)
+    t.add_argument("--rel", required=True, metavar="NAME",
+                   help="the session carrying its RM (claude --name), e.g. freerdp-rel-g1")
+    t = msub.add_parser("join", help="a member joins the team, keyed by its lineage (the name without -g<N>): "
+                                     "new, a retired lineage's next generation, or one another team has")
+    t.add_argument("team")
+    t.add_argument("name", help="the session carrying it (claude --name)")
+    t.add_argument("--role", default="comp", choices=[k for k in teams.KINDS if k != "rel"],
+                   help="one po per team; any number of comp, rev, dbg, edu (a comp per area)")
     for t in (msub.choices["new"], msub.choices["join"]):
-        t.add_argument("--area", default="", help="what it owns, in a few words")
+        t.add_argument("--area", default="", help="what it owns, in a few words (a comp's area)")
         t.add_argument("--project", default="", help="its repository (its book is in that project's memory)")
-        t.add_argument("--book", default="", help="the book's file name (default role-<role>.md)")
-    t = msub.add_parser("handover", help="the old generation retires, the new one carries the role "
-                                         "(an RM's or a PO's too), on every team naming it")
-    t.add_argument("role")
+        t.add_argument("--book", default="", help="the book's file name (default role-<lineage>.md)")
+    t = msub.add_parser("handover", help="the old generation retires, the new one carries the member "
+                                         "(a rel's or a po's too), on every team naming it")
     t.add_argument("old")
     t.add_argument("new")
     t.add_argument("--note", default="")
-    t = msub.add_parser("rename", help="the live generation's new name, the same generation (names put the "
-                                       "context first: <context>-<role>-g<N>); no alias for the old one")
-    t.add_argument("role")
+    t = msub.add_parser("rename", help="the live generation's new name, the same generation, on whichever team "
+                                       "(names: <context>-<role>-g<N>); no alias for the old one")
     t.add_argument("old")
     t.add_argument("new")
-    t = msub.add_parser("retire", help="the role ends, no successor: off every team (not an RM's role)")
-    t.add_argument("role")
+    t = msub.add_parser("merge", help="fold a retired duplicate (its lineage) into the live member NAME, its "
+                                      "history kept; NAME may then take a name from it (rename)")
+    t.add_argument("dup", help="the duplicate's lineage (retired, on no team)")
+    t.add_argument("name", help="the live member's name")
+    t = msub.add_parser("set", help="correct a member's role, area, project or book")
+    t.add_argument("name")
+    t.add_argument("--role", default="", choices=["", *teams.KINDS])
+    t.add_argument("--area", default="")
+    t.add_argument("--project", default="")
+    t.add_argument("--book", default="")
+    t = msub.add_parser("retire", help="off this team's card, the record kept; on no team any more, its "
+                                       "generation retires (not a team's rel: hand it over)")
+    t.add_argument("team")
     t.add_argument("name")
     t.add_argument("--note", default="")
-    t = msub.add_parser("leave", help="a role off this team's roster; it goes on elsewhere")
-    t.add_argument("team")
-    t.add_argument("role")
     t = msub.add_parser("show", help="the card's text, looked at now (exact ctx); needs no chat")
     t.add_argument("team")
     t = msub.add_parser("check", help="the owner's replies on the card, each once; needs no chat")
@@ -857,6 +873,17 @@ def main() -> int:
                        sty=os.environ.get("STY", ""), window=os.environ.get("WINDOW", ""))
         return 0
     team_opts = teams.settings(cfg)
+    if args.cmd == "auth":  # the owner secret's file only: no state, no chat
+        from . import webauth
+        if webauth.owner_on() and not args.force:
+            print(f"{webauth.owner_path()} exists: the owner secret is set up. A leaked one: --force "
+                  "(then every device needs the new secret)", file=sys.stderr)
+            return 2
+        secret, p, kept = webauth.new_owner_secret()
+        print(f"wrote {p} (only the secret's SHA-256, 0600)" + (f"\nkept {kept}" if kept else ""))
+        print("the owner secret, shown this once: put it in each device's profile, nowhere else:")
+        print(secret)
+        return 0
     if args.cmd == "team" and args.action == "setup":  # the instruction files only: no state, no chat
         from . import team_setup
         agents = team_setup.AGENTS if args.agent == "all" else (args.agent,)
@@ -924,12 +951,14 @@ def main() -> int:
                                       "lark", prefix="lark:"), cfg, state, "lark:"))
     if os.environ.get("TELEGRAM_BOT_TOKEN"):  # [notify] telegram, off by default like every app (notify.py)
         channels.append(notify.Quiet(Telegram(os.environ["TELEGRAM_BOT_TOKEN"], state), notify.mode(cfg, "telegram"), "telegram"))
-    if push_on and channels:  # web push to the owner's subscribed browsers ([notify] webpush live, off by
-        # default); only beside a real chat channel: a process with no chat token (a session behind the
-        # gate) must stay with none, so its cards are left undrawn for buddy serve, which pushes too
+    gated = bool(os.environ.get("BUDDY_GATE"))
+    apps = len(channels)  # the chat apps set up; none is a normal install: web only (the owner, 2026-11-22)
+    if push_on and (channels or not gated):  # web push to the owner's subscribed browsers ([notify] webpush
+        # live, off by default) and the event stream, with or without a chat app; but a session behind the
+        # gate (no chat token, on purpose) stays with none, so its cards are left undrawn for buddy serve
         channels.append(events.channel(cfg, state))
         channels.append(webpush.channel(cfg, state))
-    if not channels and args.cmd == "short" and os.environ.get("BUDDY_GATE"):
+    if not channels and args.cmd == "short" and gated:
         # Behind the gate (a session in its sandbox): no chat tokens here, on purpose. The story
         # file is written all the same, and `buddy serve` draws its card (shorts.redraw).
         try:
@@ -937,9 +966,10 @@ def main() -> int:
         except ValueError as e:
             print(e, file=sys.stderr)
             return 2
-    if not channels:
-        print("no channel: set TELEGRAM_BOT_TOKEN, LARK_APP_ID/LARK_APP_SECRET or "
-              "FEISHU_APP_ID/FEISHU_APP_SECRET", file=sys.stderr)
+    if not channels:  # behind the gate only: everywhere else the stream and web push are channels
+        print("no channel behind the gate: this command needs buddy serve's chats (TELEGRAM_BOT_TOKEN, "
+              "LARK_APP_ID/LARK_APP_SECRET or FEISHU_APP_ID/FEISHU_APP_SECRET), which the gate hides",
+              file=sys.stderr)
         return 2
     workspace = os.path.expanduser(cfg.get("workspace", "~"))
 
@@ -963,6 +993,9 @@ def main() -> int:
         commands = {name: c for d in [*duties.values(), *families.values()]
                     for name, c in d.commands().items()}
         port = cfg.get("web", {}).get("port")
+        if not apps:  # no Telegram, Lark or Feishu: the workbench is where cards, asks and answers go
+            log.info("no chat app: web only%s", f" (http://127.0.0.1:{port}/)" if port else
+                     ": and no [web] port either, so nothing reaches the owner")
         chat = None
         if port and linked.chats:  # the web joins my chats: same session, mirrored both ways
             chat = WebChat(state)
@@ -978,7 +1011,7 @@ def main() -> int:
         families["team"].channels = channels  # /team NAME <text>, and the looker's redraws
         # A long story may write ([long]); the chat and duties stay as [claude]. Its sessions run
         # behind the gate, in its sandbox, with the buddy's own .env hidden from them.
-        long = long_engines(cfg, env_file=Path(args.config).resolve().parent / ".env")
+        long = long_engines(cfg, env_file=install.env_file(Path(args.config).resolve()))
         shorts.start_drawer(state, channels)  # cards of stories marked from inside the sandbox
         teams.start_looker(state, channels, team_opts)  # team cards on a change; the RM woken on a reply
         long_live.start_pump(state, channels, long)  # the buddy's live sessions: their events, their hand-overs
@@ -1043,7 +1076,7 @@ def main() -> int:
                 print(long_live.handover(state, channels, args.number) or "ok")
             elif args.action == "takeback":
                 story = longs.load(state, args.number) or {}
-                engines = long_engines(cfg, env_file=Path(args.config).resolve().parent / ".env")
+                engines = long_engines(cfg, env_file=install.env_file(Path(args.config).resolve()))
                 print(long_live.takeback(state, channels, args.number,
                                          longs.pick(engines, "claude-code", story.get("mode"))) or "ok")
             else:

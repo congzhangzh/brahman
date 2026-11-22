@@ -421,8 +421,7 @@ class Web:
                     got = health.report(web.state, web.bot, web.scheduler, web.started)
                     if warn := getattr(web, "server", None) and web.server.warn:
                         got["warn"] = warn  # another program on [::1]:<port>; the buddy still works
-                    tok = webauth.token()
-                    if tok and not webauth.authed(self.headers, tok):
+                    if not webauth.ok(self.headers):
                         got = {k: got[k] for k in ("ok", "instance", "warn") if k in got}  # works or not, which process
                     return self._send(200 if got["ok"] else 503, json.dumps(got).encode(), "application/json")
                 if path == "/api/events":  # the event stream (events.py): what web push sends, as SSE
@@ -591,7 +590,7 @@ class Web:
 
             def _local(self) -> bool:
                 from . import webauth  # loopback, or an allowlisted host while a token is set
-                if not webauth.host_ok(self.headers.get("Host") or "", webauth.hosts(web.cfg), webauth.token()):
+                if not webauth.host_ok(self.headers.get("Host") or "", webauth.hosts(web.cfg), webauth.token()):  # owner secret: loopback only
                     self._send(421, b"use http://127.0.0.1 (or an address in [web] hosts, with BUDDY_WEB_TOKEN set)",
                                "text/plain")
                     return False
@@ -609,13 +608,12 @@ class Web:
                         return True
                     self._send(403, b"a device token reads GET /api/events only", "text/plain")
                     return False
-                tok = webauth.token()
-                if not tok or path in webauth.PUBLIC or webauth.authed(self.headers, tok):
+                if path in webauth.PUBLIC or webauth.ok(self.headers):  # the owner secret first (webauth.py)
                     return True
                 given = parse_qs(urlparse(self.path).query).get("token", [""])[0]
-                if self.command == "GET" and given and webauth.check(tok, given):
+                if self.command == "GET" and given and (cookie := webauth.login(given)):
                     self.send_response(303)
-                    self.send_header("Set-Cookie", webauth.set_cookie(tok))
+                    self.send_header("Set-Cookie", cookie)
                     self.send_header("Location", webauth.strip_token(self.path))
                     self.send_header("Content-Length", "0")
                     self.end_headers()
@@ -623,7 +621,7 @@ class Web:
                 if self.command == "GET" and not path.startswith("/api/"):
                     self._send(401, webauth.login_page(webauth.strip_token(self.path), bad=bool(given)), "text/html")
                 else:
-                    self._send(401, b"the web token is needed (BUDDY_WEB_TOKEN)", "text/plain")
+                    self._send(401, b"a secret is needed: the owner secret, or BUDDY_WEB_TOKEN", "text/plain")
                 return False
 
             def _events(self) -> None:
@@ -673,15 +671,15 @@ class Web:
 
             def _login(self) -> None:
                 from . import webauth
-                tok = webauth.token()
                 n = min(int(self.headers.get("Content-Length") or 0), 4096)
                 form = parse_qs(self.rfile.read(n).decode(errors="replace"))
                 nxt = form.get("next", ["/"])[0]
                 nxt = nxt if nxt.startswith("/") and not nxt.startswith("//") else "/"
-                if not tok or not webauth.check(tok, form.get("token", [""])[0]):
+                cookie = webauth.login(form.get("token", [""])[0]) if webauth.required() else None
+                if not cookie:
                     return self._send(401, webauth.login_page(nxt, bad=True), "text/html")
                 self.send_response(303)
-                self.send_header("Set-Cookie", webauth.set_cookie(tok))
+                self.send_header("Set-Cookie", cookie)
                 self.send_header("Location", nxt)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
@@ -855,14 +853,8 @@ class Web:
     def private(self, key: str) -> bool | None:
         """A story's or a team's run id ("short-story:12", "long-story:3", "team:kit") is private;
         None: not one of those (a duty's run, a chat)."""
-        from . import privacy, short_stories, teams
-        kind, _, n = key.partition(":")
-        if kind == "team":
-            return privacy.is_private(teams.load(self.state, n))
-        if kind not in ("short-story", "long-story"):
-            return None
-        mod = short_stories if kind == "short-story" else longs
-        return privacy.is_private(mod.load(self.state, int(n)) if n.isdigit() else None)
+        from . import privacy
+        return privacy.private_ref(self.state, key)
 
     def marked(self, d: dict) -> dict:
         """/api/data with each story's and team's mark, for the page's 🔒 / 🔓 button; "public": False

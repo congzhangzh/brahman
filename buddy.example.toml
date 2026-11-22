@@ -1,4 +1,4 @@
-# Copy to buddy.toml (git-ignored) and edit. Secrets never go here: see .env.example.
+# Copy to ~/.config/brahman/buddy.toml and edit. Secrets never go here: see buddy.env.example (buddy.env beside it).
 
 workspace = "~/src"     # working directory for chat turns
 domain = "feishu"       # "feishu" (open.feishu.cn) or "lark" (open.larksuite.com)

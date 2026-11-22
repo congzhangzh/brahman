@@ -258,7 +258,7 @@ body:not(.adv) :is(.mode, .bell, .langs, .tabs [data-tab="setup"], .more, [data-
     <div class="msg" id="sv-bmsg"></div>
     <h3 class="dim" style="margin:14px 0 4px" data-t="setup.refused">Wrote, but not paired</h3><div id="sv-refused"></div><div class="msg" id="sv-gmsg"></div></div>
   <div class="pane" id="sv-config" hidden><div class="dim" id="sv-path"></div><button class="act" id="sv-intl" hidden data-t="setup.intl_show">Show Telegram and Lark</button><table><thead><tr><th data-t="setup.setting">Setting</th><th data-t="setup.now">Now</th><th data-t="setup.new">New value</th></tr></thead><tbody id="sv-crows"></tbody></table>
-    <div class="row"><button class="act go" data-swrite="config" data-t="setup.write_config">Write buddy.toml and .env</button><span class="dim" data-t="setup.config_sub">secrets never come to this page: type a new one, or - to remove it; empty keeps it</span></div><div class="msg" id="sv-cmsg"></div>
+    <div class="row"><button class="act go" data-swrite="config" data-t="setup.write_config">Write buddy.toml and buddy.env</button><span class="dim" data-t="setup.config_sub">secrets never come to this page: type a new one, or - to remove it; empty keeps it</span></div><div class="msg" id="sv-cmsg"></div>
     <h3 class="dim" style="margin:14px 0 4px" data-t="setup.pair_helper">Pair: who wrote to the bot</h3><div class="dim" data-t="setup.pair_how">write anything to the bot in the new app (Feishu, Lark, Telegram); it shows up here; Pair writes the id and its chat, then restart the buddy</div><div id="sv-crefused" style="margin-top:6px"></div></div>
   <div class="pane" id="sv-peers" hidden><p class="warn" data-t="setup.peer_warn">⚠️ One shared secret, plain HTTP: a LAN you own, a VPN or an SSH tunnel only, never the open internet.</p>
     <div class="row"><label><span data-t="setup.side">This side</span> <input id="sv-name" style="width:11em"></label><label><span data-t="setup.bind">serve on</span> <input id="sv-bind" style="width:9em"></label><label><span data-t="setup.port">port</span> <input id="sv-port" style="width:5em"></label><span class="dim" id="sv-secret"></span></div>
@@ -1031,7 +1031,7 @@ function team(r) {
     + `<div class="flow">${r.steps.map(e => node("lit", `${day(e.at)} ${hm(e.at)}`, esc(e.step))).join('<span class="arrow">→</span>')
       || `<span class="mute">${tr("story.no_marks")}</span>`}</div>`;
   document.getElementById("l3h").textContent = tr("team.card", { team: tm.name });
-  const kind = k => k === "rm" ? "RM" : k === "po" ? "PO" : "·";
+  const kind = k => k === "rel" ? "RM" : k === "po" ? "PO" : esc(k || "");
   const rows = (tm.rows || []).map(x => `<div class="mrow ${x.role === S.role ? "hl" : ""}" id="role-${esc(x.role)}">
       <b>${kind(x.kind)} ${esc(x.role)}</b> <span class="mute">${esc(x.name)}${x.area ? " · " + esc(x.area) : ""}</span>
       <div class="chips">${x.stories.map(s => `<button class="chip" data-run="short-story:${s.n}" title="${esc(s.title)}">${STORY[s.status === "done" ? "ok" : s.status] || ""} #${s.n} ${esc(s.title.slice(0, 36))}</button>`).join("")

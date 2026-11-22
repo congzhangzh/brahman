@@ -39,7 +39,7 @@ class ShortStory:
         picked: 300 whole stories are 1.4 MB, and the page asks every 5 s."""
         since = time.time() - days * 86400 if days is not None else None
         out = []
-        self._members = (teams.sessions_to_roles(self.state_dir), teams.team_index(self.state_dir))
+        self._members = (teams.sessions_to_members(self.state_dir), teams.team_index(self.state_dir))
         for s in reversed(shorts.all_stories(self.state_dir)):
             t0 = time.mktime(time.strptime(s["started"][:19], LOCAL))
             if since is not None and s["status"] != "running" and t0 < since:
@@ -51,7 +51,7 @@ class ShortStory:
     def detail(self, key: str) -> dict | None:
         """One story as a whole run, for the page when a light tile is picked."""
         s = shorts.load(self.state_dir, int(key)) if key.isdigit() else None
-        self._members = (teams.sessions_to_roles(self.state_dir), teams.team_index(self.state_dir))
+        self._members = (teams.sessions_to_members(self.state_dir), teams.team_index(self.state_dir))
         return self._run(s) if s else None
 
     def _tile(self, s: dict) -> dict:
