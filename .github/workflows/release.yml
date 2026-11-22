@@ -77,7 +77,7 @@ jobs:
           b=dist/buddy; [ "$RUNNER_OS" = Windows ] && b=dist/buddy.exe
           home="$RUNNER_TEMP/home"; mkdir -p "$home"
           export HOME="$home" USERPROFILE="$home" XDG_CONFIG_HOME="$home/.config" XDG_STATE_HOME="$home/.state"
-          cfg="$home/.config/work_brahman/buddy.toml"
+          cfg="$home/.config/brahman/buddy.toml"  # one folder since 20261122 (was work_brahman/)
           # the version comes from the package metadata (importlib.metadata): PyInstaller ships it
           # only with --copy-metadata; without it the executable says "buddy n/a" (20261108.3)
           # the version from the tree, not the tag: a dry run (workflow_dispatch) has no tag
@@ -94,7 +94,7 @@ jobs:
           "$b" short list | grep -q "⏳"
           "$b" service install --dry-run > /dev/null
           { "$b" || true; } | grep -q "checks ok"
-          test -f "$cfg"
+          test -f "$cfg" && test -f "$home/.config/brahman/buddy.env"
           # buddy setup (20261108.10 on): a dry run writes nothing, --yes writes the rules, and a
           # rerun has nothing to do (20261108.10 on Windows without symlinks re-copied every time)
           "$b" setup --no-pys | grep -q "rule brahman-git-roles"

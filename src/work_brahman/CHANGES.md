@@ -5,7 +5,7 @@ once, at the first start of a new version (following `[notify]`).
 
 ## Unreleased
 
-## 20261122.2
+## 20261122.4
 
 **Upgrading from 20261119.5 or older: move your config first.** The buddy now reads its config from one
 folder only, `$XDG_CONFIG_HOME/brahman/` (on every system `~/.config/brahman/` when that variable isn't
