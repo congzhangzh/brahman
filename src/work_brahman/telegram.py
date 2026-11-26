@@ -32,6 +32,7 @@ import urllib.request
 from pathlib import Path
 from typing import Callable
 
+from . import reach
 from .channel import Incoming
 from .text import t
 
@@ -300,8 +301,11 @@ class Telegram:
             # and a call that hangs holds the caller (a short story's lock, say) for nothing.
             with _opener.open(req, timeout=params["timeout"] + 30 if "timeout" in params
                               else CALL_TIMEOUT) as r:
-                return json.load(r)["result"]
+                got = json.load(r)["result"]
+            reach.up("telegram")
+            return got
         except urllib.error.HTTPError as e:  # its str() has no URL, so no token
+            reach.up("telegram")  # Telegram answered (a refusal is not the network)
             try:
                 why = json.load(e).get("description", "")
             except ValueError:
@@ -310,7 +314,8 @@ class Telegram:
             log.error("telegram %s: HTTP %s %s", method, e.code, why)
         except (urllib.error.URLError, OSError) as e:
             _last.why = ""
-            log.error("telegram %s: %s", method, getattr(e, "reason", e))
+            news = reach.down("telegram", "timed out" if isinstance(getattr(e, "reason", e), TimeoutError) else "no connection")
+            (log.error if news else log.debug)("telegram %s: %s", method, getattr(e, "reason", e))  # said once
         return None
 
 

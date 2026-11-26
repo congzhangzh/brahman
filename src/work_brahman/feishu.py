@@ -41,6 +41,8 @@ MAX_TEXT = 8000  # keep replies readable on a phone; the full answer stays in th
 MAX_CARD = 24_000  # UTF-8 bytes of Markdown; Lark rejects a card whose JSON is over 30 KB
 # The SDK logs the full connect URL, including its access_key and ticket, at INFO.
 LOG_LEVEL = lark.LogLevel.WARNING
+TIMEOUT = 15  # seconds per message call (the SDK has none: on a limited network a call waited forever, 2026-11-26)
+NET = "net"  # _last.code of a call that didn't get through: the app is not reached (reach.py), nothing to retry
 QUOTA_CODES = (99991403,)  # the month's API quota: a plain reply fails the same way, no fallback
 
 
@@ -100,7 +102,20 @@ class Feishu:
         self.name = "feishu" if domain == "feishu" else "lark"
         self.prefix = prefix
         self.api = (lark.Client.builder().app_id(app_id).app_secret(app_secret)
-                    .domain(self.domain).log_level(LOG_LEVEL).build())
+                    .domain(self.domain).timeout(TIMEOUT).log_level(LOG_LEVEL).build())
+
+    def _call(self, fn, req):
+        """One message call: its response, or None when it didn't get through (a timeout, no route, TLS cut),
+        which reach.py says once; a response of any kind means the app was reached."""
+        from . import reach
+        try:
+            resp = fn(req)
+        except Exception as e:  # noqa: BLE001 - requests' Timeout, ConnectionError, SSLError …: the network
+            _last.code = NET
+            reach.down(self.name, _why(e))
+            return None
+        reach.up(self.name)
+        return resp
 
     def reply_text(self, message_id: str, text: str, in_thread: bool = False) -> str | None:
         """Reply to a message; in a topic group the reply stays in the topic."""
@@ -128,16 +143,16 @@ class Feishu:
         body = PatchMessageRequestBody.builder().content(json.dumps(card, ensure_ascii=False)).build()
         req = PatchMessageRequest.builder().message_id(message_id).request_body(body).build()
         self._counted()
-        return _check(self.api.im.v1.message.patch(req)) is not None
+        return _check(self._call(self.api.im.v1.message.patch, req)) is not None
 
     def _reply(self, message_id: str, msg_type: str, content: str, in_thread: bool = False) -> str | None:
         body = (ReplyMessageRequestBody.builder().msg_type(msg_type).content(content)
                 .reply_in_thread(in_thread).build())
         req = ReplyMessageRequest.builder().message_id(message_id).request_body(body).build()
         self._counted()
-        got = _check(self.api.im.v1.message.reply(req))
+        got = _check(self._call(self.api.im.v1.message.reply, req))
         code = getattr(_last, "code", None)  # a fresh thread whose calls all worked never set it (a Windows report, 2026-11-17)
-        if got is None and in_thread and code not in QUOTA_CODES:
+        if got is None and in_thread and code not in QUOTA_CODES and code != NET:
             # A thread reply refused (an app made by a QR scan is a PersonalAgent, and its chats may
             # not take threads; 2026-11-12): the same reply in the main chat, and the refusal kept,
             # so buddy doctor can say it and how to get threads (an app made by hand).
@@ -153,7 +168,7 @@ class Feishu:
                 .content(content).build())
         req = CreateMessageRequest.builder().receive_id_type("chat_id").request_body(body).build()
         self._counted()
-        got = _check(self.api.im.v1.message.create(req))
+        got = _check(self._call(self.api.im.v1.message.create, req))
         if got:
             others.remember(self.app_id, got)
         return got
@@ -166,10 +181,9 @@ class Feishu:
         req = (ListMessageRequest.builder().container_id_type("chat").container_id(chat.removeprefix(self.prefix))
                .sort_type("ByCreateTimeDesc").page_size(n).build())
         self._counted()
-        try:
-            resp = self.api.im.v1.message.list(req)
-        except Exception as e:  # noqa: BLE001 - the network: nothing to say
-            return (None, str(e))
+        resp = self._call(self.api.im.v1.message.list, req)
+        if resp is None:  # the network: nothing to say
+            return (None, "not reached")
         if not resp.success():
             return (resp.code, str(resp.msg))
         out = []
@@ -353,8 +367,17 @@ def _text(s: str) -> str:
     return json.dumps({"text": s}, ensure_ascii=False)
 
 
+def _why(e: Exception) -> str:
+    """A network failure in a few plain words, never a URL or a token."""
+    s = type(e).__name__
+    return {"ReadTimeout": "timed out", "ConnectTimeout": "timed out", "Timeout": "timed out",
+            "ConnectionError": "no connection", "SSLError": "the secure connection failed"}.get(s, s)
+
+
 def _check(resp) -> str | None:
-    """The message id of a successful call ("" for a patch), None after logging a failure."""
+    """The message id of a successful call ("" for a patch), None after logging a failure (or none made)."""
+    if resp is None:
+        return None
     if not resp.success():
         _last.code = resp.code
         lark.logger.error(f"feishu: {resp.code} {resp.msg} log_id={resp.get_log_id()}")

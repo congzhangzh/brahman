@@ -87,6 +87,8 @@ header .live.off i { background:var(--bad); }
 @media (max-width: 900px) { .corner video, .motto .rot { display:none; } .corner { max-width:none; } }
 .stop { background:var(--bad); color:#fff; border:2px solid var(--bad); border-radius:999px; font-weight:700; padding:3px 14px; letter-spacing:.5px; }
 .halt { margin:8px 20px 0; background:var(--bad); color:#fff; border-radius:var(--r-sm); padding:6px 12px; font-size:13.5px; }
+.reach { margin:8px 20px 0; border:1px solid var(--warn); border-left:4px solid var(--warn); border-radius:var(--r-sm); background:var(--card); padding:6px 12px; font-size:13.5px; }
+.reach .back { color:var(--ok); }
 .halt button { margin-left:10px; border:1px solid #fff; background:none; color:#fff; border-radius:999px; padding:1px 10px; }
 main { display:flex; flex-direction:column; gap:10px; padding:10px 20px 24px; }  /* the whole width: a wide screen shows more runs per row */
 .level { background:var(--card); border:1px solid var(--line); border-radius:var(--r-lg); padding:9px 14px; }
@@ -240,6 +242,7 @@ body:not(.adv) :is(.mode, .bell, .langs, .tabs [data-tab="setup"], .more, [data-
 <header><h1>brahman</h1><div class="tabs"><button data-tab="bench" class="on" data-t="tab.bench">Workbench</button><button data-tab="chat" data-t="tab.chat">Chat</button><button data-tab="setup" data-t="tab.setup">Setup</button><button data-tab="news" id="newstab" data-t="tab.news">What's new</button></div><span class="live" id="live" data-t="connecting"><i></i>connecting…</span><div class="corner"><video id="film" muted autoplay loop playsinline data-t-title="film_title" title="The film: click to watch it large"></video><div class="motto"><span class="mode"><button data-motto="what" data-t="motto.what">What</button><button data-motto="why" data-t="motto.why">Why</button></span><span class="humble" id="m-top"></span><span class="main" id="m-main"></span><span class="rot" id="rot"></span><span class="meter" id="meter"><span class="bar"><i></i></span><span></span></span></div></div><button class="view" id="view" data-t="view.off" data-t-title="view.title">🔒 private shown</button><button class="demo" id="demo" data-t="demo.off" data-t-title="demo.title">☆ Demo</button><button class="adv" id="adv" data-t="adv.off" data-t-title="adv.title">⚙ Advanced</button><button class="bell" id="bell" data-t-title="bell_title" title="system notifications from this tab">🔕</button><div class="langs" data-t-title="lang_title" title="the page's language"><button data-lang="en">EN</button><button data-lang="zh-CN">中文</button></div><button class="stop" data-stop="1" title="stop everything that is running or waiting, and pause the schedule" data-t="stop" data-t-title="stop_title">■ STOP</button></header>
 <div class="filmbox" id="filmbox" hidden><button class="x" id="filmx" data-t-title="film_close" title="close (Esc)">✕</button><video id="filmbig" controls playsinline></video></div>
 <div class="halt" id="halt" hidden></div>
+<div class="reach" id="reach" hidden></div>
 <div id="chatview" hidden>
   <div class="topics" id="topics"></div>
   <div class="thread" id="thread"></div>
@@ -484,6 +487,7 @@ async function load() {
     const d = await r.json();
     if (isPublic() && d.public !== true) return viewEnded();
     S.data = d;
+    drawReach(d.reach || []);
     showView(S.data.public === true);  // private → public follows the server; public → private never (viewEnded)
     tell(S.data);
     bellDraw();
@@ -1317,6 +1321,13 @@ function drawPings() {
   document.getElementById("sv-refused").innerHTML = document.getElementById("sv-crefused").innerHTML = (SV.refused || []).map(r =>
     `<div class="drow"><span class="warn">⚠️</span> ${esc(r.sender)} · ${esc(r.channel)} · ${esc(tr("setup.times", { n: r.times }))} · ${esc(r.last)}<div class="dim"><code>${esc(r.allow)}</code> <button class="act" data-spair="${esc(r.sender)}" data-schat="${esc(r.chat)}">${esc(tr("setup.pair"))}</button> <button class="act" data-signore="${esc(r.sender)}">${esc(tr("setup.ignore"))}</button></div></div>`).join("")
     || `<div class="dim">${esc(tr("setup.no_refused"))}</div>`;
+}
+function drawReach(rows) {  // a chat app that can't be reached: one plain line each, gone when it is back (reach.py)
+  const el = document.getElementById("reach");
+  el.hidden = !rows.length;
+  el.innerHTML = rows.map(r => r.down
+    ? `<div>⚠️ ${esc(tr("reach.down", { app: r.name, at: r.down, why: r.why }))}</div>`
+    : `<div class="back">✅ ${esc(tr("reach.back", { app: r.name, at: r.back }))}</div>`).join("");
 }
 function drawBanner() {  // who wrote to the bot and isn't paired, or wrote from a chat not linked: one click
   document.getElementById("sv-banner").innerHTML = (SV.unlinked || []).map(r =>

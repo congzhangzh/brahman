@@ -416,6 +416,8 @@ class Web:
                     rows = webpush.subs(web.state)
                     return self._json({"mode": m, "key": webpush.public_key(web.state) if m != "off" else "",
                                        "browsers": len(rows), "list": [webpush.describe(r) for r in rows]})
+                if path == "/api/push/apns":  # APNs (apns.py): on or off, what is missing, the devices (no tokens)
+                    return self._json(web.apns_state())
                 if path == "/api/health":  # health.py: 200 when it works, 503 when a part doesn't
                     from . import health, webauth
                     got = health.report(web.state, web.bot, web.scheduler, web.started)
@@ -480,6 +482,28 @@ class Web:
                 """When this browser's public view began, or 0 (privacy.py: a cookie, at most 3 h)."""
                 from . import privacy
                 return privacy.view_since(self.headers.get("Cookie") or "")
+
+            def do_DELETE(self):
+                """DELETE /api/push/apns {device}: the only DELETE; the same checks as a POST."""
+                if not self._local() or not self._authed(self.path.split("?")[0]):
+                    return
+                if self.headers.get("X-Buddy") != "1":
+                    return self._send(403, b"missing X-Buddy header", "text/plain")
+                if self.path.split("?")[0] != "/api/push/apns":
+                    return self._send(404, b"not found", "text/plain")
+                try:
+                    body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+                except ValueError:
+                    return self._send(400, b"bad json", "text/plain")
+                return self._apns(body if isinstance(body, dict) else {}, remove=True)
+
+            def _apns(self, body: dict, remove: bool):
+                from . import apns
+                if remove:
+                    return self._json({"ok": apns.unregister(web.state, str(body.get("device", "")))})
+                why = apns.register(web.state, body, self.headers.get("User-Agent", ""))
+                return self._json({"ok": True} | web.apns_state(devices=False)) if not why else \
+                    self._send(400, why.encode(), "text/plain")
 
             def do_POST(self):
                 if not self._local():
@@ -574,6 +598,8 @@ class Web:
                         return self._send(409, b"web push is off: [notify] webpush = \"ends\" or \"all\"", "text/plain")
                     why = webpush.subscribe(web.state, body.get("subscription"), self.headers.get("User-Agent", ""))
                     return self._json({"ok": True}) if not why else self._send(400, why.encode(), "text/plain")
+                elif path == "/api/push/apns":  # an app's device registers for APNs (apns.py), or leaves
+                    return self._apns(body, remove=bool(body.get("remove")))
                 elif path == "/api/lanes/attach":  # a session lane's pys window, brought up (lanes.py)
                     code, out = web.lane_attach(str(body.get("id", "")), str(body.get("machine", "")),
                                                 str(body.get("session", "")))
@@ -770,6 +796,15 @@ class Web:
             return pings.send(self.state, self.bot.channels, chat)
         return None
 
+    def apns_state(self, devices: bool = True) -> dict:
+        """APNs for the page and an app: its mode ([notify] apns, followed live), what is missing, the devices."""
+        from . import apns, notify
+        cfg = notify.config() or self.cfg
+        out = {"mode": apns.mode(cfg), "missing": apns.missing(cfg)}
+        if devices:
+            out["devices"] = [apns.describe(k, v) for k, v in apns.devices(self.state).items()]
+        return out
+
     def press(self, action: str, text: str | None = None) -> None:
         """A press on the page, handled as one in a chat (the person at this machine is trusted).
         text: what was typed with it (a short story's reply)."""
@@ -929,6 +964,7 @@ class Web:
         return {**chat, "messages": msgs, "topics": topics_, "public": True}
 
     def data(self) -> dict:
+        from . import reach
         runs = []
         days = sorted((self.state / "runs").glob("*"))[-DAYS:]
         for f in sorted((p for d in days for p in d.glob("*.json")), reverse=True)[:MAX_RUNS]:
@@ -955,7 +991,7 @@ class Web:
                 log.exception("family %s: runs failed", f.name)
         return {"now": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "workflows": workflows, "sops": SOPS,
                 "runs": runs, "asks": asks, "paused": paused, "running": running,
-                "meter": self.meter(), "pys": bool(pys_path())}
+                "meter": self.meter(), "pys": bool(pys_path()), "reach": reach.notices(self.state)}
 
 
 def loopback6_notice(state: Path, channels: list, chats: list[str], server, port: int) -> bool:

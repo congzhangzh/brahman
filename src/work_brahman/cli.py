@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 import tomllib
 from pathlib import Path
@@ -86,6 +87,30 @@ def _pairs(items: list[str] | None) -> dict:
         k, eq, v = x.partition("=")
         out[k.strip() if eq else "ref"] = (v if eq else k).strip()
     return out
+
+
+def _start_notes(state: Path, channels: list, chats: list[str], w, port) -> None:
+    """At serve's start, beside the web (never before it): What's new, the was-down notice and the heartbeat,
+    the [::1] notice. Each chat call has its timeout; an app that can't be reached is said once (reach.py)."""
+    try:  # What's new (changes.py): the first start of a new version posts its notes once, following [notify]
+        from . import changes
+        said = changes.announce_once(state, channels, chats)
+        if said:
+            log.info("version %s: %s", changes.version(), said)
+    except Exception:  # noqa: BLE001 - notes never stop the buddy
+        log.exception("what's new: the announcement failed")
+    try:  # down for a while (not a restart): say when, so he resends what got no answer (alive.py)
+        from . import alive
+        if said := alive.start(state, channels, chats):
+            log.info("was down: %s", said)
+    except Exception:  # noqa: BLE001 - the heartbeat never stops the buddy
+        log.exception("alive: the heartbeat failed to start")
+    if w is not None:
+        try:  # another program on [::1]:<port>: say it once
+            from .web import loopback6_notice
+            loopback6_notice(state, channels, chats, w.server, int(port))
+        except Exception:  # noqa: BLE001 - a notice never stops the buddy
+            log.exception("the [::1] notice failed")
 
 
 def _short(args, state: Path, channels: list, chats: list[str]) -> int:
@@ -461,6 +486,11 @@ def main() -> int:
     t.add_argument("--without", action="append", metavar="RULE", help="leave a rules file out, and keep it "
                    "out (e.g. brahman-git-roles); may be given more than once")
     t.add_argument("--no-pys", action="store_true", help="don't look for pys")
+    t.add_argument("--remote", nargs="*", metavar="VERB [SPACE]",
+                   help="the quick start's fix step (remote_setup.py): check, install, start or restart the "
+                        "shell's spaces (work, personal, desktop, terminal, browser), JSON out; `line` prints the "
+                        "forced-command key line it is meant for. Under that line it reads $SSH_ORIGINAL_COMMAND "
+                        "and refuses anything but one verb and one space")
     auth = sub.add_parser("auth", help="the owner secret: one secret for the workbench, the event stream, "
                                        "the terminal, the Browser and the assistant (webauth.py)")
     asub = auth.add_subparsers(dest="action", required=True)
@@ -776,6 +806,11 @@ def main() -> int:
     if args.cmd == "tui":  # setting up, in one screen: no channel, no buddy state
         from . import buddy_tui
         return buddy_tui.run(install.config_path(args.config))
+    if args.cmd == "setup" and args.remote is not None:  # the quick start's fix step: no channel, no state
+        from . import remote_setup
+        path = install.config_path(args.config)
+        cfg = tomllib.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        return remote_setup.main(args.remote, os.environ, cfg)
     if args.cmd in ("init", "allow", "config", "doctor", "service", "setup"):  # setting up: no channel, no state
         from . import workbench
         return {"init": install.init, "allow": install.allow, "config": configure.config,
@@ -789,6 +824,8 @@ def main() -> int:
     jobs = cfg.get("jobs", {})
     state = Path(os.environ.get("XDG_STATE_HOME", "~/.local/state")).expanduser() / "work_brahman"
     _private(state)
+    from . import reach
+    reach.state = state  # a chat app that can't be reached is kept there, said once (reach.py)
     if args.cmd == "serve":  # one buddy per state: a second would fight the first for the chats
         lock = state / "serve.lock"
         held = portable.hold(lock)
@@ -808,10 +845,11 @@ def main() -> int:
     # followed live (notify.watch), off by default, so turning it on needs no restart
     # the event stream (events.py): its own pseudo-chat and [notify] events, before web push's, so the
     # browsers' push of an event carries the stream's id
-    from . import events, notify, webpush
+    # APNs (apns.py): the owner's own apps, after web push, the same decision and id; off by default
+    from . import apns, events, notify, webpush
     notify.watch(Path(args.config))
     push_on = True
-    linked = Linked(list(cfg.get("me", {}).get("chats", [])) + [events.CHAT, webpush.CHAT])  # this order (test_events)
+    linked = Linked(list(cfg.get("me", {}).get("chats", [])) + [events.CHAT, webpush.CHAT, apns.CHAT])  # this order (test_events)
     home = linked.chats[0] if linked.chats else ""  # where a job or duty without chat_id posts
     duties = {name: DUTIES[name]({"chat_id": home} | d, state)
               for name, d in cfg.get("duties", {}).items() if name in DUTIES}
@@ -875,7 +913,7 @@ def main() -> int:
     team_opts = teams.settings(cfg)
     if args.cmd == "auth":  # the owner secret's file only: no state, no chat
         from . import webauth
-        if webauth.owner_on() and not args.force:
+        if webauth.owner_path().exists() and not args.force:  # owner.secret's own file (owner.d/ is the devices')
             print(f"{webauth.owner_path()} exists: the owner secret is set up. A leaked one: --force "
                   "(then every device needs the new secret)", file=sys.stderr)
             return 2
@@ -958,6 +996,7 @@ def main() -> int:
         # gate (no chat token, on purpose) stays with none, so its cards are left undrawn for buddy serve
         channels.append(events.channel(cfg, state))
         channels.append(webpush.channel(cfg, state))
+        channels.append(apns.channel(cfg, state))
     if not channels and args.cmd == "short" and gated:
         # Behind the gate (a session in its sandbox): no chat tokens here, on purpose. The story
         # file is written all the same, and `buddy serve` draws its card (shorts.redraw).
@@ -1022,33 +1061,20 @@ def main() -> int:
                   state, linked, scheduler)
         bot.long_engines = long
         bot.team_opts = team_opts
-        try:  # What's new (changes.py): the first start of a new version posts its notes once, following [notify]
-            from . import changes
-            said = changes.announce_once(state, channels, list(linked.chats))
-            if said:
-                log.info("version %s: %s", changes.version(), said)
-        except Exception:  # noqa: BLE001 - notes never stop the buddy
-            log.exception("what's new: the announcement failed")
-        try:  # down for a while (not a restart): say when, so he resends what got no answer (alive.py)
-            from . import alive
-            if said := alive.start(state, channels, list(linked.chats)):
-                log.info("was down: %s", said)
-        except Exception:  # noqa: BLE001 - the heartbeat never stops the buddy
-            log.exception("alive: the heartbeat failed to start")
+        # The web first (the owner, 2026-11-26: on a limited network the buddy "hung and no serve"): nothing
+        # before it talks to a chat app, and the start-time posts run beside it, each call with its timeout
+        w = None
+        if port:  # the workbench, on the loopbacks only (127.0.0.1 and ::1)
+            w = Web(int(port), state, bot, scheduler, cfg, home, chat, families, Path(args.config))
+            w.start()
+        threading.Thread(target=_start_notes, args=(state, channels, list(linked.chats), w, port),
+                         name="start-notes", daemon=True).start()
         from . import others  # another buddy on the same Feishu/Lark bot: looked for once, said once
         others.tell = lambda md: post_all(channels, list(linked.chats), md, title="buddy")
         others.check_start(channels, list(linked.chats))
         adopted = procs.adopt(bot.adopted)  # what the last instance left running: delivered when it ends
         if adopted:
             log.info("adopted %d runs from the last instance: %s", len(adopted), ", ".join(adopted))
-        if port:  # the workbench, on the loopbacks only (127.0.0.1 and ::1)
-            from .web import loopback6_notice
-            w = Web(int(port), state, bot, scheduler, cfg, home, chat, families, Path(args.config))
-            w.start()
-            try:  # another program on [::1]:<port>: say it once
-                loopback6_notice(state, channels, list(linked.chats), w.server, int(port))
-            except Exception:  # noqa: BLE001 - a notice never stops the buddy
-                log.exception("the [::1] notice failed")
         if "bitable" in cfg and os.environ.get("FEISHU_APP_ID"):  # the Lark Base workbench
             from .bitable import Bitable
             Bitable(os.environ["FEISHU_APP_ID"], os.environ["FEISHU_APP_SECRET"],

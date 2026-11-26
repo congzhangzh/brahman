@@ -360,6 +360,39 @@ SCOPES = [("im:message.p2p_msg:readonly", "your messages to the bot", True),
           ("docs:permission.member:create", "sharing the Base with you ([bitable])", "bitable")]
 
 
+BUDGET = 10  # seconds for every network check together (the owner, 2026-11-26: "buddy doctor itself hung!")
+
+
+def network(probes: list, budget: float | None = None) -> list[tuple]:
+    """The checks that need the network, side by side under one budget: each (name, fn(row)) in a thread of its
+    own; one that hasn't answered in time is "not reached" (offline, or blocked) and is left behind: a name
+    lookup can't be stopped, and urlopen's timeout doesn't cover it. The doctor ends all the same."""
+    import threading
+    if not probes:
+        return []
+    budget = BUDGET if budget is None else budget
+    out: list[list] = [[] for _ in probes]
+    threads = []
+    for (label, fn), got in zip(probes, out):
+        def run(label=label, fn=fn, got=got):
+            try:
+                fn(lambda ok, what, how="": got.append((ok, what, how)))
+            except Exception as e:  # noqa: BLE001 - a probe's own failure is its row
+                got.append((False, f"{label}: {type(e).__name__}", ""))
+        t = threading.Thread(target=run, name=f"doctor {label}", daemon=True)
+        t.start()
+        threads.append(t)
+    end = time.monotonic() + budget
+    for t in threads:
+        t.join(max(0.0, end - time.monotonic()))
+    rows = []
+    for (label, _), t, got in zip(probes, threads, out):
+        rows += [(None, f"{label}: not reached in {budget:g} s (offline, or blocked?)",
+                  "the checks above don't need it; a network that reaches it, or a proxy, brings it back")] \
+            if t.is_alive() else got
+    return rows
+
+
 def _get(url: str, data: dict | None = None, token: str = "") -> dict:
     import json
     req = urllib.request.Request(url, method="POST" if data is not None else "GET",
@@ -451,19 +484,32 @@ def line(ok, what: str, how: str = "") -> str:
 
 def doctor(args) -> int:
     """One line per check: ✅ works, ⚠️ off or worth fixing, ❌ the buddy can't run."""
+    js = getattr(args, "json", False)
+    shown = []
+
+    def early(local):  # the local checks at once, before the network's (each in at most BUDGET seconds)
+        shown[:] = local
+        print("\n".join(line(*r[:3]) for r in local), flush=True)
     rows = all_checks(config_path(args.config), offline=args.offline, name=args.name,
-                      peers=getattr(args, "peers", False))
-    if getattr(args, "json", False):  # for scripts and cron: the same rows, the same exit code
-        print(json.dumps([{"ok": ok, "what": what, "how": how} for ok, what, how in rows], ensure_ascii=False, indent=1))
-    else:
-        print("\n".join(line(*r) for r in rows))
+                      peers=getattr(args, "peers", False), detail=True, early=None if js else early)
+    if js:  # for scripts and cron: the same rows, the same exit code; a space's
+        # row also carries its whole check (remote_setup: units, port, state, the fix), for the quick start
+        print(json.dumps([{"ok": r[0], "what": r[1], "how": r[2]} | ({"space": r[3]} if len(r) > 3 else {})
+                          for r in rows], ensure_ascii=False, indent=1))
+    elif rows[len(shown):]:
+        print("\n".join(line(*r[:3]) for r in rows[len(shown):]))
     return 1 if any(r[0] is False for r in rows) else 0
 
 
-def all_checks(path: Path, *, offline: bool = False, name: str = "buddy", peers: bool = False, pinger=None) -> list[tuple]:
-    """The buddy's checks, then (peers) the peer build's (peer.doctor: the secret, where serve
-    listens, a signed ping both ways to every peer), each of those named "peer: ..."."""
-    rows = checks(path, offline=offline, name=name)
+def all_checks(path: Path, *, offline: bool = False, name: str = "buddy", peers: bool = False, pinger=None,
+               detail: bool = False, early=None) -> list[tuple]:
+    """The buddy's checks, then the shell's spaces (remote_setup: each space's units, port and fix; with
+    detail, its row carries the whole check as a 4th item), then (peers) the peer build's (peer.doctor:
+    the secret, where serve listens, a signed ping both ways to every peer), each named "peer: ..."."""
+    rows = checks(path, offline=offline, name=name, early=early)
+    from . import remote_setup
+    cfg = tomllib.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    rows += [r if detail else r[:3] for r in remote_setup.doctor_rows(cfg)]
     if peers:
         from . import peer as P
         cfg = P.load(os.environ)
@@ -474,7 +520,7 @@ def all_checks(path: Path, *, offline: bool = False, name: str = "buddy", peers:
     return rows
 
 
-def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tuple]:
+def checks(path: Path, *, offline: bool = False, name: str = "buddy", early=None) -> list[tuple]:
     """(ok, what, how to fix): ok is True, None (off, or worth fixing) or False (can't run)."""
     load_env(path)
     rows = []
@@ -508,7 +554,9 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
     if first == "Lark" and second:
         row(False, "two Lark apps: FEISHU_APP_ID is on domain = \"lark\" and LARK_APP_ID is set",
             'set domain = "feishu" in buddy.toml if FEISHU_APP_ID is a Feishu (China) app')
-    if tg and not offline:
+    net = []  # the checks that need the network: run last, side by side, under one budget (network())
+
+    def tg_rows(row):
         me = _telegram(tg)
         if "error" in me:
             row(False, f"Telegram bot: {me['error']}", "check the token with @BotFather")
@@ -519,12 +567,16 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
                                             "long stories and topics share one chat"),
                 "" if me.get("has_topics_enabled") else
                 "@BotFather → open the Mini App → your bot → Bot Settings → Threaded Mode")
+    if tg and not offline:
+        net.append(("Telegram", tg_rows))
     cfg = tomllib.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     if not offline and os.environ.get("FEISHU_APP_ID"):
-        _app_rows(row, "Feishu" if domain == "feishu" else "Lark", os.environ["FEISHU_APP_ID"],
-                  os.environ.get("FEISHU_APP_SECRET", ""), domain, cfg)
+        label = "Feishu" if domain == "feishu" else "Lark"
+        net.append((label, lambda row: _app_rows(row, label, os.environ["FEISHU_APP_ID"],
+                                                 os.environ.get("FEISHU_APP_SECRET", ""), domain, cfg)))
     if not offline and os.environ.get("LARK_APP_ID"):
-        _app_rows(row, "Lark", os.environ["LARK_APP_ID"], os.environ.get("LARK_APP_SECRET", ""), "lark", cfg)
+        net.append(("Lark", lambda row: _app_rows(row, "Lark", os.environ["LARK_APP_ID"],
+                                                  os.environ.get("LARK_APP_SECRET", ""), "lark", cfg)))
     allowed = [x for x in os.environ.get("BUDDY_ALLOWED_IDS", "").split(",") if x.strip()]
     if chats or allowed:  # pairing is a chat app's: web only has nothing to pair
         row(True if allowed else None, f"paired: {', '.join(allowed)}" if allowed else "not paired yet",
@@ -620,14 +672,20 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
     if webauth.owner_on():  # the owner secret first, loopback only
         from . import events as _ev
         old = [x for x, on in (("BUDDY_WEB_TOKEN", tok), (f"{len(_ev.tokens(state))} device token(s)", _ev.tokens(state))) if on]
-        good = bool(webauth.owner_hash())
+        devs = webauth.device_files()
+        bad = [p.name for p in devs if not webauth._hex(p)]
+        main = webauth.owner_path().exists()
+        good = (bool(webauth.owner_hash()) or not main) and not bad and bool(webauth.owner_hashes())
         row(True if good else False,
-            f"auth: owner secret {webauth.owner_path()}: one secret for web, events, terminal, Browser, assistant; "
+            f"auth: owner secret {webauth.owner_path() if main else '(no owner.secret)'}"
+            + (f" + {len(devs)} device(s) in {webauth.owner_dir()}" if devs else "")
+            + ": one secret for web, events, terminal, Browser, assistant; "
             "loopback only" + (f" ([web] hosts {', '.join(hosts)} not honoured)" if hosts else "")
             + (f"; still set too: {', '.join(old)}" if old else ""),
             ("a leaked secret: buddy auth new --force, then the new one in every device's profile"
              + (f"; delete {', '.join(old)} once every device uses the owner secret" if old else ""))
-            if good else f"{webauth.owner_path()} is not one SHA-256 hex line: buddy auth new --force")
+            if good else (f"not one SHA-256 hex line: {', '.join(bad)} (delete it, the device sets up again)" if bad
+                          else f"{webauth.owner_path()} is not one SHA-256 hex line: buddy auth new --force"))
     elif tok:
         row(None if hosts else True, "workbench: a web token is set" + (f"; also reachable as {', '.join(hosts)}" if hosts else ""),
             "plain HTTP: on that network the token and the pages can be read; an SSH client on the device "
@@ -635,6 +693,12 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
     elif hosts:
         row(None, f"workbench: [web] hosts lists {', '.join(hosts)}, but no BUDDY_WEB_TOKEN is set: they are ignored",
             "set a long random BUDDY_WEB_TOKEN (Setup → Config) to use them")
+    from . import reach  # a chat app the running buddy can't reach (a limited network): said, never an error
+    for r in reach.notices(state):
+        if r.get("down"):
+            row(None, f"{r['name']}: can't be reached since {r['down']} ({r['why']})",
+                f"the web page, the scheduler and the duties work; {r['name']} is tried again on its next call "
+                "(a network that reaches it, or a proxy, brings it back)")
     from . import webpush  # web push to the owner's browsers (webpush.py): off by default
     wp, browsers = webpush.mode(cfg), webpush.subs(state)
     if wp != "off" or browsers:
@@ -642,6 +706,16 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
             f"web push: notify = {wp}, {len(browsers)} browser(s) subscribed · {used.get('webpush', 0)} pushes this month"
             + (" (off: nothing is sent)" if wp == "off" else ""),
             "" if browsers or wp == "off" else "🔔 in the workbench subscribes this browser (buddy push test sends one)")
+    from . import apns  # APNs to the owner's own apps (apns.py): off by default, off while the key is missing
+    am, devs, miss = apns.mode(cfg), apns.devices(state), apns.missing(cfg)
+    if am != "off" or devs:
+        row(True if am == "off" or (devs and not miss) else None,
+            f"APNs: notify = {am}, {len(devs)} device(s) registered · {used.get('apns', 0)} pushes this month"
+            + (" (off: nothing is sent)" if am == "off" else f" (off until: {'; '.join(miss)})" if miss else ""),
+            "" if am == "off" or (devs and not miss) else
+            ("the key: Apple Developer → Keys → + → Apple Push Notifications service; the .p8 at "
+             f"{apns.key_path()} (chmod 600), its key id and your team id in [apns]" if miss
+             else "open the app on the device: it registers itself"))
     port = (cfg.get("web") or {}).get("port")  # both loopbacks (web.LoopbackServer): one process on each?
     if port:
         v4, v6 = loopback_health(int(port))
@@ -681,6 +755,9 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy") -> list[tu
     unit = service_file(name)
     if WINDOWS or MACOS or sys.platform.startswith("linux"):
         row(True if unit.exists() else None, f"service {unit}", "" if unit.exists() else "buddy service install")
+    if early is not None:  # the local checks at once (the doctor prints them before the network's)
+        early(list(rows))
+    rows += network(net)
     return rows
 
 

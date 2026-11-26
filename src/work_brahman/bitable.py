@@ -159,7 +159,7 @@ def rows(state: Path, cfg: dict, days: int = 30) -> dict[str, dict[str, dict]]:
 
 class Bitable:
     def __init__(self, app_id: str, app_secret: str, domain, state: Path, cfg: dict):
-        self.api = (lark.Client.builder().app_id(app_id).app_secret(app_secret).domain(domain)
+        self.api = (lark.Client.builder().app_id(app_id).app_secret(app_secret).domain(domain).timeout(15)
                     .log_level(lark.LogLevel.WARNING).build())
         self.state, self.cfg = state, cfg
         self.share_with = cfg.get("bitable", {}).get("share_with", "")

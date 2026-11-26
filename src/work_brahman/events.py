@@ -106,14 +106,21 @@ def publish(state: Path, kind: str, title: str, body: str = "", link: str = "", 
 
 
 def with_stream(chats: list[str]) -> list[str]:
-    """A story's chats with the stream's just before web push's: a story started before the stream
-    existed (its chats were fixed at its start) reaches it too (the PO, 2026-11-18: "our own push
-    can't miss what's running now"). Before, so the push of the same event carries the stream's id."""
+    """A story's chats with the stream's just before web push's, and APNs just after it: a story started
+    before the stream or APNs existed (its chats were fixed at its start) reaches them too (the PO,
+    2026-11-18: "our own push can't miss what's running now"). The stream first, so the pushes of the
+    same event carry its id."""
+    from .apns import CHAT as APNS
     from .webpush import CHAT as PUSH
-    if PUSH not in chats or CHAT in chats:
+    if PUSH not in chats:
         return chats
-    i = chats.index(PUSH)
-    return chats[:i] + [CHAT] + chats[i:]
+    if CHAT not in chats:
+        i = chats.index(PUSH)
+        chats = chats[:i] + [CHAT] + chats[i:]
+    if APNS not in chats:
+        i = chats.index(PUSH)
+        chats = chats[:i + 1] + [APNS] + chats[i + 1:]
+    return chats
 
 
 def recent(state: Path, kind: str, title: str, body: str, within: float = 10.0, now: float | None = None,

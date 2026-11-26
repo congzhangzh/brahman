@@ -1,6 +1,6 @@
 [project]
 name = "brahman-buddy"
-version = "20261122.4"
+version = "20261126.1"
 license = "MIT"
 license-files = ["LICENSE"]
 description = "A personal work buddy: Telegram, Lark and Feishu chats driving Claude Code, with scheduled jobs, short and long stories, and portable skills"
@@ -12,6 +12,7 @@ dependencies = [
     "lark-oapi>=1.7.5",
     "segno>=1.6",  # the QR codes buddy init / buddy scan draw in the terminal (pure Python, no dependencies)
     "pycryptodome>=3.20",  # web push (webpush.py): P-256, ECDH, HKDF, AES-GCM; lark-oapi brings it already
+    "httpx[http2]>=0.27",  # APNs (apns.py) speaks HTTP/2 only; httpx comes with lark-oapi, the extra adds h2 (pure Python)
 ]
 
 [project.scripts]

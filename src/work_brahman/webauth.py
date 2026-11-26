@@ -78,6 +78,7 @@ def token(env=None) -> str:
 
 
 OWNER_FILE = "owner.secret"
+OWNER_DIR = "owner.d"  # one <device>.sha256 per paired device, beside owner.secret (the owner, 2026-11-25: pairing)
 OWNER_COOKIE = "buddy_owner"
 
 
@@ -86,24 +87,61 @@ def owner_path() -> Path:
     return install.config_dir() / OWNER_FILE
 
 
-def owner_on() -> bool:
-    """The owner secret is set up (the file exists): checked first, loopback only."""
-    return owner_path().exists()
+def owner_dir() -> Path:
+    """owner.d/ beside owner.secret: each paired device's own secret, as its SHA-256 only (<device>.sha256, one
+    64-hex line, 0600), written once at the device's setup through the owner's own SSH key; a lost device:
+    delete its file (the owner, 2026-11-25: "share the shared secret", one setup per device)."""
+    return owner_path().parent / OWNER_DIR
 
 
-def owner_hash() -> str:
-    """The stored SHA-256 hex, or "" (no file, unreadable, or not 64 hex digits: nobody gets in by it)."""
+def device_files() -> list[Path]:
+    """The devices' hash files: regular files named *.sha256 (a link is not one: it opens nothing)."""
     try:
-        h = owner_path().read_text(encoding="utf-8").strip().lower()
+        return sorted(p for p in owner_dir().glob("*.sha256") if p.is_file() and not p.is_symlink())
+    except OSError:
+        return []
+
+
+def _hex(p: Path) -> str:
+    """A file's SHA-256 hex, or "" (unreadable, or not 64 hex digits: nobody gets in by it)."""
+    try:
+        h = p.read_text(encoding="utf-8").strip().lower()
     except OSError:
         return ""
     return h if len(h) == 64 and all(c in "0123456789abcdef" for c in h) else ""
 
 
+def owner_on() -> bool:
+    """The owner secret is set up (owner.secret, or a device's file in owner.d/): checked first, loopback only.
+    A file that holds no good hash still counts: it closes the buddy to the loopback and opens nothing."""
+    return owner_path().exists() or bool(device_files())
+
+
+def owner_hash() -> str:
+    """owner.secret's SHA-256 hex, or "" (no file, unreadable, or not 64 hex digits: nobody gets in by it)."""
+    return _hex(owner_path())
+
+
+def owner_hashes() -> list[str]:
+    """Every hash that logs in, read at each check: owner.secret's, then each device's (bad ones left out)."""
+    return list(dict.fromkeys(h for h in [owner_hash(), *map(_hex, device_files())] if h))
+
+
+def owner_match(given: str) -> str:
+    """The stored hash the secret's SHA-256 equals, or "". Compared with every one in constant time, never the
+    hash itself (it is not the secret)."""
+    if not given:
+        return ""
+    d, hit = hashlib.sha256(given.strip().encode()).hexdigest().encode(), ""
+    for h in owner_hashes():
+        if hmac.compare_digest(d, h.encode()):
+            hit = h
+    return hit
+
+
 def owner_ok(given: str) -> bool:
-    """The secret itself (never its hash): SHA-256 of it equals the stored hash, in constant time."""
-    h = owner_hash()
-    return bool(h and given) and hmac.compare_digest(hashlib.sha256(given.strip().encode()).hexdigest().encode(), h.encode())
+    """The secret itself (never its hash): its SHA-256 equals owner.secret's or a device's."""
+    return bool(owner_match(given))
 
 
 def _cookie_key() -> bytes:
@@ -122,8 +160,10 @@ def _cookie_key() -> bytes:
         return bytes.fromhex(p.read_text(encoding="utf-8").strip())
 
 
-def owner_cookie_value() -> str:
-    h = owner_hash()
+def owner_cookie_value(h: str | None = None) -> str:
+    """The owner cookie for one stored hash (owner.secret's by default): its file removed or changed, the cookie
+    ends."""
+    h = owner_hash() if h is None else h
     return hmac.new(_cookie_key(), b"brahman owner cookie v1 " + h.encode(), hashlib.sha256).hexdigest() if h else ""
 
 
@@ -137,10 +177,10 @@ def ok(headers) -> bool:
     if not required():
         return True
     if owner_on():
-        want = owner_cookie_value()
+        wants = [owner_cookie_value(h) for h in owner_hashes()]
         for part in (headers.get("Cookie") or "").split(";"):
             k, _, v = part.strip().partition("=")
-            if want and k == OWNER_COOKIE and hmac.compare_digest(v.strip().encode(), want.encode()):
+            if k == OWNER_COOKIE and any(hmac.compare_digest(v.strip().encode(), w.encode()) for w in wants if w):
                 return True
         auth = headers.get("Authorization") or ""
         if auth.startswith("Bearer ") and owner_ok(auth[7:]):
@@ -152,8 +192,9 @@ def ok(headers) -> bool:
 def login(given: str) -> str | None:
     """A secret typed or put in the URL: the Set-Cookie for it (the owner's first, then the web token's),
     or None after a second's wait (no fast guessing)."""
-    if owner_on() and owner_ok(given):
-        return f"{OWNER_COOKIE}={owner_cookie_value()}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000"
+    h = owner_match(given) if owner_on() else ""
+    if h:
+        return f"{OWNER_COOKIE}={owner_cookie_value(h)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000"
     tok = token()
     if tok and hmac.compare_digest(given.strip().encode(), tok.encode()):
         return set_cookie(tok)
@@ -256,17 +297,22 @@ def strip_token(path: str) -> str:
 
 
 LOGIN = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>brahman · token</title><style>body{font:16px system-ui,sans-serif;background:#1f1b16;color:#eee;display:grid;place-items:center;min-height:100vh;margin:0}
+<title>brahman · sign in</title><style>body{font:16px system-ui,sans-serif;background:#1f1b16;color:#eee;display:grid;place-items:center;min-height:100vh;margin:0}
 form{display:grid;gap:10px;padding:24px;border:1px solid #444;border-radius:12px;max-width:320px}input,button{font:inherit;padding:8px;border-radius:8px;border:1px solid #666}
 button{background:#c9a227;color:#1f1b16;border:0}p{margin:0;color:#aaa;font-size:13px}</style></head><body>
-<form method="post" action="/login"><b>brahman workbench</b><p>This buddy asks for its secret: the owner secret, or its web token.</p>
-<input name="token" type="password" autocomplete="current-password" autofocus placeholder="token"><input type="hidden" name="next" value="{next}">
+<form method="post" action="/login"><b>brahman workbench</b><p>{ask}</p>
+<input name="token" type="password" autocomplete="current-password" autofocus placeholder="{what}"><input type="hidden" name="next" value="{next}">
 <button>Open</button>{bad}</form>
 <script>const n = document.querySelector("[name=next]"); if (location.hash && !n.value.includes("#")) n.value += location.hash;</script>
 </body></html>"""
 
 
 def login_page(next_path: str = "/", bad: bool = False) -> bytes:
+    """The form names what it takes: the owner secret while it is set up (the one secret for every space; the
+    owner, 2026-11-25: "one simple shared secret"), else the buddy's web token, as before."""
     import html
-    return LOGIN.replace("{next}", html.escape(next_path or "/")).replace(
-        "{bad}", "<p style='color:#e66'>wrong token</p>" if bad else "").encode()
+    what = "owner secret" if owner_on() else "web token"
+    ask = ("The owner secret: the one secret for every space (buddy auth new makes it)." if owner_on()
+           else "This buddy asks for its web token (BUDDY_WEB_TOKEN).")
+    return (LOGIN.replace("{ask}", ask).replace("{what}", what).replace("{next}", html.escape(next_path or "/"))
+            .replace("{bad}", f"<p style='color:#e66'>not the {what}</p>" if bad else "").encode())
