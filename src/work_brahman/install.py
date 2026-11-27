@@ -667,8 +667,12 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy", early=None
         pass
     row(True, "outside calls: " + (", ".join(dict.fromkeys(out)) if out else "none (nothing is switched on)")
         + "; plus Claude Code's own endpoint (ANTHROPIC_BASE_URL or its default)", "")
-    from . import webauth  # who may use the workbench (webauth.py)
-    tok, hosts = webauth.token(), list(cfg.get("web", {}).get("hosts") or [])
+    from . import webauth  # who may use the workbench (webauth.py): the key slots, the one way in
+    left = [x for x, on in (("BUDDY_WEB_TOKEN", os.environ.get("BUDDY_WEB_TOKEN")),
+                            ("[web] hosts", (cfg.get("web") or {}).get("hosts"))) if on]
+    if left:  # read by nothing since 2026-11-26 (the owner: "yes, remove the web token and web hosts")
+        row(None, f"{' and '.join(left)} {'is' if len(left) == 1 else 'are'} not read any more: the key slots are the "
+            "one way in", f"remove {' and '.join(left)} ({env_file(path).name} / {path.name})")
     old_file = webauth.owner_dir().parent / "owner.secret"  # read by nothing since the key slots (2026-11-26)
     if old_file.exists():
         row(None, f"{old_file} is not read any more: the logins are the key slots in {webauth.owner_dir()}",
@@ -676,18 +680,16 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy", early=None
             "or a new one: buddy auth new --append owner")
     if webauth.owner_on():  # the key slots first, loopback only
         from . import events as _ev
-        old = [x for x, on in (("BUDDY_WEB_TOKEN", tok), (f"{len(_ev.tokens(state))} device token(s)", _ev.tokens(state))) if on]
+        old = [f"{len(_ev.tokens(state))} device token(s)"] if _ev.tokens(state) else []
         slots = webauth.slots()
         bad = [r["name"] for r in slots if not r["ok"]]
         row(not bad,
             f"auth: {len(slots)} key slot(s) in {webauth.owner_dir()} ({', '.join(r['name'] for r in slots)}): "
             "each a login for web, events, terminal, Browser, assistant; loopback only"
-            + (f" ([web] hosts {', '.join(hosts)} not honoured)" if hosts else "")
-            + (f"; still set too: {', '.join(old)}" if old else ""),
-            ("a lost device: buddy auth remove <name>; a leak: buddy auth new --replace-all <name>"
-             + (f"; delete {', '.join(old)} once every device has its slot" if old else ""))
+            + (f"; the event stream also takes {', '.join(old)}" if old else ""),
+            "a lost device: buddy auth remove <name>; a leak: buddy auth new --replace-all <name>"
             if not bad else f"not one SHA-256 hex line: {', '.join(bad)} (buddy auth new --replace <name>, or remove it)")
-    else:  # no key slot: closed (fail closed, 2026-11-26), the token too
+    else:  # no key slot: closed (fail closed, 2026-11-26)
         row(None, "auth: no key slot: the workbench is closed (the scheduler, the duties and the chats run)",
             "buddy auth new --append <name> on this machine (its secret is printed once), then reload the page")
     from . import reach  # a chat app the running buddy can't reach (a limited network): said, never an error
@@ -735,6 +737,9 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy", early=None
         row(None, f"this buddy is {_ch.version()}, older than {newer} ({where})",
             "run the newer one (uv tool upgrade brahman-buddy, then restart the buddy), or stop this copy; "
             "ignore it if you went back on purpose")
+    mine = sorted(p.name for p in (Path.home() / ".claude" / "rules").glob("brahman-*.local.md"))
+    if mine:  # the owner's own lines beside our rules files (workbench.LOCAL): never touched by buddy setup
+        row(True, f"rules: your own beside ours: {', '.join(mine)} (buddy setup never touches them; Claude follows them where they differ)")
     from . import events  # the event stream for other apps (events.py): off by default
     ev, devices = events.mode(cfg), events.tokens(state)
     if ev != "off" or devices:

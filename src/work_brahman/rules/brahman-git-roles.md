@@ -1,3 +1,5 @@
+<!-- brahman-git-roles: written by `buddy setup`. Your own lines go in brahman-git-roles.local.md beside this file: buddy setup never writes, rewrites or removes it; where the two differ, follow that file. -->
+
 # Git branches by role (from brahman-buddy; `buddy setup` keeps it current)
 
 Installed by `buddy setup` into `~/.claude/rules/`. Edit it freely: once you change it, setup

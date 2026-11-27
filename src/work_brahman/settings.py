@@ -30,12 +30,11 @@ FIELDS = [  # key, label, kind
     ("notify_telegram", "Telegram on its own", "notify"), ("notify_web", "the web chat on its own", "notify"),
     ("notify_webpush", "web push to your browsers (with the tab closed)", "notify"),
     ("notify_events", "the event stream for other apps (GET /api/events)", "notify"),
-    ("web_token", "web token (LAN access through a forward; empty: off)", "secret"),
-    ("web_hosts", "web: extra addresses allowed (only with the token)", "list")]
+]
 DEFAULT_OF = {"notify_webpush": "off", "notify_events": "off"}
 NOTIFY = ("off", "ends", "all")  # notify.MODES: what Feishu/Lark get without being asked
 RESTART = "the buddy reads this when it starts: restart it to use it (systemctl --user restart buddy)"
-NOW = "applies now: the running buddy follows [notify], the web token and [web] hosts without a restart"
+NOW = "applies now: the running buddy follows [notify] without a restart"
 
 
 def mask(secret: str) -> str:
@@ -138,13 +137,13 @@ def write(path: Path, s: dict, before: dict) -> tuple[bool, list[str]]:
     except ValueError as e:
         return False, [f"not written: {e}"]
     changed = [k for k in s if s.get(k) != before.get(k)]
-    if changed and all(k.startswith(("notify_", "web_")) for k in changed):  # followed live (notify.watch, webauth)
+    if changed and all(k.startswith("notify_") for k in changed):  # followed live (notify.watch)
         return True, ["written"] + notes + [NOW]
     return True, ["written"] + notes + [RESTART]
 
 
 ENV_KEYS = ("TELEGRAM_BOT_TOKEN", "FEISHU_APP_ID", "FEISHU_APP_SECRET", "LARK_APP_ID", "LARK_APP_SECRET",
-            "BUDDY_ALLOWED_IDS", "BUDDY_WEB_TOKEN")
+            "BUDDY_ALLOWED_IDS")
 
 
 def reload_env(path: Path, env=None) -> None:

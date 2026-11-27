@@ -226,15 +226,13 @@ A zh-CN setup doesn't offer Telegram or Lark (`buddy init` doesn't ask; Setup sh
 changed in the Setup tab, the TUI or by hand applies to the next message, with no restart (other
 settings still need one).
 
-**The workbench from another device on your LAN** (an SSH forward with a wildcard bind, e.g.
-`ssh -L 0.0.0.0:18787:127.0.0.1:8787 server` on a machine the phone can reach): set a long random
-`BUDDY_WEB_TOKEN` in `buddy.env` (`python -c "import secrets; print(secrets.token_urlsafe(32))"`) and
-list the addresses the browser will use in `[web] hosts` (e.g. `["192.0.2.10"]` or
-`["192.0.2.0/24"]`), then restart. Every request then needs the token: open
-`http://192.0.2.10:18787/?token=…` once (it becomes a cookie and leaves the address bar), or type it
-on the login page; scripts send `Authorization: Bearer …`. Without a token, `[web] hosts` is ignored.
-Plain HTTP: anyone on that network can read the token and the pages, and web push needs
-127.0.0.1 or HTTPS; an SSH client on the device itself (`-L` to 127.0.0.1) has neither problem.
+**Who may open the workbench: the key slots, the one way in.** The workbench listens on 127.0.0.1 and ::1
+only. Each device or browser gets its own slot: `buddy auth new --append <name> --note "…"` on the server prints
+its secret once (only its SHA-256 is kept in `~/.config/brahman/owner.d/`); type it once into that browser's
+login page, or let the shell keep it. `buddy auth list` shows the slots, `buddy auth remove <name>` retires a
+lost device, `buddy auth new --replace-all <name>` retires them all. With no slot the workbench stays closed and
+says what to run. Another device reaches it through an SSH forward to 127.0.0.1 (`ssh -L 8787:127.0.0.1:8787
+server`), or the brahman shell, which does that for you.
 
 **A long story into a terminal, from the phone:** in its thread, `/topys` brings up the pys window
 that holds it, or opens one on the buddy's machine, in the story's folder, running `buddy-long take N`
@@ -406,9 +404,17 @@ loads in every project. Claude knows git; it does not know how this team works u
 | `brahman-short-stories.md` | report work that waits on pipelines as a short story (`buddy-short`), so you are told, not asked |
 | `brahman-team.md` | work as a team member: the roles po, rel, comp, dbg, rev, edu; names `<context>-<role>[-<area>]-g<N>`; window titles; a book per role; generations; merges, pushes and restarts only on your word in that member's window |
 
-`buddy setup` again updates them (a file you changed yourself is left alone); `buddy setup --without
-brahman-team` leaves one out, and the choice is remembered. `buddy team setup --agent codex` puts the team
-rule into Codex's `AGENTS.md` too.
+`buddy setup` again updates them; `buddy setup --without brahman-team` leaves one out, and the choice is
+remembered. `buddy team setup --agent codex` puts the team rule into Codex's `AGENTS.md` too.
+
+**Your own lines** go in `brahman-<x>.local.md` beside each (`brahman-team.local.md`, `brahman-git-roles.local.md`,
+`brahman-short-stories.local.md`): Claude Code loads it with ours, each of ours tells Claude to follow it where
+the two differ, and `buddy setup` never writes, rewrites or removes it (the release ships none). Don't edit ours:
+a changed copy is left alone, with the hint to move your lines to its `.local.md`.
+
+**Developing the rules** in a checkout: `uv run buddy setup --yes --link` makes each of ours a symlink to the
+checkout's own source (`rules/brahman-*.md`, `families/team/RULE.md`), so an edit there reaches every session at
+once; a rerun keeps the links, a plain `buddy setup` leaves them, `--without` removes only the link.
 
 ### How a team works together
 
@@ -429,8 +435,8 @@ rule into Codex's `AGENTS.md` too.
   the book first, and the RM records it on the card with `buddy-team handover <old> <new>`; the old one
   retires.
 
-The detail: `src/work_brahman/families/team/TEAM.md` (installed with the package), its "Generations" and
-"The book" sections above all.
+The detail: `buddy-team doc` prints it (TEAM.md, from the installed package), its "Generations" and "The
+book" sections above all.
 
 ## Teams
 

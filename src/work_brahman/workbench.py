@@ -192,14 +192,19 @@ def _link(src: Path, dest: Path) -> None:
         print(f"  {_warn('⚠')} {dest.name}: copied, not linked ({e})\n      hint: {_NO_SYMLINK_HINT}")
 
 
-def _rules(home: Path) -> list[tuple[str, bytes]]:
-    """(file name, text) of each rules file this buddy writes: the bundled rules/brahman-*.md, and the team rule
-    (families/team/RULE.md as team_setup renders it: the same file `buddy team setup` writes; the owner,
-    2026-11-26: the roles and how a team works reach a new user with one setup)."""
+def _rules(home: Path) -> list[tuple[str, bytes, Path]]:
+    """(file name, text, source) of each rules file this buddy writes: the bundled rules/brahman-*.md, and the team
+    rule (families/team/RULE.md: the same file `buddy team setup` writes; the owner, 2026-11-26: the roles and how
+    a team works reach a new user with one setup). Each source starts with its own first line, so a copy and a
+    link (--link) read the same."""
     from . import team_setup
     src = _bundled("rules")
-    out = [(r.name, r.read_bytes()) for r in sorted(src.glob("brahman-*.md"))] if src else []
-    return out + [(team_setup.NAME, team_setup.render({"HOME": str(home)}).encode())]
+    files = sorted(r for r in src.glob("brahman-*.md") if not r.name.endswith(LOCAL)) if src else []
+    return [(r.name, r.read_bytes(), r) for r in files] + \
+        [(team_setup.NAME, team_setup.render().encode(), team_setup.HERE / "RULE.md")]
+
+
+LOCAL = ".local.md"  # the owner's own file beside each of ours: never written, read to rewrite or removed here
 
 
 def _dg(name: str, data: bytes) -> str:
@@ -207,21 +212,42 @@ def _dg(name: str, data: bytes) -> str:
     return hashlib.sha256(name.encode() + data).hexdigest()
 
 
-def rule_steps(home: Path, without: list[str]) -> list[Step]:
-    """A Step for each rules file. The stamp file records what we wrote and what the user left out, so a
-    rerun keeps both choices. The team rule is also ours when it starts with its own first line (team_setup
-    MARK: `buddy team setup` wrote it)."""
+def _our_link(dest: Path, src: Path) -> bool:
+    """dest is a link setup --link made: to this source, or to the same file of another checkout of ours."""
+    if not dest.is_symlink():
+        return False
+    target = Path(os.readlink(dest))
+    return target.name == src.name and target.parent.name == src.parent.name
+
+
+def _checkout(src: Path) -> bool:
+    """--link is for a checkout: never a one-file build (its folder is gone after the run) or an installed package."""
+    return not _frozen() and not any(p in ("site-packages", "dist-packages") for p in src.resolve().parts)
+
+
+def rule_steps(home: Path, without: list[str], link: bool = False) -> list[Step]:
+    """A Step for each rules file. The stamp file records what we wrote and what the user left out, so a rerun
+    keeps both choices. Ours: a copy we wrote, a link --link made, or a team rule starting with its own first
+    line (team_setup MARK: `buddy team setup` wrote it). With link (development, in a checkout): each one a
+    symlink to the checkout's own source; a plain setup leaves such a link as it is. A brahman-<x>.local.md
+    beside ours is never written, read to rewrite or removed."""
     from . import team_setup
     dest_dir = home / ".claude" / "rules"
     stamp_path = dest_dir / STAMP
     stamp = json.loads(stamp_path.read_text(encoding="utf-8")) if stamp_path.exists() else {}
     wrote, left_out = stamp.get("files", {}), set(stamp.get("without", [])) | set(without)
     steps = []
-    for fname, data in _rules(home):
+    rules = _rules(home)
+    if link and not all(_checkout(src) for _, _, src in rules):
+        return [Step("rules", "--link: not a checkout", None,
+                     "--link is for development in a brahman checkout (uv run buddy setup --yes --link); "
+                     "an installed buddy copies: buddy setup --yes")]
+    for fname, data, src in rules:
         dest = dest_dir / fname
         name = fname.removesuffix(".md")
-        ours = dest.exists() and (wrote.get(fname) == _digest(dest) or (
-            fname == team_setup.NAME and dest.read_text(encoding="utf-8", errors="replace").startswith(team_setup.MARK)))
+        linked = _our_link(dest, src)
+        ours = linked or (dest.exists() and not dest.is_symlink() and (wrote.get(fname) == _digest(dest) or (
+            fname == team_setup.NAME and dest.read_text(encoding="utf-8", errors="replace").startswith(team_setup.MARK))))
         if name in left_out:
             if ours:
                 steps.append(Step(f"rule {name}", "remove ours (--without)", lambda d=dest: d.unlink()))
@@ -230,18 +256,37 @@ def rule_steps(home: Path, without: list[str]) -> list[Step]:
             else:
                 steps.append(Step(f"rule {name}", "left out (--without)", None))
             continue
-        if not dest.exists():
+        if link:
+            if linked and dest.resolve() == src.resolve():
+                steps.append(Step(f"rule {name}", "up to date (linked)", None))
+            elif not dest.exists() and not dest.is_symlink() or ours:
+                steps.append(Step(f"rule {name}", "link (dev)", lambda s=src, d=dest: _link_rule(s, d)))
+            else:
+                steps.append(Step(f"rule {name}", "changed by you: left alone", None,
+                                  f"move your lines to {name}{LOCAL} beside it, then remove {fname} and run buddy setup again"))
+            continue
+        if linked:
+            steps.append(Step(f"rule {name}", "linked (dev): left as it is", None))
+        elif not dest.exists():
             steps.append(Step(f"rule {name}", "write (new)", lambda f=fname, t=data, d=dest: _write_rule(f, t, d)))
         elif _digest(dest) == _dg(fname, data):
             steps.append(Step(f"rule {name}", "up to date", None))
         elif ours:
             steps.append(Step(f"rule {name}", "update ours", lambda f=fname, t=data, d=dest: _write_rule(f, t, d)))
         else:
-            steps.append(Step(f"rule {name}", "changed by you: left alone", None))
+            steps.append(Step(f"rule {name}", "changed by you: left alone", None,
+                              f"move your lines to {name}{LOCAL} beside it, then remove {fname} and run buddy setup again"))
     if set(without) - set(stamp.get("without", [])):
         steps.append(Step("rules", f"remember --without {' '.join(sorted(set(without)))}",
                       lambda d=dest_dir: _remember_without(d, without)))
     return steps
+
+
+def _link_rule(src: Path, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.is_symlink() or dest.exists():
+        dest.unlink()  # ours only (rule_steps checked): a copy we wrote, or our own link
+    dest.symlink_to(src.resolve())
 
 
 def _write_rule(fname: str, data: bytes, dest: Path) -> None:
@@ -293,7 +338,7 @@ def _warn(text: str) -> str:
 def setup(args) -> int:
     home = Path(os.path.expanduser("~"))
     without = [w.removesuffix(".md") for w in (args.without or [])]
-    steps = skill_steps(home) + rule_steps(home, without) + pys_steps(args.no_pys)
+    steps = skill_steps(home) + rule_steps(home, without, link=getattr(args, "link", False)) + pys_steps(args.no_pys)
     todo = [s for s in steps if s.do is not None]
     warned = [s for s in steps if s.hint]
     width = max(len(s.what) for s in steps)

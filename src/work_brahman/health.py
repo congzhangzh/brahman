@@ -9,9 +9,8 @@ The answer is 200 when every part works and 503 when one doesn't, so `curl -f` a
 `instance` is a random id made when the process starts (128 bits, hex), and nothing else: a client
 that reaches the buddy on both loopbacks (127.0.0.1 and [::1], web.LoopbackServer) compares it to
 know both are this process, not another program on one of them (the PO, 2026-11-18; the shell's
-Local mode). Without the web token (BUDDY_WEB_TOKEN set, none given) the body is {"ok", "instance"}
-only: whether it works, nothing about which channels or which version. With the token, or with no token set,
-the details too. Only names and numbers: no chat ids, no paths, no hosts.
+Local mode). Without the owner's login the body is {"ok", "instance"} only: whether it works, nothing about
+which channels or which version. Logged in (a key slot), the details too. Only names and numbers: no chat ids, no paths, no hosts.
 """
 
 from __future__ import annotations

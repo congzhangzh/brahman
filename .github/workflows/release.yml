@@ -102,6 +102,10 @@ jobs:
           "$b" setup --yes --no-pys > /dev/null
           test -f "$home/.claude/rules/brahman-git-roles.md" && test -f "$home/.claude/rules/brahman-short-stories.md"
           "$b" setup --no-pys | grep -q "nothing to do"
+          # the team rule points at `buddy team doc` (20261126.4: a one-file build unpacks to a new folder each run)
+          test -f "$home/.claude/rules/brahman-team.md"
+          "$b" team doc > "$home/team-doc.txt"   # a file, not a pipe: grep -q stops early, pipefail would read a broken pipe
+          grep -q "Team and roles" "$home/team-doc.txt"
       - name: The wheel on this OS, as uv installs it
         shell: bash
         run: |

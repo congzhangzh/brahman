@@ -1,3 +1,5 @@
+<!-- brahman-short-stories: written by `buddy setup`. Your own lines go in brahman-short-stories.local.md beside this file: buddy setup never writes, rewrites or removes it; where the two differ, follow that file. -->
+
 # Short stories: report pipeline-bound work (from brahman-buddy; `buddy setup` keeps it current)
 
 Installed by `buddy setup` into `~/.claude/rules/`. Edit it freely: once you change it, setup

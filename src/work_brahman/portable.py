@@ -257,6 +257,7 @@ def _win_parent(pid: int) -> tuple[int, str] | None:
 ENV_FILE: Path | None = None  # buddy.env beside buddy.toml (install.load_env sets it)
 SECRETS = ("TELEGRAM_BOT_TOKEN", "FEISHU_APP_ID", "FEISHU_APP_SECRET", "LARK_APP_ID", "LARK_APP_SECRET",
            "BUDDY_ALLOWED_IDS", "BUDDY_ALLOWED_OPEN_IDS", "BUDDY_WEB_TOKEN", "BUDDY_PEER_SECRET")  # engine.SECRETS too
+# (BUDDY_WEB_TOKEN is read by nothing since 2026-11-26; a leftover one in .env is still never handed on)
 
 
 def child_env(base: dict | None = None) -> dict:

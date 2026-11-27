@@ -525,6 +525,8 @@ def main() -> int:
     t.add_argument("--without", action="append", metavar="RULE", help="leave a rules file out, and keep it "
                    "out (e.g. brahman-git-roles); may be given more than once")
     t.add_argument("--no-pys", action="store_true", help="don't look for pys")
+    t.add_argument("--link", action="store_true", help="development, in a checkout: each rules file a symlink to the "
+                   "checkout's own source, so an edit reaches every session at once (without: copies)")
     t.add_argument("--remote", nargs="*", metavar="VERB [SPACE]",
                    help="the quick start's fix step (remote_setup.py): check, install, start or restart the "
                         "shell's spaces (work, personal, desktop, terminal, browser), JSON out; `line` prints the "
@@ -768,6 +770,7 @@ def main() -> int:
                                         "(private until marked; the public view hides it)")
     t.add_argument("team")
     t.add_argument("value", nargs="?", choices=["on", "off"], help="none: show it")
+    msub.add_parser("doc", help="print TEAM.md: the team rule's detail (roles, books, generations, the card)")
     t = msub.add_parser("setup", help="install the team rule (names, window titles, generations): "
                                       "~/.claude/rules/brahman-team.md, and a managed block in "
                                       "~/.codex/AGENTS.md unless a generator copies the rules file there")
@@ -959,6 +962,10 @@ def main() -> int:
     team_opts = teams.settings(cfg)
     if args.cmd == "auth":  # the key slots' files only: no state, no chat
         return _auth(args)
+    if args.cmd == "team" and args.action == "doc":  # the package's own TEAM.md: no state, no chat
+        from . import team_setup
+        print(team_setup.doc(), end="")
+        return 0
     if args.cmd == "team" and args.action == "setup":  # the instruction files only: no state, no chat
         from . import team_setup
         agents = team_setup.AGENTS if args.agent == "all" else (args.agent,)

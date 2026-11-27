@@ -392,7 +392,7 @@ class Web:
                 if not self._local():
                     return
                 path = self.path.split("?")[0]
-                if not self._authed(path):  # BUDDY_WEB_TOKEN (webauth.py)
+                if not self._authed(path):  # the key slots (webauth.py)
                     return
                 if path == "/":
                     return self._send(200, page(self._public()), "text/html")
@@ -615,10 +615,9 @@ class Web:
                 self._json({"ok": True, "action": action})
 
             def _local(self) -> bool:
-                from . import webauth  # loopback, or an allowlisted host while a token is set
-                if not webauth.host_ok(self.headers.get("Host") or "", webauth.hosts(web.cfg), webauth.token()):  # owner secret: loopback only
-                    self._send(421, b"use http://127.0.0.1 (or an address in [web] hosts, with BUDDY_WEB_TOKEN set)",
-                               "text/plain")
+                from . import webauth  # a loopback name only
+                if not webauth.host_ok(self.headers.get("Host") or ""):
+                    self._send(421, b"use http://127.0.0.1 (the workbench is on the loopbacks only)", "text/plain")
                     return False
                 if not _owner(self.client_address[1], self.server.server_port):
                     self._send(403, b"only the user the buddy runs as", "text/plain")
@@ -626,29 +625,21 @@ class Web:
                 return True
 
             def _authed(self, path: str) -> bool:
-                """BUDDY_WEB_TOKEN: the cookie or a Bearer token; ?token=… once sets the cookie. A
-                device token (events.py) reads GET /api/events and nothing else."""
+                """A key slot: its cookie (the login form) or Bearer <its secret> (webauth.ok). A device token
+                (events.py) reads GET /api/events and nothing else."""
                 from . import events, webauth
                 if path not in webauth.PUBLIC and events.device(web.state, self.headers) is not None:
                     if self.command == "GET" and path == "/api/events":
                         return True
                     self._send(403, b"a device token reads GET /api/events only", "text/plain")
                     return False
-                if path in webauth.PUBLIC or webauth.ok(self.headers):  # the owner secret first (webauth.py)
+                if path in webauth.PUBLIC or webauth.ok(self.headers):
                     return True
-                given = parse_qs(urlparse(self.path).query).get("token", [""])[0]
-                if self.command == "GET" and given and (cookie := webauth.login(given)):
-                    self.send_response(303)
-                    self.send_header("Set-Cookie", cookie)
-                    self.send_header("Location", webauth.strip_token(self.path))
-                    self.send_header("Content-Length", "0")
-                    self.end_headers()
-                    return False
                 if self.command == "GET" and not path.startswith("/api/"):
-                    self._send(401, webauth.login_page(webauth.strip_token(self.path), bad=bool(given)), "text/html")
+                    self._send(401, webauth.login_page(self.path), "text/html")
                 else:
-                    self._send(401, (b"a secret is needed: the owner secret (a key slot's), or BUDDY_WEB_TOKEN" if webauth.owner_on()
-                                     else webauth.NO_SLOT.encode()), "text/plain")
+                    self._send(401, (b"a secret is needed: a key slot's (the login form, or Authorization: Bearer)"
+                                     if webauth.owner_on() else webauth.NO_SLOT.encode()), "text/plain")
                 return False
 
             def _events(self) -> None:

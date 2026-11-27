@@ -1000,8 +1000,6 @@ Anything else goes to Claude Code, in the same session as your last message in t
     "page.setup.add": ('Add a peer', '添加节点'),
     "page.setup.write_peers": ('Write peers.toml', '写入 peers.toml'),
     "page.setup.no_peers": ('No peers yet.', '还没有节点。'),
-    "page.setup.f.web_token": ('web token (LAN access through a forward; empty: off)', '网页令牌（经转发从局域网访问；留空即关闭）'),
-    "page.setup.f.web_hosts": ('web: extra addresses allowed (only with the token)', '网页：额外允许的地址（仅在设了令牌时有效）'),
     "chat.replied": ("✓ answered", "✓ 已回复"),
     "page.chat.replying": ('↩ Replying to: {q}', '↩ 回复：{q}'),
     "page.chat.reply": ('↩ Reply', '↩ 回复'),

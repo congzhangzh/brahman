@@ -15,8 +15,8 @@ extend it with an xxx.d or rules").
     `brahman-team:begin` and `brahman-team:end`, replaced in place when rerun, a copy kept beside
     it before a change (<name>.brahman-backup-<time>). Nothing outside the markers changes.
 
-The text is families/team/RULE.md; it points at families/team/TEAM.md (the detail) by this
-checkout's path. `--dry-run` prints the plan and the rule and changes nothing.
+The text is families/team/RULE.md as it is; it points at `buddy-team doc`, which prints
+families/team/TEAM.md (the detail) from the installed package. `--dry-run` prints the plan and the rule and changes nothing.
 """
 
 from __future__ import annotations
@@ -30,36 +30,49 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent / "families" / "team"
 MARK = "<!-- brahman-team: written by"  # the first line's start: ours, whichever command wrote it
+
+
+def local_line(stem: str) -> str:
+    """The one line on top of each rules file we write (the owner, 2026-11-26: "publish with default without
+    .local, and user override it", "safely"; Samvada's samvada.md + samvada.local.md). It is written in the source
+    files themselves (RULE.md, rules/brahman-*.md), so a copy and a link (`buddy setup --link`) read the same."""
+    return (f"Your own lines go in {stem}.local.md beside this file: buddy setup never writes, rewrites or removes "
+            "it; where the two differ, follow that file.")
+
+
 HEAD = (MARK + " `buddy setup` (or `buddy-team setup`) from brahman's families/team/RULE.md; "
-        "change it there, not here -->")
-BEGIN = "<!-- brahman-team:begin (managed by `buddy-team setup`; change brahman's families/team/RULE.md, not this block) -->"
+        f"change it there, not here. {local_line('brahman-team')} -->")  # RULE.md's own first line
+BEGIN = ("<!-- brahman-team:begin (managed by `buddy-team setup`; change brahman's families/team/RULE.md, not this block. "
+         "Your own lines go in ~/.claude/rules/brahman-team.local.md: buddy setup never writes, rewrites or removes it, "
+         "where the two differ, follow that file.) -->")
 END = "<!-- brahman-team:end -->"
 BLOCK_RE = re.compile(r"<!-- brahman-team:begin.*?<!-- brahman-team:end -->\n?", re.S)
 AGENTS = ("claude", "codex")
 NAME = "brahman-team.md"
 
 
-def _home_path(p: Path, env: Mapping[str, str]) -> str:
-    """~/… for a path under the home folder, so the rule reads the same on every machine."""
-    home = Path(env.get("HOME") or Path.home())
-    try:
-        return "~/" + str(p.relative_to(home))
-    except ValueError:
-        return str(p)
+def body() -> str:
+    """The rule's text without its first line (HEAD): families/team/RULE.md. No path in it: it points at `buddy-team
+    doc` for the detail, so the text is the same wherever the code was unpacked (a one-file build unpacks to a new
+    folder on every run: a path there changed the rule each time and led to a folder gone after the run; rel-g2,
+    2026-11-26)."""
+    text = (HERE / "RULE.md").read_text(encoding="utf-8")
+    return text.removeprefix(HEAD).lstrip("\n").rstrip()
 
 
-def body(env: Mapping[str, str] = os.environ) -> str:
-    return (HERE / "RULE.md").read_text(encoding="utf-8").replace("{detail}", _home_path(HERE / "TEAM.md", env)).rstrip()
+def doc() -> str:
+    """TEAM.md, the detail behind the rule: what `buddy-team doc` prints."""
+    return (HERE / "TEAM.md").read_text(encoding="utf-8")
 
 
-def render(env: Mapping[str, str] = os.environ) -> str:
-    """Claude's rules file."""
-    return f"{HEAD}\n\n{body(env)}\n"
+def render() -> str:
+    """Claude's rules file: RULE.md as it is (its first line is HEAD), so a copy equals a link to it."""
+    return (HERE / "RULE.md").read_text(encoding="utf-8")
 
 
-def block(env: Mapping[str, str] = os.environ) -> str:
+def block() -> str:
     """Codex's managed block, for an AGENTS.md no generator builds."""
-    return f"{BEGIN}\n{body(env)}\n{END}\n"
+    return f"{BEGIN}\n{body()}\n{END}\n"
 
 
 def rule_file(agent: str, env: Mapping[str, str] = os.environ) -> Path:
@@ -89,24 +102,24 @@ def generated(text: str) -> bool:
 Step = tuple[Path, str, "str | None", bool]  # file, what happens, new text (None: no write), delete
 
 
-def _claude(f: Path, uninstall: bool, env: Mapping[str, str]) -> Step:
+def _claude(f: Path, uninstall: bool) -> Step:
     if uninstall:
         return (f, "remove", None, True) if f.exists() else (f, "not there:", None, False)
-    new = render(env)
+    new = render()
     old = f.read_text(encoding="utf-8") if f.exists() else None
     if old == new:
         return f, "unchanged:", None, False
     return f, "write" if old is None else "update", new, False
 
 
-def _codex(f: Path, uninstall: bool, env: Mapping[str, str]) -> Step:
+def _codex(f: Path, uninstall: bool) -> Step:
     old = f.read_text(encoding="utf-8") if f.exists() else ""
     if generated(old):
-        state = "current" if body(env) in old else "out of date, rebuild it with its generator"
+        state = "current" if body() in old else "out of date, rebuild it with its generator"
         if uninstall:
             state = "rebuild it with its generator once the rules file is gone"
         return f, f"left alone (it copies ~/.claude/rules/{NAME}; {state}):", None, False
-    new = new_text(old, block(env), uninstall)
+    new = new_text(old, block(), uninstall)
     if new == old:
         return f, "no team block in" if uninstall else "unchanged in", None, False
     if uninstall:
@@ -117,7 +130,7 @@ def _codex(f: Path, uninstall: bool, env: Mapping[str, str]) -> Step:
 def plan(agents: tuple[str, ...], uninstall: bool = False,
          env: Mapping[str, str] = os.environ) -> list[Step]:
     """Claude first: a generator that builds Codex's file from Claude's reads the rules file."""
-    return [(_claude if a == "claude" else _codex)(rule_file(a, env), uninstall, env) for a in agents]
+    return [(_claude if a == "claude" else _codex)(rule_file(a, env), uninstall) for a in agents]
 
 
 def run(agents: tuple[str, ...], dry_run: bool = False, uninstall: bool = False,
@@ -127,7 +140,7 @@ def run(agents: tuple[str, ...], dry_run: bool = False, uninstall: bool = False,
         out(f"{what} {f}")
     if dry_run:
         if not uninstall:
-            out("\nthe rule:\n\n" + render(env))
+            out("\nthe rule:\n\n" + render())
         out("dry run: nothing changed")
         return 0
     for f, _, new, delete in steps:

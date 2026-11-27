@@ -5,10 +5,25 @@ once, at the first start of a new version (following `[notify]`).
 
 ## Unreleased
 
-## 20261126.3
+## 20261126.4
 
+- **Your own lines beside each rules file** (the owner, 2026-11-26: "publish with default without .local, and user
+  override it", "safely"): `~/.claude/rules/brahman-<x>.local.md` (team, git-roles, short-stories). Each of ours says
+  so on its first line and tells Claude to follow yours where they differ; `buddy setup` never writes, rewrites or
+  removes a `.local.md`. A copy of ours you changed is left alone, with the hint to move your lines there.
+- **`buddy setup --yes --link`** (development, in a checkout): each rules file a symlink to the checkout's own
+  source, so an edit reaches every session at once. An installed buddy refuses it and copies as before.
+- **`buddy-team doc`** prints the team's full guide (TEAM.md) from the installed package; the team rule points at
+  it rather than at a folder, so the rule is the same in every install, a one-file `buddy` included (it unpacks
+  to a new folder on every run).
+- **The key slots are the one way in** (the owner, 2026-11-26: "yes, remove the web token and web hosts").
+  `BUDDY_WEB_TOKEN`, its `?token=` links and `[web] hosts` are gone: the workbench is on the loopbacks only and
+  takes a key slot's secret (the login form, or `Authorization: Bearer`). Upgrading: give each device or browser
+  its slot first (`buddy auth new --append <name>`); a leftover `BUDDY_WEB_TOKEN` in `buddy.env` or `[web] hosts`
+  in `buddy.toml` is ignored, and `buddy doctor` says to remove it. Another device: an SSH forward to 127.0.0.1,
+  or the brahman shell.
 - **No key slot = the workbench is closed** (fail closed). Until a slot exists (`buddy auth new --append <name>`
-  on the machine), the page says just that and every API and action is refused, `BUDDY_WEB_TOKEN` included;
+  on the machine), the page says just that and every API and action is refused;
   `buddy serve` still runs the scheduler, the duties and the chats, and `buddy doctor` says what to run. Before,
   an install with no slot was open on the loopback.
 - **Key slots for the owner login, like ZFS / LUKS key slots** (the owner, 2026-11-26). One secret per device or
@@ -17,14 +32,13 @@ once, at the first start of a new version (following `[notify]`).
   retired, one new), `buddy auth list`, `buddy auth remove <name>`. Only your own shell on the server runs
   them. The trust root is the first SSH key (the one that set the system up): the weak point by design, which
   keeps everything else simple.
-- **Upgrading: do this before the restart.** `owner.secret` is no longer read, and nothing moves it for you. It
-  holds only the SHA-256 of your secret, so copying the file keeps the same secret:
+- **Upgrading from `owner.secret`: do this before the restart.** It is no longer read, and nothing moves it for
+  you. It holds only the SHA-256 of your secret, so copying the file keeps the same secret:
   `mkdir -m 700 -p ~/.config/brahman/owner.d && install -m 600 ~/.config/brahman/owner.secret
   ~/.config/brahman/owner.d/owner.sha256` (Windows, PowerShell: `New-Item -ItemType Directory -Force
   $HOME\.config\brahman\owner.d; Copy-Item $HOME\.config\brahman\owner.secret
   $HOME\.config\brahman\owner.d\owner.sha256`); or make a new one: `buddy auth new --append <name>`. Until a
-  slot exists the workbench stays closed (`BUDDY_WEB_TOKEN` alone no longer opens it); `buddy doctor` says what
-  to run.
+  slot exists the workbench stays closed; `buddy doctor` says what to run.
 - **`buddy-team` and `buddy-short` come with the package**, on every system, Windows too (they were scripts in the
   repository only).
 - **`buddy setup` installs the team rule too** (`~/.claude/rules/brahman-team.md`, beside the git roles and the

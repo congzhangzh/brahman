@@ -1,81 +1,38 @@
-"""Who may use the workbench (the owner, 2026-11-12: "allow an allowlist? … add basic protection
-by a password or token"; "do allowlist and token").
+"""Who may use the workbench: the key slots, the one way in (the owner, 2026-11-26: "yes, remove the web token and
+web hosts").
 
-The workbench binds 127.0.0.1 only. Through an SSH forward made with a wildcard bind
-(`ssh -L 0.0.0.0:18787:127.0.0.1:8787 …`), another device on the LAN reaches it, and the
-connection still arrives from sshd as the owner, so the owner check (web._owner) passes; the
-Host check alone stops a browser, not a person who sets the header. Hence:
+The workbench binds the loopbacks only (127.0.0.1 and ::1) and answers only a loopback Host name; a request from
+another user on the machine is refused (web._owner). Every request but the public files needs the owner's login:
 
-- BUDDY_WEB_TOKEN in .env (empty: off, everything as before). When set, every request needs it:
-  the cookie the buddy sets after `/?token=…` once or the small login page, or
-  `Authorization: Bearer <token>` (scripts). The cookie holds an HMAC of the token, never the
-  token; HttpOnly, SameSite=Lax (a notification's click is a navigation, so Strict would drop
-  it; POSTs still need X-Buddy, which no other site can send). Compared in constant time; a
-  wrong token waits a second.
-- [web] hosts in buddy.toml: the extra names or addresses a browser may use (e.g.
-  "192.0.2.10", "192.0.2.0/24", "mymac.local"). Honoured only while a token is set: an
-  allowlist without a password would open the door with nothing behind it.
-- Public without the token: the manifest, the icons and the Service Worker: code and pictures
-  only, and iOS fetches the manifest without cookies.
+- **The key slots** ("allow multikey? … key with name so it can be noted, like zfs keyslots"):
+  ~/.config/brahman/owner.d/<name>.sha256, one per device or browser, made by `buddy auth new --append <name>` (or a
+  device's first setup) in the owner's own shell. A slot holds only the SHA-256 hex of its secret: a request's
+  secret (the login form, or `Authorization: Bearer <secret>`) is hashed and compared in constant time with every
+  slot, so a hash is no credential; a wrong one waits a second. The cookie is an HMAC of the slot's hash under a
+  random key kept in the buddy's state (0600): the hash file alone forges no cookie, and a slot replaced or
+  removed ends its cookies, no other. HttpOnly, SameSite=Lax (a notification's click is a navigation, so Strict
+  would drop it; POSTs still need X-Buddy, which no other site can send).
+- **No slot: closed** (fail closed): the page says what to run, and nothing else is answered.
+- Public: the manifest, the icons and the Service Worker (code and pictures; iOS fetches the manifest without
+  cookies), and /api/health's works-or-not.
+- The event stream's device tokens (events.py) read GET /api/events and nothing else.
 
-Plain HTTP: on the LAN the token and the pages can be read by anyone on that network (doctor
-says so). An SSH client on the device itself (`-L` to 127.0.0.1) needs none of this.
-
-**The key slots** (the owner, 2026-11-26: "allow multikey? … key with name so it can be noted, like zfs
-keyslots"): ~/.config/brahman/owner.d/<name>.sha256, one per device or browser, made by `buddy auth new
---append <name>` (or a device's first setup) in the owner's own shell. While one exists it is checked first,
-everywhere (the workbench, the event stream, the login page, ?token=), and the buddy is loopback only ([web]
-hosts not honoured). A slot holds only the SHA-256 hex of its secret: a request's secret is hashed and
-compared in constant time with every slot, so a hash is no credential. The cookie is an HMAC of the slot's
-hash under a random key kept in the buddy's state (0600): the hash file alone forges no cookie, and a slot
-replaced or removed ends its cookies, no other. BUDDY_WEB_TOKEN and the device tokens still work after it;
-doctor lists them. Without a slot, everything is as before. The trust root is the first SSH key: owner_dir().
+The trust root is the first SSH key: owner_dir(). BUDDY_WEB_TOKEN and [web] hosts are read by nothing (since
+2026-11-26); doctor says to remove a leftover one.
 """
 
 from __future__ import annotations
 
 import hashlib
 import hmac
-import ipaddress
 import os
 import re
 import time
-import urllib.parse
 from pathlib import Path
 
-ENV = "BUDDY_WEB_TOKEN"
-COOKIE = "buddy_auth"
 PUBLIC = {"/manifest.webmanifest", "/sw.js", "/icon-180.png", "/icon-192.png", "/icon-512.png",
-          "/api/health"}  # health: {ok} only without the token (web.py)
+          "/api/health"}  # health: {ok, instance} only without a login (web.py)
 LOOPBACK = ("127.0.0.1", "localhost", "[::1]", "::1")
-
-
-_env_cache: dict = {"path": None, "mtime": None, "checked": 0.0, "token": None}
-
-
-def token(env=None) -> str:
-    """BUDDY_WEB_TOKEN, followed live (the owner, 2026-11-12: "make the allowlist work without a
-    restart"): buddy.env beside the watched buddy.toml is read again when it changes, at most once
-    a second; without a watched buddy.toml (tests, other commands) the environment says it."""
-    if env is not None:
-        return (env.get(ENV) or "").strip()
-    from . import notify
-    cfg_path = notify._watch.get("path")
-    if cfg_path is None:
-        return (os.environ.get(ENV) or "").strip()
-    from . import install
-    p = install.env_file(Path(cfg_path))
-    now = time.time()
-    if _env_cache["path"] != p or now - _env_cache["checked"] >= 1.0:
-        _env_cache.update(path=p, checked=now)
-        try:
-            m = p.stat().st_mtime
-            if m != _env_cache["mtime"] or _env_cache["token"] is None:
-                from .configure import _env
-                _env_cache.update(mtime=m, token=(_env(p).get(ENV) or "").strip())
-        except OSError:
-            _env_cache["token"] = (os.environ.get(ENV) or "").strip()
-    return _env_cache["token"] or ""
 
 
 OWNER_DIR = "owner.d"  # the key slots: <name>.sha256 (+ <name>.note), like ZFS / LUKS key slots (the owner, 2026-11-26)
@@ -173,33 +130,26 @@ NO_SLOT = "no key slot yet: run `buddy auth new --append <name>` on this machine
 
 
 def ok(headers) -> bool:
-    """A key slot's cookie or Bearer <secret>, then the web token. No slot at all: closed, the token too (the
-    owner, 2026-11-25: "simple by design, no fallback"; a missing secret is said and the part stays off):
-    `buddy serve` runs (scheduler, duties, chats) and the workbench says NO_SLOT."""
+    """A key slot's cookie, or Authorization: Bearer <a slot's secret>. No slot at all: closed (the owner,
+    2026-11-25: "simple by design, no fallback"): `buddy serve` runs (scheduler, duties, chats) and the
+    workbench says NO_SLOT."""
     if not owner_on():
         return False
-    if owner_on():
-        wants = [owner_cookie_value(h) for h in owner_hashes()]
-        for part in (headers.get("Cookie") or "").split(";"):
-            k, _, v = part.strip().partition("=")
-            if k == OWNER_COOKIE and any(hmac.compare_digest(v.strip().encode(), w.encode()) for w in wants if w):
-                return True
-        auth = headers.get("Authorization") or ""
-        if auth.startswith("Bearer ") and owner_ok(auth[7:]):
+    wants = [owner_cookie_value(h) for h in owner_hashes()]
+    for part in (headers.get("Cookie") or "").split(";"):
+        k, _, v = part.strip().partition("=")
+        if k == OWNER_COOKIE and any(hmac.compare_digest(v.strip().encode(), w.encode()) for w in wants if w):
             return True
-    tok = token()
-    return bool(tok) and authed(headers, tok)
+    auth = headers.get("Authorization") or ""
+    return auth.startswith("Bearer ") and owner_ok(auth[7:])
 
 
 def login(given: str) -> str | None:
-    """A secret typed or put in the URL: the Set-Cookie for it (the owner's first, then the web token's),
-    or None after a second's wait (no fast guessing)."""
+    """A secret typed into the login form: the Set-Cookie for its slot, or None after a second's wait (no fast
+    guessing)."""
     h = owner_match(given) if owner_on() else ""
     if h:
         return f"{OWNER_COOKIE}={owner_cookie_value(h)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000"
-    tok = token() if owner_on() else ""  # no slot: closed, the token too
-    if tok and hmac.compare_digest(given.strip().encode(), tok.encode()):
-        return set_cookie(tok)
     time.sleep(1)
     return None
 
@@ -283,20 +233,6 @@ def slots() -> list[dict]:
     return out
 
 
-def hosts(start_cfg: dict) -> list[str]:
-    """[web] hosts, followed live (notify.config: buddy.toml read again when it changes). None while the
-    owner secret is set up: then the buddy is loopback only."""
-    if owner_on():
-        return []
-    from . import notify
-    cfg = notify.config() or start_cfg
-    return [str(h) for h in (cfg.get("web") or {}).get("hosts") or []]
-
-
-def cookie_value(tok: str) -> str:
-    return hmac.new(tok.encode(), b"brahman workbench cookie v1", hashlib.sha256).hexdigest()
-
-
 def host_of(header: str) -> str:
     """The Host header without its port ("[::1]:8787" → "[::1]", "192.0.2.5:18787" → "192.0.2.5")."""
     h = (header or "").strip().lower()
@@ -305,60 +241,9 @@ def host_of(header: str) -> str:
     return h.rsplit(":", 1)[0] if h.count(":") == 1 else h
 
 
-def host_ok(header: str, hosts: list[str], tok: str) -> bool:
-    """May a browser that used this Host reach the workbench? Loopback always; an allowlisted
-    name, address or network only while a token is set, and never while the owner secret is."""
-    h = host_of(header)
-    if h in LOOPBACK:
-        return True
-    if not tok or owner_on():
-        return False
-    bare = h.strip("[]")
-    for entry in hosts or []:
-        e = str(entry).strip().lower()
-        if not e:
-            continue
-        if "/" in e:
-            try:
-                if ipaddress.ip_address(bare) in ipaddress.ip_network(e, strict=False):
-                    return True
-            except ValueError:
-                continue
-        elif e == h or e == bare:
-            return True
-    return False
-
-
-def authed(headers, tok: str) -> bool:
-    """No token set: yes. Else the cookie (an HMAC of the token) or a Bearer token must match."""
-    if not tok:
-        return True
-    want = cookie_value(tok)
-    for part in (headers.get("Cookie") or "").split(";"):
-        k, _, v = part.strip().partition("=")
-        if k == COOKIE and hmac.compare_digest(v.strip().encode(), want.encode()):  # bytes: any text compares
-            return True
-    auth = headers.get("Authorization") or ""
-    return auth.startswith("Bearer ") and hmac.compare_digest(auth[7:].strip().encode(), tok.encode())
-
-
-def check(tok: str, given: str) -> bool:
-    """A token typed or put in the URL: right or wrong; a wrong one waits a second (no fast guessing)."""
-    ok = bool(tok) and hmac.compare_digest(given.strip().encode(), tok.encode())
-    if not ok:
-        time.sleep(1)
-    return ok
-
-
-def set_cookie(tok: str) -> str:
-    return f"{COOKIE}={cookie_value(tok)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000"
-
-
-def strip_token(path: str) -> str:
-    """The URL without its token= part (where to go after the cookie is set)."""
-    u = urllib.parse.urlsplit(path)
-    q = [(k, v) for k, v in urllib.parse.parse_qsl(u.query, keep_blank_values=True) if k != "token"]
-    return urllib.parse.urlunsplit(("", "", u.path or "/", urllib.parse.urlencode(q), ""))
+def host_ok(header: str) -> bool:
+    """May a browser that used this Host reach the workbench? A loopback name only."""
+    return host_of(header) in LOOPBACK
 
 
 LOGIN = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">

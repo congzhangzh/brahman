@@ -1,3 +1,5 @@
+<!-- brahman-team: written by `buddy setup` (or `buddy-team setup`) from brahman's families/team/RULE.md; change it there, not here. Your own lines go in brahman-team.local.md beside this file: buddy setup never writes, rewrites or removes it; where the two differ, follow that file. -->
+
 ## Team and Roles: long-lived members, names, window titles (the owner, 2026-11-07; names 2026-11-11)
 
 Work is done by long-lived member sessions, one per area, assigned by the **release manager**
@@ -49,5 +51,5 @@ person's own login; a scheduled job or duty never calls it (if one ever must, an
 purpose and shown in the audit). Every review asks: a new model call at run time, why can't a
 script do it?
 
-Read `{detail}` when starting, resuming, retiring or briefing a session, or naming one (roles
-table, where each role lives, the book, the team card, starting a member).
+Read the detail, `buddy-team doc` (it prints TEAM.md), when starting, resuming, retiring or briefing a
+session, or naming one (roles table, where each role lives, the book, the team card, starting a member).
