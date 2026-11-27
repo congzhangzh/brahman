@@ -669,30 +669,27 @@ def checks(path: Path, *, offline: bool = False, name: str = "buddy", early=None
         + "; plus Claude Code's own endpoint (ANTHROPIC_BASE_URL or its default)", "")
     from . import webauth  # who may use the workbench (webauth.py)
     tok, hosts = webauth.token(), list(cfg.get("web", {}).get("hosts") or [])
-    if webauth.owner_on():  # the owner secret first, loopback only
+    old_file = webauth.owner_dir().parent / "owner.secret"  # read by nothing since the key slots (2026-11-26)
+    if old_file.exists():
+        row(None, f"{old_file} is not read any more: the logins are the key slots in {webauth.owner_dir()}",
+            f"keep its secret: cp {old_file} {webauth.owner_dir()}/owner.sha256 (mkdir -m 700 the folder first); "
+            "or a new one: buddy auth new --append owner")
+    if webauth.owner_on():  # the key slots first, loopback only
         from . import events as _ev
         old = [x for x, on in (("BUDDY_WEB_TOKEN", tok), (f"{len(_ev.tokens(state))} device token(s)", _ev.tokens(state))) if on]
-        devs = webauth.device_files()
-        bad = [p.name for p in devs if not webauth._hex(p)]
-        main = webauth.owner_path().exists()
-        good = (bool(webauth.owner_hash()) or not main) and not bad and bool(webauth.owner_hashes())
-        row(True if good else False,
-            f"auth: owner secret {webauth.owner_path() if main else '(no owner.secret)'}"
-            + (f" + {len(devs)} device(s) in {webauth.owner_dir()}" if devs else "")
-            + ": one secret for web, events, terminal, Browser, assistant; "
-            "loopback only" + (f" ([web] hosts {', '.join(hosts)} not honoured)" if hosts else "")
+        slots = webauth.slots()
+        bad = [r["name"] for r in slots if not r["ok"]]
+        row(not bad,
+            f"auth: {len(slots)} key slot(s) in {webauth.owner_dir()} ({', '.join(r['name'] for r in slots)}): "
+            "each a login for web, events, terminal, Browser, assistant; loopback only"
+            + (f" ([web] hosts {', '.join(hosts)} not honoured)" if hosts else "")
             + (f"; still set too: {', '.join(old)}" if old else ""),
-            ("a leaked secret: buddy auth new --force, then the new one in every device's profile"
-             + (f"; delete {', '.join(old)} once every device uses the owner secret" if old else ""))
-            if good else (f"not one SHA-256 hex line: {', '.join(bad)} (delete it, the device sets up again)" if bad
-                          else f"{webauth.owner_path()} is not one SHA-256 hex line: buddy auth new --force"))
-    elif tok:
-        row(None if hosts else True, "workbench: a web token is set" + (f"; also reachable as {', '.join(hosts)}" if hosts else ""),
-            "plain HTTP: on that network the token and the pages can be read; an SSH client on the device "
-            "(-L to 127.0.0.1) needs no token" if hosts else "")
-    elif hosts:
-        row(None, f"workbench: [web] hosts lists {', '.join(hosts)}, but no BUDDY_WEB_TOKEN is set: they are ignored",
-            "set a long random BUDDY_WEB_TOKEN (Setup → Config) to use them")
+            ("a lost device: buddy auth remove <name>; a leak: buddy auth new --replace-all <name>"
+             + (f"; delete {', '.join(old)} once every device has its slot" if old else ""))
+            if not bad else f"not one SHA-256 hex line: {', '.join(bad)} (buddy auth new --replace <name>, or remove it)")
+    else:  # no key slot: closed (fail closed, 2026-11-26), the token too
+        row(None, "auth: no key slot: the workbench is closed (the scheduler, the duties and the chats run)",
+            "buddy auth new --append <name> on this machine (its secret is printed once), then reload the page")
     from . import reach  # a chat app the running buddy can't reach (a limited network): said, never an error
     for r in reach.notices(state):
         if r.get("down"):

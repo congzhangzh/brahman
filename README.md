@@ -395,6 +395,43 @@ buddy-short list                       # the running stories; --all for every on
 `$XDG_STATE_HOME/work_brahman/short_stories/<number>.json`; the stages are in
 `src/work_brahman/families/short_story/FAMILY.md`.
 
+## Working rules (what Claude Code is told)
+
+`buddy setup` installs the buddy's skills and three rules files into `~/.claude/rules/`, which Claude Code
+loads in every project. Claude knows git; it does not know how this team works until these files tell it:
+
+| File | What it makes Claude do |
+|---|---|
+| `brahman-git-roles.md` | name each branch's role (clean MR, feature, integration, release, history key) and keep its one rule; show where it is before anything moves a branch |
+| `brahman-short-stories.md` | report work that waits on pipelines as a short story (`buddy-short`), so you are told, not asked |
+| `brahman-team.md` | work as a team member: the roles po, rel, comp, dbg, rev, edu; names `<context>-<role>[-<area>]-g<N>`; window titles; a book per role; generations; merges, pushes and restarts only on your word in that member's window |
+
+`buddy setup` again updates them (a file you changed yourself is left alone); `buddy setup --without
+brahman-team` leaves one out, and the choice is remembered. `buddy team setup --agent codex` puts the team
+rule into Codex's `AGENTS.md` too.
+
+### How a team works together
+
+- **You decide.** Every merge, push, restart, release and anything that leaves the machine waits for your
+  word, in the window of the member that asks (one line, one question).
+- **The product owner (po)** keeps the priorities and writes each job as a brief; it starts or resumes a
+  member for it, on your word.
+- **Component developers (comp)**, one long-lived session per area, do the work in their own worktree and
+  branch, test it, review their own diff, and ask you to merge. **dbg** finds a root cause across areas and
+  hands the fix to the area's owner; **edu** teaches from the real work; **rev** reviews when you ask.
+- **The release manager (rel)**, one per kit, picks the release from what is merged, strips and publishes
+  it, and keeps the team card (`buddy-team`).
+- **Work moves** po (brief) → comp (branch, tests, your merge) → rel (release, your go).
+- **Generations, like a life:** a member lives across compactions (each one a year of its life), and keeps
+  its **book** (`role-<role>.md` in the project's memory: how it works, the live state, open items, traps)
+  current. When it truly ages (forgets decisions, repeats fixed mistakes), it or the RM proposes the next
+  generation and you decide: it finishes its book, the next one (`…-g<N+1>`) starts from a brief and reads
+  the book first, and the RM records it on the card with `buddy-team handover <old> <new>`; the old one
+  retires.
+
+The detail: `src/work_brahman/families/team/TEAM.md` (installed with the package), its "Generations" and
+"The book" sections above all.
+
 ## Teams
 
 A **team** is the who of the work: one per kit, its release manager (RM), its product owner
@@ -405,11 +442,14 @@ last handovers. The RM records what it did; the card looks at the rest and chang
 the banded facts do. 💬 Reply under it goes to the RM.
 
 ```bash
-buddy-team new app-release-kit --rm app-rm app-release-kit-1 --book role-release-manager.md
-buddy-team join app-release-kit server-a1 --role server --area "the server, its daemon" --project ~/projects/server
-buddy-team handover server server-a1 server-g2     # the same for the RM's own role
+buddy-team new app-release-kit --rel app-rel-g1 --book role-release-manager.md
+buddy-team join app-release-kit app-po-g1 --role po
+buddy-team join app-release-kit app-comp-server-g1 --role comp --area server --project ~/projects/server
+buddy-team handover app-comp-server-g1 app-comp-server-g2   # the next generation; the same for the RM
 buddy-team show app-release-kit               # exact ctx, now; check: the owner's replies
 ```
+
+`buddy-team` and `buddy-short` come with the package (the same as `buddy team …` and `buddy short …`).
 
 The stages and rules are in `src/work_brahman/families/team/FAMILY.md`; the idea in
 `specs/team.md`.

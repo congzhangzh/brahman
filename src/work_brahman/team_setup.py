@@ -29,7 +29,8 @@ from collections.abc import Mapping
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent / "families" / "team"
-HEAD = ("<!-- brahman-team: written by `buddy-team setup` from brahman's families/team/RULE.md; "
+MARK = "<!-- brahman-team: written by"  # the first line's start: ours, whichever command wrote it
+HEAD = (MARK + " `buddy setup` (or `buddy-team setup`) from brahman's families/team/RULE.md; "
         "change it there, not here -->")
 BEGIN = "<!-- brahman-team:begin (managed by `buddy-team setup`; change brahman's families/team/RULE.md, not this block) -->"
 END = "<!-- brahman-team:end -->"
@@ -82,7 +83,7 @@ def new_text(old: str, blk: str, uninstall: bool = False) -> str:
 
 def generated(text: str) -> bool:
     """A generator copied the rules file into it (HEAD outside any managed block)."""
-    return HEAD in BLOCK_RE.sub("", text)
+    return MARK in BLOCK_RE.sub("", text)
 
 
 Step = tuple[Path, str, "str | None", bool]  # file, what happens, new text (None: no write), delete

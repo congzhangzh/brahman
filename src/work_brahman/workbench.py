@@ -192,35 +192,50 @@ def _link(src: Path, dest: Path) -> None:
         print(f"  {_warn('⚠')} {dest.name}: copied, not linked ({e})\n      hint: {_NO_SYMLINK_HINT}")
 
 
-def rule_steps(home: Path, without: list[str]) -> list[Step]:
-    """A Step for each bundled rules file. The stamp file records what we wrote and
-    what the user left out, so a rerun keeps both choices."""
+def _rules(home: Path) -> list[tuple[str, bytes]]:
+    """(file name, text) of each rules file this buddy writes: the bundled rules/brahman-*.md, and the team rule
+    (families/team/RULE.md as team_setup renders it: the same file `buddy team setup` writes; the owner,
+    2026-11-26: the roles and how a team works reach a new user with one setup)."""
+    from . import team_setup
     src = _bundled("rules")
-    if src is None:
-        return [Step("rules", "none bundled with this buddy")]
+    out = [(r.name, r.read_bytes()) for r in sorted(src.glob("brahman-*.md"))] if src else []
+    return out + [(team_setup.NAME, team_setup.render({"HOME": str(home)}).encode())]
+
+
+def _dg(name: str, data: bytes) -> str:
+    """_digest of a file of that name and text."""
+    return hashlib.sha256(name.encode() + data).hexdigest()
+
+
+def rule_steps(home: Path, without: list[str]) -> list[Step]:
+    """A Step for each rules file. The stamp file records what we wrote and what the user left out, so a
+    rerun keeps both choices. The team rule is also ours when it starts with its own first line (team_setup
+    MARK: `buddy team setup` wrote it)."""
+    from . import team_setup
     dest_dir = home / ".claude" / "rules"
     stamp_path = dest_dir / STAMP
     stamp = json.loads(stamp_path.read_text(encoding="utf-8")) if stamp_path.exists() else {}
     wrote, left_out = stamp.get("files", {}), set(stamp.get("without", [])) | set(without)
     steps = []
-    for rule in sorted(src.glob("brahman-*.md")):
-        dest = dest_dir / rule.name
-        name = rule.stem
+    for fname, data in _rules(home):
+        dest = dest_dir / fname
+        name = fname.removesuffix(".md")
+        ours = dest.exists() and (wrote.get(fname) == _digest(dest) or (
+            fname == team_setup.NAME and dest.read_text(encoding="utf-8", errors="replace").startswith(team_setup.MARK)))
         if name in left_out:
-            if dest.exists() and wrote.get(rule.name) == _digest(dest):
+            if ours:
                 steps.append(Step(f"rule {name}", "remove ours (--without)", lambda d=dest: d.unlink()))
             elif dest.exists():
                 steps.append(Step(f"rule {name}", "left out (--without); your changed copy stays", None))
             else:
                 steps.append(Step(f"rule {name}", "left out (--without)", None))
             continue
-        want = _digest(rule)
         if not dest.exists():
-            steps.append(Step(f"rule {name}", "write (new)", lambda r=rule, d=dest: _write_rule(r, d, without)))
-        elif _digest(dest) == want:
+            steps.append(Step(f"rule {name}", "write (new)", lambda f=fname, t=data, d=dest: _write_rule(f, t, d)))
+        elif _digest(dest) == _dg(fname, data):
             steps.append(Step(f"rule {name}", "up to date", None))
-        elif wrote.get(rule.name) == _digest(dest):
-            steps.append(Step(f"rule {name}", "update ours", lambda r=rule, d=dest: _write_rule(r, d, without)))
+        elif ours:
+            steps.append(Step(f"rule {name}", "update ours", lambda f=fname, t=data, d=dest: _write_rule(f, t, d)))
         else:
             steps.append(Step(f"rule {name}", "changed by you: left alone", None))
     if set(without) - set(stamp.get("without", [])):
@@ -229,12 +244,12 @@ def rule_steps(home: Path, without: list[str]) -> list[Step]:
     return steps
 
 
-def _write_rule(rule: Path, dest: Path, without: list[str]) -> None:
+def _write_rule(fname: str, data: bytes, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(rule, dest)
+    dest.write_bytes(data)
     stamp_path = dest.parent / STAMP
     stamp = json.loads(stamp_path.read_text(encoding="utf-8")) if stamp_path.exists() else {}
-    stamp.setdefault("files", {})[rule.name] = _digest(dest)
+    stamp.setdefault("files", {})[fname] = _digest(dest)
     stamp["by"] = f"brahman-buddy {VERSION}"
     stamp_path.write_text(json.dumps(stamp, indent=1) + "\n", encoding="utf-8")
 

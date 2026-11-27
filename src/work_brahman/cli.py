@@ -89,6 +89,45 @@ def _pairs(items: list[str] | None) -> dict:
     return out
 
 
+def _auth(args) -> int:
+    """buddy auth new|list|remove: the owner's own shell only (the trust root is the first SSH key, webauth.owner_dir):
+    a restricted key's forced command or a session behind the gate gets no slot."""
+    from . import webauth
+    if os.environ.get("SSH_ORIGINAL_COMMAND") is not None or os.environ.get("BUDDY_GATE"):
+        print("buddy auth runs only in the owner's own shell on this machine (not through a forced-command key, "
+              "not behind the gate)", file=sys.stderr)
+        return 2
+    try:
+        if args.action == "list":
+            rows = webauth.slots()
+            for r in rows:
+                print(f"{r['name']:<24} {r['at']}  {r['note']}" + ("" if r["ok"] else "  (not one SHA-256 line: opens nothing)"))
+            if not rows:
+                print("no key slot: buddy auth new --append <name> (the web page then asks for it)")
+            return 0
+        if args.action == "remove":
+            gone = webauth.remove_slot(args.name)
+            if gone is None:
+                print(f"no slot {args.name} (buddy auth list)", file=sys.stderr)
+                return 2
+            print(f"slot {args.name} retired (kept as {gone.name}, never read): its secret stops now")
+            return 0
+        if args.replace_all:
+            secret, p, gone = webauth.replace_all(args.replace_all, args.note)
+            print(f"retired every slot ({len(gone)} file(s) kept as .bak-…); every device sets up again")
+        else:
+            secret, p, kept = webauth.add_slot(args.append or args.replace, args.note, replace=bool(args.replace))
+            if kept:
+                print(f"the old secret of {p.stem} stops now (kept as {kept.name}, never read)")
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
+    print(f"slot {p.stem}: wrote {p} (only the secret's SHA-256, 0600)")
+    print("its secret, shown this once: put it in that device's profile (or type it once in its browser), nowhere else:")
+    print(secret)
+    return 0
+
+
 def _start_notes(state: Path, channels: list, chats: list[str], w, port) -> None:
     """At serve's start, beside the web (never before it): What's new, the was-down notice and the heartbeat,
     the [::1] notice. Each chat call has its timeout; an app that can't be reached is said once (reach.py)."""
@@ -491,13 +530,20 @@ def main() -> int:
                         "shell's spaces (work, personal, desktop, terminal, browser), JSON out; `line` prints the "
                         "forced-command key line it is meant for. Under that line it reads $SSH_ORIGINAL_COMMAND "
                         "and refuses anything but one verb and one space")
-    auth = sub.add_parser("auth", help="the owner secret: one secret for the workbench, the event stream, "
-                                       "the terminal, the Browser and the assistant (webauth.py)")
+    auth = sub.add_parser("auth", help="the owner's key slots, like ZFS / LUKS key slots: one secret per device or "
+                                       "browser, each the login for the workbench, the event stream, the terminal, "
+                                       "the Browser and the assistant (webauth.py; ~/.config/brahman/owner.d)")
     asub = auth.add_subparsers(dest="action", required=True)
-    t = asub.add_parser("new", help="make the owner secret: printed once, only its SHA-256 kept "
-                                    "(~/.config/brahman/owner.secret); put it in each device's profile")
-    t.add_argument("--force", action="store_true", help="replace one that exists (a leaked secret): every "
-                   "device's profile then needs the new one; the old file is kept as a dated copy")
+    t = asub.add_parser("new", help="a new secret in a slot, printed once (only its SHA-256 is kept)")
+    how = t.add_mutually_exclusive_group(required=True)
+    how.add_argument("--append", metavar="NAME", help="a new slot (a name in use is refused: --replace)")
+    how.add_argument("--replace", metavar="NAME", help="a new secret for that slot: its old one stops at once")
+    how.add_argument("--replace-all", metavar="NAME", dest="replace_all",
+                     help="every slot retired, then this one alone: every device sets up again (a leak)")
+    t.add_argument("--note", default="", help="one line: what or where it is (\"John's browser, Chrome on the Air\")")
+    asub.add_parser("list", help="the slots: name, when made, note (never a hash or a secret)")
+    t = asub.add_parser("remove", help="retire one slot (a lost device): its secret stops at once")
+    t.add_argument("name")
     peer = sub.add_parser("peer", help="pass git bundles between two brahmans with one shared secret "
                                        "(BRAHMAN_PEER_SECRET); a restricted environment only (peer.py)")
     psub = peer.add_subparsers(dest="action", required=True)
@@ -911,17 +957,8 @@ def main() -> int:
                        sty=os.environ.get("STY", ""), window=os.environ.get("WINDOW", ""))
         return 0
     team_opts = teams.settings(cfg)
-    if args.cmd == "auth":  # the owner secret's file only: no state, no chat
-        from . import webauth
-        if webauth.owner_path().exists() and not args.force:  # owner.secret's own file (owner.d/ is the devices')
-            print(f"{webauth.owner_path()} exists: the owner secret is set up. A leaked one: --force "
-                  "(then every device needs the new secret)", file=sys.stderr)
-            return 2
-        secret, p, kept = webauth.new_owner_secret()
-        print(f"wrote {p} (only the secret's SHA-256, 0600)" + (f"\nkept {kept}" if kept else ""))
-        print("the owner secret, shown this once: put it in each device's profile, nowhere else:")
-        print(secret)
-        return 0
+    if args.cmd == "auth":  # the key slots' files only: no state, no chat
+        return _auth(args)
     if args.cmd == "team" and args.action == "setup":  # the instruction files only: no state, no chat
         from . import team_setup
         agents = team_setup.AGENTS if args.agent == "all" else (args.agent,)

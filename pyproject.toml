@@ -1,6 +1,6 @@
 [project]
 name = "brahman-buddy"
-version = "20261126.1"
+version = "20261126.3"
 license = "MIT"
 license-files = ["LICENSE"]
 description = "A personal work buddy: Telegram, Lark and Feishu chats driving Claude Code, with scheduled jobs, short and long stories, and portable skills"
@@ -17,6 +17,8 @@ dependencies = [
 
 [project.scripts]
 buddy = "work_brahman.cli:main"
+buddy-team = "work_brahman.entry:team"    # the team board (families/team): the same as buddy team
+buddy-short = "work_brahman.entry:short"  # the short stories (families/short_story): the same as buddy short
 
 [tool.uv.build-backend]
 module-name = "work_brahman"  # the code keeps its name; the package on PyPI is brahman-buddy

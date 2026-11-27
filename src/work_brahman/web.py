@@ -647,7 +647,8 @@ class Web:
                 if self.command == "GET" and not path.startswith("/api/"):
                     self._send(401, webauth.login_page(webauth.strip_token(self.path), bad=bool(given)), "text/html")
                 else:
-                    self._send(401, b"a secret is needed: the owner secret, or BUDDY_WEB_TOKEN", "text/plain")
+                    self._send(401, (b"a secret is needed: the owner secret (a key slot's), or BUDDY_WEB_TOKEN" if webauth.owner_on()
+                                     else webauth.NO_SLOT.encode()), "text/plain")
                 return False
 
             def _events(self) -> None:

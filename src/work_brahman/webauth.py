@@ -21,15 +21,15 @@ Host check alone stops a browser, not a person who sets the header. Hence:
 Plain HTTP: on the LAN the token and the pages can be read by anyone on that network (doctor
 says so). An SSH client on the device itself (`-L` to 127.0.0.1) needs none of this.
 
-**The owner secret** (the owner, 2026-11-21: "one secret", "it should all be localhost", "owner.secret
-is enough"): when `~/.config/brahman/owner.secret` exists, it is checked first, everywhere (the
-workbench, the event stream, the login page, ?token=), and the buddy is loopback only ([web] hosts not
-honoured). The file holds only the SHA-256 hex of the secret (`buddy auth new` prints the secret once;
-the devices keep it): a request's secret is hashed and compared in constant time, so the hash itself
-is no credential. Its cookie is an HMAC of that hash under a random key kept in the buddy's state
-(0600), so the hash file alone forges no cookie, and a new secret ends every old cookie. BUDDY_WEB_TOKEN
-and the device tokens still work after it (nothing breaks while devices move over); doctor lists them.
-Without the file, everything is as before.
+**The key slots** (the owner, 2026-11-26: "allow multikey? … key with name so it can be noted, like zfs
+keyslots"): ~/.config/brahman/owner.d/<name>.sha256, one per device or browser, made by `buddy auth new
+--append <name>` (or a device's first setup) in the owner's own shell. While one exists it is checked first,
+everywhere (the workbench, the event stream, the login page, ?token=), and the buddy is loopback only ([web]
+hosts not honoured). A slot holds only the SHA-256 hex of its secret: a request's secret is hashed and
+compared in constant time with every slot, so a hash is no credential. The cookie is an HMAC of the slot's
+hash under a random key kept in the buddy's state (0600): the hash file alone forges no cookie, and a slot
+replaced or removed ends its cookies, no other. BUDDY_WEB_TOKEN and the device tokens still work after it;
+doctor lists them. Without a slot, everything is as before. The trust root is the first SSH key: owner_dir().
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ import hashlib
 import hmac
 import ipaddress
 import os
+import re
 import time
 import urllib.parse
 from pathlib import Path
@@ -77,25 +78,28 @@ def token(env=None) -> str:
     return _env_cache["token"] or ""
 
 
-OWNER_FILE = "owner.secret"
-OWNER_DIR = "owner.d"  # one <device>.sha256 per paired device, beside owner.secret (the owner, 2026-11-25: pairing)
+OWNER_DIR = "owner.d"  # the key slots: <name>.sha256 (+ <name>.note), like ZFS / LUKS key slots (the owner, 2026-11-26)
 OWNER_COOKIE = "buddy_owner"
-
-
-def owner_path() -> Path:
-    from . import install
-    return install.config_dir() / OWNER_FILE
+SLOT = re.compile(r"[a-z0-9][a-z0-9-]{0,47}")
 
 
 def owner_dir() -> Path:
-    """owner.d/ beside owner.secret: each paired device's own secret, as its SHA-256 only (<device>.sha256, one
-    64-hex line, 0600), written once at the device's setup through the owner's own SSH key; a lost device:
-    delete its file (the owner, 2026-11-25: "share the shared secret", one setup per device)."""
-    return owner_path().parent / OWNER_DIR
+    """~/.config/brahman/owner.d: the key slots, the only owner login (the owner, 2026-11-26: "allow multikey? …
+    key with name so it can be noted, like zfs keyslots"). A slot is a name and the SHA-256 of its secret
+    (<name>.sha256, one 64-hex line, 0600; the folder 0700), with an optional <name>.note; a retired slot is
+    <name>.sha256.bak-<time>, never read. Only the owner's own shell on this machine makes them (`buddy auth`,
+    or a device's first setup through the init key): no web or chat route adds one.
+
+    The trust root is the first SSH key (the init key): whoever holds it sets the system up and adds devices. It is
+    the system's weak point by design (the owner, 2026-11-26: "we trust the first ssh key to initialize system
+    and it's the weak [point of the] system by design, which simplifies all the system"); no second root, no
+    recovery beyond it."""
+    from . import install
+    return install.config_dir() / OWNER_DIR
 
 
-def device_files() -> list[Path]:
-    """The devices' hash files: regular files named *.sha256 (a link is not one: it opens nothing)."""
+def slot_files() -> list[Path]:
+    """The slots' hash files: regular files named *.sha256 (a link is not one: it opens nothing)."""
     try:
         return sorted(p for p in owner_dir().glob("*.sha256") if p.is_file() and not p.is_symlink())
     except OSError:
@@ -112,19 +116,14 @@ def _hex(p: Path) -> str:
 
 
 def owner_on() -> bool:
-    """The owner secret is set up (owner.secret, or a device's file in owner.d/): checked first, loopback only.
-    A file that holds no good hash still counts: it closes the buddy to the loopback and opens nothing."""
-    return owner_path().exists() or bool(device_files())
-
-
-def owner_hash() -> str:
-    """owner.secret's SHA-256 hex, or "" (no file, unreadable, or not 64 hex digits: nobody gets in by it)."""
-    return _hex(owner_path())
+    """A key slot exists: the owner check is on, checked first, loopback only. A slot that holds no good hash
+    still counts: it closes the buddy to the loopback and opens nothing."""
+    return bool(slot_files())
 
 
 def owner_hashes() -> list[str]:
-    """Every hash that logs in, read at each check: owner.secret's, then each device's (bad ones left out)."""
-    return list(dict.fromkeys(h for h in [owner_hash(), *map(_hex, device_files())] if h))
+    """Every hash that logs in, read at each check (bad ones left out)."""
+    return list(dict.fromkeys(h for h in map(_hex, slot_files()) if h))
 
 
 def owner_match(given: str) -> str:
@@ -140,7 +139,7 @@ def owner_match(given: str) -> str:
 
 
 def owner_ok(given: str) -> bool:
-    """The secret itself (never its hash): its SHA-256 equals owner.secret's or a device's."""
+    """The secret itself (never its hash): its SHA-256 equals a slot's."""
     return bool(owner_match(given))
 
 
@@ -160,22 +159,25 @@ def _cookie_key() -> bytes:
         return bytes.fromhex(p.read_text(encoding="utf-8").strip())
 
 
-def owner_cookie_value(h: str | None = None) -> str:
-    """The owner cookie for one stored hash (owner.secret's by default): its file removed or changed, the cookie
-    ends."""
-    h = owner_hash() if h is None else h
+def owner_cookie_value(h: str) -> str:
+    """The owner cookie for one slot's hash: that slot replaced or removed, the cookie ends."""
     return hmac.new(_cookie_key(), b"brahman owner cookie v1 " + h.encode(), hashlib.sha256).hexdigest() if h else ""
 
 
 def required() -> bool:
-    """Does a request need a secret? The owner secret set up, or a web token set."""
-    return owner_on() or bool(token())
+    """Every request but the public files needs a secret: always (fail closed)."""
+    return True
+
+
+NO_SLOT = "no key slot yet: run `buddy auth new --append <name>` on this machine"
 
 
 def ok(headers) -> bool:
-    """Nothing required: yes. Else the owner first (its cookie, or Bearer <secret>), then the web token."""
-    if not required():
-        return True
+    """A key slot's cookie or Bearer <secret>, then the web token. No slot at all: closed, the token too (the
+    owner, 2026-11-25: "simple by design, no fallback"; a missing secret is said and the part stays off):
+    `buddy serve` runs (scheduler, duties, chats) and the workbench says NO_SLOT."""
+    if not owner_on():
+        return False
     if owner_on():
         wants = [owner_cookie_value(h) for h in owner_hashes()]
         for part in (headers.get("Cookie") or "").split(";"):
@@ -195,27 +197,90 @@ def login(given: str) -> str | None:
     h = owner_match(given) if owner_on() else ""
     if h:
         return f"{OWNER_COOKIE}={owner_cookie_value(h)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000"
-    tok = token()
+    tok = token() if owner_on() else ""  # no slot: closed, the token too
     if tok and hmac.compare_digest(given.strip().encode(), tok.encode()):
         return set_cookie(tok)
     time.sleep(1)
     return None
 
 
-def new_owner_secret() -> tuple[str, Path, Path | None]:
-    """A new owner secret: 256 random bits; only its SHA-256 hex is written (0600). Returns the secret
-    (shown once), the file, and where an old file was kept (or None)."""
-    import secrets
-    from . import install
-    secret = "bos_" + secrets.token_urlsafe(32)
-    p = owner_path()
-    install._folder(p.parent)
-    kept = install._keep(p) if p.exists() else None
+# The verbs (`buddy auth`): the owner's own shell only
+
+def slot_path(name: str) -> Path:
+    if not SLOT.fullmatch(name or ""):
+        raise ValueError(f"a slot's name: a-z, 0-9 and -, at most 48, starting with a letter or digit (not {name!r})")
+    return owner_dir() / f"{name}.sha256"
+
+
+def _retire(p: Path) -> Path:
+    """A slot's file put aside as <file>.bak-<time> (never read again); returns where it went."""
+    old = p.with_name(f"{p.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}")
+    n = 1
+    while old.exists():
+        n += 1
+        old = p.with_name(f"{p.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}-{n}")
+    p.rename(old)
+    return old
+
+
+def _write(p: Path, text: str) -> None:
     tmp = p.with_name(p.name + ".tmp")
-    tmp.write_text(hashlib.sha256(secret.encode()).hexdigest() + "\n", encoding="utf-8")
+    tmp.write_text(text, encoding="utf-8")
     tmp.chmod(0o600)
     tmp.replace(p)
+
+
+def add_slot(name: str, note: str = "", replace: bool = False) -> tuple[str, Path, Path | None]:
+    """A new secret in slot `name` (256 random bits; only its SHA-256 is written). Returns the secret (to show
+    once), the slot's file, and where its old file went (replace). --append refuses a name in use; --replace a
+    name not in use."""
+    import secrets
+    from . import install
+    p = slot_path(name)
+    if p.exists() and not replace:
+        raise ValueError(f"slot {name} exists: buddy auth new --replace {name}")
+    if replace and not p.exists():
+        raise ValueError(f"no slot {name}: buddy auth new --append {name}")
+    install._folder(p.parent)
+    kept = _retire(p) if p.exists() else None
+    secret = "bos_" + secrets.token_urlsafe(32)
+    _write(p, hashlib.sha256(secret.encode()).hexdigest() + "\n")
+    if note:
+        _write(p.with_suffix(".note"), note.replace("\n", " ").strip()[:200] + "\n")
     return secret, p, kept
+
+
+def replace_all(name: str, note: str = "") -> tuple[str, Path, list[Path]]:
+    """The panic button: every slot retired, then one new slot `name`. Every device sets up again."""
+    gone = [_retire(p) for p in slot_files()]
+    gone += [_retire(n) for n in sorted(owner_dir().glob("*.note")) if not n.with_suffix(".sha256").exists()]
+    secret, p, _ = add_slot(name, note)
+    return secret, p, gone
+
+
+def remove_slot(name: str) -> Path | None:
+    """Retire one slot (a lost device): its secret stops at once. Returns where its file went, None if none."""
+    p = slot_path(name)
+    if not p.exists():
+        return None
+    note = p.with_suffix(".note")
+    if note.exists():
+        _retire(note)
+    return _retire(p)
+
+
+def slots() -> list[dict]:
+    """{name, at, note} per slot, never a hash or a secret; at: when its secret was made (the file's time)."""
+    out = []
+    for p in slot_files():
+        note = p.with_suffix(".note")
+        try:
+            text = note.read_text(encoding="utf-8").strip() if note.exists() else ""
+        except OSError:
+            text = ""
+        out.append({"name": p.name.removesuffix(".sha256"), "at": time.strftime("%Y-%m-%d %H:%M", time.localtime(p.stat().st_mtime)),
+                    "note": text, "ok": bool(_hex(p))})
+    return out
 
 
 def hosts(start_cfg: dict) -> list[str]:
@@ -308,11 +373,13 @@ button{background:#c9a227;color:#1f1b16;border:0}p{margin:0;color:#aaa;font-size
 
 
 def login_page(next_path: str = "/", bad: bool = False) -> bytes:
-    """The form names what it takes: the owner secret while it is set up (the one secret for every space; the
-    owner, 2026-11-25: "one simple shared secret"), else the buddy's web token, as before."""
+    """The form asks for the owner secret (a key slot's; the owner, 2026-11-25: "one simple shared secret"). No
+    slot yet: no form, only what to run (nothing could get in)."""
     import html
-    what = "owner secret" if owner_on() else "web token"
-    ask = ("The owner secret: the one secret for every space (buddy auth new makes it)." if owner_on()
-           else "This buddy asks for its web token (BUDDY_WEB_TOKEN).")
+    if not owner_on():
+        return (LOGIN.split("<form", 1)[0] + f"<p style='max-width:420px;line-height:1.5'><b>brahman workbench</b><br>"
+                f"{html.escape(NO_SLOT)}, then reload this page.</p></body></html>").encode()
+    what = "owner secret"
+    ask = "The owner secret: this device's key slot, the same one for every space (buddy auth list)."
     return (LOGIN.replace("{ask}", ask).replace("{what}", what).replace("{next}", html.escape(next_path or "/"))
             .replace("{bad}", f"<p style='color:#e66'>not the {what}</p>" if bad else "").encode())
